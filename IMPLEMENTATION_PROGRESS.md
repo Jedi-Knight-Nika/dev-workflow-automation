@@ -42,6 +42,7 @@ This is the durable implementation ledger for the project. Update it whenever a 
 - **IMPLEMENTED** Per-task job creation/listing and event timeline endpoints.
 - **IMPLEMENTED** Pause and cancel commands.
 - **IMPLEMENTED** SSE live-event endpoint with keepalive messages.
+- **DONE** Fixed SSE heartbeat cancellation so idle live connections remain open across repeated keepalives; added a regression test.
 - **IMPLEMENTED** CORS policy scoped to the local dashboard.
 
 ### Durable state
@@ -85,8 +86,10 @@ This is the durable implementation ledger for the project. Update it whenever a 
 - **DONE** SvelteKit adapter-node production build succeeds.
 - **DONE** Docker Compose configuration validates successfully.
 - **DONE** Backend and frontend Docker images build successfully on Docker Desktop.
-- **IN PROGRESS** Complete container startup reached service creation but encountered an existing host process on port 5432. The unnecessary PostgreSQL host-port publication has been removed; startup requires a rerun.
-- **IN PROGRESS** End-to-end test: dashboard task creation → job claim → worker result → UI state update depends on the Docker rerun above.
+- **DONE** The port-conflict fix was verified: all three containers are created without publishing PostgreSQL to the host.
+- **DONE** Full Docker Compose stack starts successfully: PostgreSQL initializes, Alembic applies the foundation migration, FastAPI becomes healthy, and SvelteKit listens on its published port.
+- **IN PROGRESS** Browser-level end-to-end test: task creation → job claim → worker result → UI state update. Runtime services are ready for manual validation.
+- **DONE** User runtime logs verified PostgreSQL initialization, migration execution, backend readiness, frontend startup, and browser API access.
 
 ## Remaining design phases
 

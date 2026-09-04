@@ -1,5 +1,5 @@
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 
 
 class EventBroker:
@@ -13,7 +13,7 @@ class EventBroker:
             except asyncio.QueueFull:
                 pass
 
-    async def subscribe(self) -> AsyncIterator[str]:
+    async def subscribe(self) -> AsyncGenerator[str, None]:
         queue: asyncio.Queue[str] = asyncio.Queue(maxsize=100)
         self._subscribers.add(queue)
         try:

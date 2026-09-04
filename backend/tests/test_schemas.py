@@ -7,12 +7,12 @@ from app.db.models import JobRole
 from app.schemas import TaskCreate, WorkerResult
 
 
-def test_task_priority_is_bounded():
+def test_task_priority_is_bounded() -> None:
     with pytest.raises(ValidationError):
         TaskCreate(title="x", priority=6)
 
 
-def test_worker_result_protocol():
+def test_worker_result_protocol() -> None:
     result = WorkerResult(
         job_id=uuid.uuid4(),
         task_id=uuid.uuid4(),
