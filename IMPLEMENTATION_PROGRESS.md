@@ -27,6 +27,7 @@ This is the durable implementation ledger for the project. Update it whenever a 
 - **DONE** Added application-owned quality commands for backend and frontend.
 - **DONE** Added and verified ESLint with TypeScript and Svelte rules; Prettier remains formatting-only.
 - **DONE** Standardized frontend development, Docker, and CI on Node.js 22 LTS.
+- **DONE** Added Tailwind CSS 4 through the Vite plugin and converted the dashboard from component CSS to Tailwind utilities.
 - **DONE** Renamed the workflow to the conventional `.github/workflows/ci.yml` with display name `CI`.
 - **DONE** Replaced the public README with a stable, high-level description and moved changing operational details to `DEVELOPMENT.md`.
 - **DOCUMENTED** Required GitHub `main` branch ruleset and `Quality gate` status check.
