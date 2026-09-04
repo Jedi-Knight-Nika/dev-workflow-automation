@@ -1,0 +1,58 @@
+name: autonomous-engineering-worker
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-engineering_worker}
+      POSTGRES_USER: ${POSTGRES_USER:-engineering_worker}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+  backend:
+    build:
+      context: ./backend
+      target: runtime
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://engineering_worker:change-me@postgres:5432/engineering_worker}
+      DATABASE_URL_SYNC: ${DATABASE_URL_SYNC:-postgresql+psycopg://engineering_worker:change-me@postgres:5432/engineering_worker}
+      APP_SECRET_KEY: ${APP_SECRET_KEY:-development-only-secret-change-me}
+      WORKSPACE_ROOT: /data/workspaces
+      SCHEDULER_ENABLED: "true"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - workspaces:/data/workspaces
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/ready')"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  frontend:
+    build:
+      context: ./frontend
+    environment:
+      API_URL: http://backend:8000
+      PUBLIC_API_URL: ${PUBLIC_API_URL:-http://localhost:8000}
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+
+volumes:
+  postgres_data:
+  workspaces:
+
