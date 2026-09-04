@@ -1,5 +1,7 @@
 # Autonomous Engineering Worker
 
+> Automate the nine-to-five job hell. As one wise man said, if they don't give you a salary raise, promote yourself by working less.
+
 An engineering workflow automation system that coordinates planning, code execution,
 review, and repository workflows while keeping authority and state in deterministic
 software.
