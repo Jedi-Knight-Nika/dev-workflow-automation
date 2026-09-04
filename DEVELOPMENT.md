@@ -15,8 +15,10 @@ cp .env.example .env
 make setup
 ```
 
-For host-based development, PostgreSQL must be reachable and database URLs must use
-`localhost` instead of the Compose service hostname `postgres`.
+For host-based backend development, PostgreSQL must be reachable separately and the
+database URLs must use `localhost` instead of the Compose service hostname `postgres`.
+The Compose database is intentionally not published to a host port because the
+containerized backend accesses it through Docker's internal network.
 
 ```bash
 make dev-backend
@@ -64,4 +66,3 @@ commit `.env` or real integration credentials.
 `.github/workflows/ci.yml` runs backend and frontend quality checks. Protect `main`
 with a GitHub branch ruleset that requires pull requests and the **Quality gate**
 status check, and blocks force pushes and branch deletion.
-

@@ -84,7 +84,8 @@ This is the durable implementation ledger for the project. Update it whenever a 
 - **DONE** Svelte type checking passes with zero errors and zero warnings.
 - **DONE** SvelteKit adapter-node production build succeeds.
 - **DONE** Docker Compose configuration validates successfully.
-- **IN PROGRESS** Docker image build and end-to-end container startup. The first user-run build reached the backend image but failed because Docker lacked free package-cache space; the image and build contexts have since been reduced substantially and require a rerun.
+- **DONE** Backend and frontend Docker images build successfully on Docker Desktop.
+- **IN PROGRESS** Complete container startup reached service creation but encountered an existing host process on port 5432. The unnecessary PostgreSQL host-port publication has been removed; startup requires a rerun.
 - **IN PROGRESS** End-to-end test: dashboard task creation → job claim → worker result → UI state update depends on the Docker rerun above.
 
 ## Remaining design phases
