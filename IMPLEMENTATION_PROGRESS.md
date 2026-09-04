@@ -28,6 +28,8 @@ This is the durable implementation ledger for the project. Update it whenever a 
 - **DONE** Added and verified ESLint with TypeScript and Svelte rules; Prettier remains formatting-only.
 - **DONE** Standardized frontend development, Docker, and CI on Node.js 22 LTS.
 - **DONE** Added Tailwind CSS 4 through the Vite plugin and converted the dashboard from component CSS to Tailwind utilities.
+- **DONE** Added service-specific Docker ignore files so local virtual environments and `node_modules` are excluded from build contexts.
+- **DONE** Removed unused Git/cURL packages from the control-plane API image; Git will live in the isolated Executor worker image when that phase is implemented.
 - **DONE** Renamed the workflow to the conventional `.github/workflows/ci.yml` with display name `CI`.
 - **DONE** Replaced the public README with a stable, high-level description and moved changing operational details to `DEVELOPMENT.md`.
 - **DOCUMENTED** Required GitHub `main` branch ruleset and `Quality gate` status check.
@@ -82,8 +84,8 @@ This is the durable implementation ledger for the project. Update it whenever a 
 - **DONE** Svelte type checking passes with zero errors and zero warnings.
 - **DONE** SvelteKit adapter-node production build succeeds.
 - **DONE** Docker Compose configuration validates successfully.
-- **BLOCKED** Docker image build and end-to-end container startup: Docker is installed, but the local Docker daemon is not running (`Cannot connect to the Docker daemon`). Start Docker Desktop, then run `docker compose up --build`.
-- **BLOCKED** End-to-end test: dashboard task creation → job claim → worker result → UI state update depends on the PostgreSQL/container stack above.
+- **IN PROGRESS** Docker image build and end-to-end container startup. The first user-run build reached the backend image but failed because Docker lacked free package-cache space; the image and build contexts have since been reduced substantially and require a rerun.
+- **IN PROGRESS** End-to-end test: dashboard task creation → job claim → worker result → UI state update depends on the Docker rerun above.
 
 ## Remaining design phases
 
