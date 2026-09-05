@@ -39,17 +39,22 @@
   let filters = $state<TaskFilters>({ sort: 'priority', direction: 'asc' });
   let columns = $derived(tasksByColumn(tasks));
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let requestId = 0;
 
   async function refresh() {
+    const thisRequest = ++requestId;
     loading = true;
     error = '';
     try {
-      tasks = await listTasks(filters);
+      const nextTasks = await listTasks(filters);
+      if (thisRequest !== requestId) return;
+      tasks = nextTasks;
       if (selected) selected = tasks.find((task) => task.id === selected?.id) ?? null;
     } catch (cause) {
+      if (thisRequest !== requestId) return;
       error = cause instanceof Error ? cause.message : String(cause);
     } finally {
-      loading = false;
+      if (thisRequest === requestId) loading = false;
     }
   }
   function queueRefresh() {

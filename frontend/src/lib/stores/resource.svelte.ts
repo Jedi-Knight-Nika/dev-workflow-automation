@@ -20,6 +20,7 @@ export function createResource<T>(fetcher: () => Promise<T>, initial: T): Resour
   let error = $state('');
   let loaded = false;
   let inFlight: Promise<void> | null = null;
+  let refreshQueued = false;
 
   async function run() {
     loading = true;
@@ -33,6 +34,10 @@ export function createResource<T>(fetcher: () => Promise<T>, initial: T): Resour
       loading = false;
       inFlight = null;
     }
+    if (refreshQueued) {
+      refreshQueued = false;
+      await refresh();
+    }
   }
 
   function load() {
@@ -42,7 +47,11 @@ export function createResource<T>(fetcher: () => Promise<T>, initial: T): Resour
   }
 
   function refresh() {
-    if (!inFlight) inFlight = run();
+    if (inFlight) {
+      refreshQueued = true;
+      return inFlight;
+    }
+    inFlight = run();
     return inFlight;
   }
 

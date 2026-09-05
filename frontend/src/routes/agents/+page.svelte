@@ -7,8 +7,8 @@
   import ErrorBanner from '$lib/components/ErrorBanner.svelte';
   import TextArea from '$lib/components/TextArea.svelte';
   import Skeleton from '$lib/components/Skeleton.svelte';
-  import WorkflowCanvas from '$lib/components/workflow/WorkflowCanvas.svelte';
   import TerminalConsole from '$lib/components/workflow/TerminalConsole.svelte';
+  import type { default as WorkflowCanvasComponent } from '$lib/components/workflow/WorkflowCanvas.svelte';
   import {
     addAgentKnowledge,
     deleteAgentKnowledge,
@@ -46,6 +46,7 @@
   let selectedNodeId = '';
   let consoleAgent: AgentConfig | null = null;
   let inspectorTab = 'instructions';
+  let WorkflowCanvas: typeof WorkflowCanvasComponent | null = null;
   const number = new Intl.NumberFormat();
   const teamId = page.url.searchParams.get('team') || undefined;
   const date = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' });
@@ -72,9 +73,15 @@
     ).checked;
   }
   async function load() {
-    [agents, workflow, integrations, repositories] = await Promise.all([
-      listAgents(),
+    const [loadedWorkflow] = await Promise.all([
       getWorkflow(teamId),
+      import('$lib/components/workflow/WorkflowCanvas.svelte').then((mod) => {
+        WorkflowCanvas = mod.default;
+      })
+    ]);
+    workflow = loadedWorkflow;
+    [agents, integrations, repositories] = await Promise.all([
+      listAgents(),
       listIntegrations(),
       listRepositories()
     ]);
@@ -168,8 +175,9 @@
 />
 <main class="p-4 sm:p-6 md:p-10">
   <ErrorBanner message={error} class="mb-4" />
-  {#if workflow}
-    <WorkflowCanvas
+  {#if workflow && WorkflowCanvas}
+    <svelte:component
+      this={WorkflowCanvas}
       {workflow}
       {agents}
       {integrations}

@@ -22,6 +22,7 @@
   let telemetry = $state<HostTelemetry | null>(null);
   let approvals = $state<ApprovalRequest[]>([]);
   let refreshTimer: ReturnType<typeof setTimeout> | undefined;
+  let requestId = 0;
   const compact = new Intl.NumberFormat(undefined, {
     notation: 'compact',
     maximumFractionDigits: 1
@@ -35,17 +36,23 @@
   const maxUsage = (items: DashboardUsageBucket[]) => Math.max(1, ...items.map(total));
 
   async function load() {
+    const thisRequest = ++requestId;
     try {
-      [dashboard, telemetry, approvals] = await Promise.all([
+      const [nextDashboard, nextTelemetry, nextApprovals] = await Promise.all([
         getDashboardSummary(period),
         getDashboardTelemetry(),
         listApprovals()
       ]);
+      if (thisRequest !== requestId) return;
+      dashboard = nextDashboard;
+      telemetry = nextTelemetry;
+      approvals = nextApprovals;
       error = '';
     } catch (cause) {
+      if (thisRequest !== requestId) return;
       error = cause instanceof Error ? cause.message : String(cause);
     } finally {
-      loading = false;
+      if (thisRequest === requestId) loading = false;
     }
   }
   async function decideApproval(id: string, approved: boolean) {

@@ -627,6 +627,8 @@
     try {
       await onsave(graph);
       dirty = false;
+    } catch {
+      // onsave already records the error for display; nothing further to do here.
     } finally {
       saving = false;
     }

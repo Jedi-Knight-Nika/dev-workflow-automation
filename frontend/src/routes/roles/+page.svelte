@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import ErrorBanner from '$lib/components/ErrorBanner.svelte';
   import PageHeader from '$lib/components/PageHeader.svelte';
+  import Skeleton from '$lib/components/Skeleton.svelte';
   import {
     cloneRole,
     createRole,
@@ -45,7 +46,8 @@
     open = $state(false),
     advanced = $state(false),
     busy = $state(false),
-    error = $state('');
+    error = $state(''),
+    loading = $state(true);
   let form = $state<RoleInput>(blank());
 
   function blank(): RoleInput {
@@ -75,6 +77,8 @@
       ]);
     } catch (cause) {
       error = String(cause);
+    } finally {
+      loading = false;
     }
   }
   function edit(role?: Role) {
@@ -159,7 +163,18 @@
     </div>
     <button class="primary" onclick={() => edit()}>Create role</button>
   </section>
-  <section class="role-grid">
+  <section class="role-grid" aria-busy={loading}>
+    {#if loading}
+      <!-- eslint-disable-next-line @typescript-eslint/no-unused-vars -->
+      {#each Array(4) as _, index (index)}
+        <article class="role-card">
+          <Skeleton class="h-3 w-24" />
+          <Skeleton class="h-5 w-32" />
+          <Skeleton class="h-10 w-full" />
+          <Skeleton class="h-6 w-full" />
+        </article>
+      {/each}
+    {/if}
     {#each roles as role (role.id)}
       <article class:disabled={!role.enabled} class="role-card">
         <header>

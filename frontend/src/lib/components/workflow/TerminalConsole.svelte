@@ -18,6 +18,7 @@
   let connecting = $state(false);
   let connected = $state(false);
   let error = $state('');
+  let resizeHandler: (() => void) | null = null;
 
   async function connect() {
     if (!agent.active_task_id) return;
@@ -61,7 +62,8 @@
       terminal.onResize(({ cols, rows }) =>
         socket?.send(JSON.stringify({ type: 'resize', cols, rows }))
       );
-      window.addEventListener('resize', () => fit.fit(), { passive: true });
+      resizeHandler = () => fit.fit();
+      window.addEventListener('resize', resizeHandler, { passive: true });
     } catch (cause) {
       error = String(cause);
     } finally {
@@ -83,6 +85,7 @@
   onDestroy(() => {
     socket?.close();
     terminal?.dispose();
+    if (resizeHandler) window.removeEventListener('resize', resizeHandler);
   });
 </script>
 

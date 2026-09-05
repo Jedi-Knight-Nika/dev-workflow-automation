@@ -17,6 +17,7 @@
     busy = $state(false);
   let error = $state(''),
     loading = $state(true);
+  let archivingId = $state('');
   let name = $state(''),
     description = $state(''),
     concurrency = $state(1);
@@ -113,11 +114,14 @@
   }
   async function remove(team: Team) {
     if (!confirm(`Archive ${team.name}? Queued assignments will be cancelled.`)) return;
+    archivingId = team.id;
     try {
       await archiveTeam(team.id);
       await load();
     } catch (cause) {
       error = String(cause);
+    } finally {
+      archivingId = '';
     }
   }
   onMount(load);
@@ -187,7 +191,9 @@
             aria-label={`Edit ${team.name}`}><span aria-hidden="true">✎</span> Edit</button
           >{#if team.id !== '00000000-0000-0000-0000-000000000001'}<button
               class="danger"
-              onclick={() => void remove(team)}>Archive</button
+              disabled={archivingId === team.id}
+              onclick={() => void remove(team)}
+              >{archivingId === team.id ? 'Archiving…' : 'Archive'}</button
             >{/if}
         </footer>
       </article>

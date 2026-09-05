@@ -13,10 +13,16 @@ export const TASK_COLUMNS = [
   { id: 'attention', label: 'Attention', states: ['NEEDS_HUMAN', 'FAILED', 'PAUSED', 'CANCELLED'] }
 ] as const;
 
+const KNOWN_STATES = new Set<string>(TASK_COLUMNS.flatMap((column) => column.states));
+
 export function tasksByColumn(tasks: Task[]) {
   return TASK_COLUMNS.map((column) => ({
     ...column,
-    tasks: tasks.filter((task) => (column.states as readonly string[]).includes(task.state))
+    tasks: tasks.filter((task) =>
+      column.id === 'attention'
+        ? (column.states as readonly string[]).includes(task.state) || !KNOWN_STATES.has(task.state)
+        : (column.states as readonly string[]).includes(task.state)
+    )
   }));
 }
 
