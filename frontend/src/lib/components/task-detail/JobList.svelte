@@ -1,0 +1,45 @@
+<script lang="ts">
+  import ShowMore from '$lib/components/ShowMore.svelte';
+  import type { Job } from '$lib/types';
+
+  let { jobs }: { jobs: Job[] } = $props();
+</script>
+
+<section class="border-line rounded-xl border p-5">
+  <h2 class="mb-4 font-semibold">Jobs</h2>
+  {#if jobs.length === 0}
+    <p class="text-muted text-sm">No jobs recorded.</p>
+  {:else}
+    <ShowMore items={jobs}>
+      {#snippet children(visibleJobs: Job[])}
+        {#each visibleJobs as job, index (job.id)}
+          <div
+            class="border-line border-t py-3 motion-safe:animate-fade-in-up"
+            style="animation-delay: {Math.min(index, 10) * 30}ms"
+          >
+            <div class="flex justify-between">
+              <strong>{job.role}</strong><span class="font-mono text-xs">{job.state}</span>
+            </div>
+            <small class="text-muted">{job.action} · attempt {job.attempt}</small>
+            {#if job.result}
+              <p class="mt-1 text-xs">
+                <span class="font-mono text-accent">{job.result.result}</span>
+                <span class="text-muted"> · {job.result.summary}</span>
+              </p>
+            {/if}
+            {#if job.retry_not_before}
+              <p class="mt-1 text-xs text-warning">
+                Retry scheduled for {new Date(job.retry_not_before).toLocaleString()}
+              </p>
+            {/if}
+            {#if job.failure_reason}
+              <p class="text-muted mt-1 line-clamp-2 text-xs" title={job.failure_reason}>
+                {job.failure_reason}
+              </p>
+            {/if}
+          </div>
+        {/each}
+      {/snippet}
+    </ShowMore>
+  {/if}
+</section>

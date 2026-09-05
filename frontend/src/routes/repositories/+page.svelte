@@ -1,9 +1,18 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import PageHeader from '$lib/PageHeader.svelte';
-  import { api } from '$lib/api';
+  import PageHeader from '$lib/components/PageHeader.svelte';
+  import Button from '$lib/components/Button.svelte';
+  import EmptyState from '$lib/components/EmptyState.svelte';
+  import TextField from '$lib/components/TextField.svelte';
+  import { repositoriesResource } from '$lib/stores/repositories.svelte';
+  import {
+    addRepository,
+    discoverGithubRepositories,
+    queueRepositoryIndex,
+    setRepositoryEnabled,
+    searchRepositoryKnowledge
+  } from '$lib/services/repositories';
   import type { DiscoveredRepository, KnowledgeResult, Repository } from '$lib/types';
-  let repositories: Repository[] = [];
   let discovered: DiscoveredRepository[] = [];
   let discovering = false;
   let owner = '';
@@ -14,27 +23,21 @@
   let searchingRepository = '';
   let results: KnowledgeResult[] = [];
   const date = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' });
-  async function load() {
-    repositories = await api<Repository[]>('/repositories');
-  }
   async function add(event: SubmitEvent) {
     event.preventDefault();
     try {
-      await api('/repositories', {
-        method: 'POST',
-        body: JSON.stringify({
-          provider: 'github',
-          external_repo_id: `${owner}/${name}`,
-          owner,
-          name,
-          clone_url: cloneUrl,
-          default_branch: 'main'
-        })
+      await addRepository({
+        provider: 'github',
+        external_repo_id: `${owner}/${name}`,
+        owner,
+        name,
+        clone_url: cloneUrl,
+        default_branch: 'main'
       });
       owner = '';
       name = '';
       cloneUrl = '';
-      await load();
+      await repositoriesResource.refresh();
     } catch (cause) {
       error = String(cause);
     }
@@ -43,7 +46,7 @@
     discovering = true;
     error = '';
     try {
-      discovered = await api<DiscoveredRepository[]>('/github/repositories');
+      discovered = await discoverGithubRepositories();
     } catch (cause) {
       error = String(cause);
     } finally {
@@ -52,21 +55,18 @@
   }
   async function selectRepository(repository: DiscoveredRepository) {
     try {
-      await api('/repositories', {
-        method: 'POST',
-        body: JSON.stringify({
-          provider: 'github',
-          external_repo_id: repository.external_repo_id,
-          owner: repository.owner,
-          name: repository.name,
-          clone_url: repository.clone_url,
-          default_branch: repository.default_branch
-        })
+      await addRepository({
+        provider: 'github',
+        external_repo_id: repository.external_repo_id,
+        owner: repository.owner,
+        name: repository.name,
+        clone_url: repository.clone_url,
+        default_branch: repository.default_branch
       });
       discovered = discovered.filter(
         (item) => item.external_repo_id !== repository.external_repo_id
       );
-      await load();
+      await repositoriesResource.refresh();
     } catch (cause) {
       error = String(cause);
     }
@@ -74,18 +74,16 @@
   async function queueIndex(repository: Repository) {
     error = '';
     try {
-      await api(`/repositories/${repository.id}/index`, { method: 'POST' });
-      await load();
+      await queueRepositoryIndex(repository.id);
+      await repositoriesResource.refresh();
     } catch (cause) {
       error = String(cause);
     }
   }
   async function toggleRepository(repository: Repository) {
     try {
-      await api(`/repositories/${repository.id}/enabled?enabled=${!repository.enabled}`, {
-        method: 'PATCH'
-      });
-      await load();
+      await setRepositoryEnabled(repository.id, !repository.enabled);
+      await repositoriesResource.refresh();
     } catch (cause) {
       error = String(cause);
     }
@@ -95,24 +93,20 @@
     searchingRepository = repository.id;
     error = '';
     try {
-      results = await api<KnowledgeResult[]>(
-        `/repositories/${repository.id}/search?query=${encodeURIComponent(query)}`
-      );
+      results = await searchRepositoryKnowledge(repository.id, query);
     } catch (cause) {
       error = String(cause);
     }
   }
   onMount(() => {
-    load().catch((cause) => {
-      error = String(cause);
-    });
+    repositoriesResource.load();
     const refresh = window.setInterval(() => {
       if (
-        repositories.some((repository) => ['QUEUED', 'INDEXING'].includes(repository.index_status))
+        repositoriesResource.data.some((repository) =>
+          ['QUEUED', 'INDEXING'].includes(repository.index_status)
+        )
       ) {
-        load().catch((cause) => {
-          error = String(cause);
-        });
+        repositoriesResource.refresh();
       }
     }, 2000);
     return () => window.clearInterval(refresh);
@@ -124,45 +118,45 @@
   title="Repositories"
   description="Repositories available to the worker and their knowledge-index status."
 />
-<main class="grid gap-6 p-6 md:p-10 xl:grid-cols-[1fr_360px]">
-  <section class="border-line border">
-    <div class="border-line flex items-center justify-between border-b p-4">
+<main class="grid gap-6 p-4 sm:p-6 md:p-10 xl:grid-cols-[1fr_360px]">
+  <section class="border-line overflow-hidden rounded-xl border">
+    <div class="border-line flex flex-wrap items-center justify-between gap-3 border-b p-4">
       <div>
         <strong>GitHub discovery</strong>
         <p class="text-muted text-xs">
           Select a GitHub repository to add it and automatically queue its knowledge index.
         </p>
       </div>
-      <button class="border-line border px-3 py-2 text-xs" onclick={discover} disabled={discovering}
-        >{discovering ? 'Loading…' : 'Discover'}</button
+      <Button onclick={discover} disabled={discovering}
+        >{discovering ? 'Loading…' : 'Discover'}</Button
       >
     </div>
-    {#if discovered.length}<div class="border-accent border-b">
-        <p class="bg-[#102218] px-4 py-2 font-mono text-[10px] text-accent">
-          AVAILABLE FROM GITHUB
-        </p>
-        {#each discovered as repository (repository.external_repo_id)}<div
-            class="border-line flex items-center justify-between border-t p-3"
+    {#if discovered.length}<div class="border-brand border-b">
+        <p class="bg-panel-alt px-4 py-2 font-mono text-[10px] text-brand">AVAILABLE FROM GITHUB</p>
+        {#each discovered as repository, index (repository.external_repo_id)}<div
+            class="border-line flex flex-wrap items-center justify-between gap-3 border-t p-3 motion-safe:animate-fade-in-up"
+            style="animation-delay: {Math.min(index, 10) * 30}ms"
           >
             <span class="text-sm"
               >{repository.full_name} {repository.private ? '· private' : ''}</span
-            ><button
-              class="bg-accent px-3 py-1.5 text-xs font-bold text-[#07100a]"
-              onclick={() => selectRepository(repository)}>Select</button
             >
+            <Button variant="primary" onclick={() => selectRepository(repository)}>Select</Button>
           </div>{/each}
       </div>{/if}
-    {#each repositories as repository (repository.id)}<article
-        class="border-line grid gap-4 border-b p-4 lg:grid-cols-[1fr_auto]"
+    {#each repositoriesResource.data as repository, index (repository.id)}<article
+        class="border-line grid gap-4 rounded-xl border p-4 card-hover motion-safe:animate-fade-in-up lg:grid-cols-[1fr_auto]"
+        style="animation-delay: {Math.min(index, 10) * 30}ms"
       >
         <div>
           <div class="flex items-center gap-3">
             <strong>{repository.owner}/{repository.name}</strong>
-            <span class="font-mono text-[10px] {repository.enabled ? 'text-accent' : 'text-muted'}"
-              >{repository.enabled ? 'ENABLED' : 'DISABLED'}</span
+            <span
+              class="rounded-full border border-line px-2 py-0.5 font-mono text-[10px] {repository.enabled
+                ? 'border-accent/40 text-accent'
+                : 'text-muted'}">{repository.enabled ? 'ENABLED' : 'DISABLED'}</span
             >
           </div>
-          <p class="text-muted mt-1 text-xs">
+          <p class="text-muted mt-1 text-xs break-all">
             {repository.default_branch} · {repository.clone_url}
           </p>
           <div class="text-muted mt-3 grid gap-1 font-mono text-[10px] sm:grid-cols-2">
@@ -176,54 +170,50 @@
                 : 'never'}</span
             >
           </div>
-          {#if repository.index_error}<p class="mt-1 max-w-xl text-xs text-red-300">
+          {#if repository.index_error}<p class="mt-1 max-w-xl text-xs text-danger">
               {repository.index_error}
             </p>{/if}
         </div>
-        <div class="flex items-center gap-2">
-          <span class="font-mono text-[10px] text-[#a4afa7]"
-            >{repository.index_status.replaceAll('_', ' ')}</span
+        <div class="flex flex-wrap items-center gap-2">
+          <span
+            class="font-mono text-[10px] text-muted {['QUEUED', 'INDEXING'].includes(
+              repository.index_status
+            )
+              ? 'motion-safe:animate-pulse'
+              : ''}">{repository.index_status.replaceAll('_', ' ')}</span
           >
-          <button
-            class="border-line border px-2 py-1 text-xs"
-            disabled={!repository.enabled}
-            onclick={() => queueIndex(repository)}>Index</button
+          <Button size="sm" disabled={!repository.enabled} onclick={() => queueIndex(repository)}
+            >Index</Button
           >
-          <button
-            class="border-line border px-2 py-1 text-xs disabled:opacity-30"
+          <Button
+            size="sm"
             disabled={repository.index_status !== 'READY'}
             onclick={() => {
               searchingRepository = repository.id;
               results = [];
-            }}>Search</button
+            }}>Search</Button
           >
-          <button
-            class="border-line border px-2 py-1 text-xs"
-            onclick={() => toggleRepository(repository)}
-            >{repository.enabled ? 'Disable' : 'Enable + index'}</button
+          <Button size="sm" onclick={() => toggleRepository(repository)}
+            >{repository.enabled ? 'Disable' : 'Enable + index'}</Button
           >
         </div>
-      </article>{:else}<p class="text-muted p-8 text-center">No repositories selected.</p>{/each}
+      </article>{:else}<EmptyState message="No repositories selected." />{/each}
     {#if searchingRepository}<form
         class="border-line border-t p-4"
         onsubmit={(event) => {
           event.preventDefault();
-          const repository = repositories.find((item) => item.id === searchingRepository);
+          const repository = repositoriesResource.data.find(
+            (item) => item.id === searchingRepository
+          );
           if (repository) search(repository);
         }}
       >
-        <div class="flex gap-2">
-          <input
-            class="border-line w-full border bg-[#090c0a] p-3 outline-none focus:border-accent"
-            bind:value={query}
-            placeholder="Semantic repository search"
-          />
-          <button class="bg-accent cursor-pointer px-5 font-bold text-[#07100a]" type="submit"
-            >Search</button
-          >
+        <div class="flex flex-col gap-2 sm:flex-row">
+          <TextField bind:value={query} placeholder="Semantic repository search" />
+          <Button variant="primary" type="submit" class="sm:w-auto">Search</Button>
         </div>
         {#each results as result (`${result.file_path}-${result.chunk_index}`)}<article
-            class="border-line mt-3 border p-3"
+            class="border-line mt-3 rounded-lg border p-3"
           >
             <div class="flex justify-between gap-3 text-xs">
               <strong>{result.file_path}</strong><span>{result.score.toFixed(3)}</span>
@@ -233,25 +223,16 @@
           </article>{/each}
       </form>{/if}
   </section>
-  <form class="border-line bg-panel h-fit border p-5" onsubmit={add}>
+  <form class="border-line bg-panel h-fit rounded-xl border p-5" onsubmit={add}>
     <h2 class="mb-4 font-semibold">Add repository</h2>
-    {#if error}<p class="mb-3 text-xs text-red-300">{error}</p>{/if}<input
-      class="border-line mb-2.5 w-full border bg-[#090c0a] p-3 outline-none focus:border-accent"
-      bind:value={owner}
-      placeholder="Owner"
-      required
-    /><input
-      class="border-line mb-2.5 w-full border bg-[#090c0a] p-3 outline-none focus:border-accent"
-      bind:value={name}
-      placeholder="Repository name"
-      required
-    /><input
-      class="border-line mb-2.5 w-full border bg-[#090c0a] p-3 outline-none focus:border-accent"
-      bind:value={cloneUrl}
-      placeholder="Clone URL"
-      required
-    /><button class="bg-accent w-full cursor-pointer p-3 font-bold text-[#07100a]" type="submit"
-      >Add repository</button
-    >
+    {#if error || repositoriesResource.error}<p class="mb-3 text-xs text-danger">
+        {error || repositoriesResource.error}
+      </p>{/if}
+    <div class="mb-2.5 space-y-2.5">
+      <TextField bind:value={owner} placeholder="Owner" required />
+      <TextField bind:value={name} placeholder="Repository name" required />
+      <TextField bind:value={cloneUrl} placeholder="Clone URL" required />
+    </div>
+    <Button variant="primary" size="lg" type="submit" class="w-full">Add repository</Button>
   </form>
 </main>

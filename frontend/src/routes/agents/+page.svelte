@@ -1,7 +1,10 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import PageHeader from '$lib/PageHeader.svelte';
-  import { api } from '$lib/api';
+  import PageHeader from '$lib/components/PageHeader.svelte';
+  import Button from '$lib/components/Button.svelte';
+  import ErrorBanner from '$lib/components/ErrorBanner.svelte';
+  import Card from '$lib/components/Card.svelte';
+  import { listAgents, saveAgent, discoverProviderModels } from '$lib/services/agents';
   import type { AgentConfig, ProviderCatalog } from '$lib/types';
   let agents: AgentConfig[] = [];
   let error = '';
@@ -19,18 +22,15 @@
     agent.configuration[key] = value === '' ? null : Number(value);
   }
   async function load() {
-    agents = await api<AgentConfig[]>('/agents');
+    agents = await listAgents();
   }
   async function save(agent: AgentConfig) {
     try {
-      await api(`/agents/${agent.role}`, {
-        method: 'PUT',
-        body: JSON.stringify({
-          enabled: agent.enabled,
-          provider: agent.provider,
-          model: agent.model,
-          configuration: agent.configuration
-        })
+      await saveAgent(agent.role, {
+        enabled: agent.enabled,
+        provider: agent.provider,
+        model: agent.model,
+        configuration: agent.configuration
       });
       saved = agent.role;
       setTimeout(() => {
@@ -44,7 +44,7 @@
     loadingProvider = provider;
     error = '';
     try {
-      catalogs[provider] = await api<ProviderCatalog>(`/providers/${provider}/catalog`);
+      catalogs[provider] = await discoverProviderModels(provider);
       catalogs = { ...catalogs };
     } catch (cause) {
       error = String(cause);
@@ -64,13 +64,17 @@
   title="Agents"
   description="Choose the provider and model used by each specialized worker role."
 />
-<main class="p-6 md:p-10">
-  {#if error}<p class="mb-4 bg-red-950 p-3 text-red-300">{error}</p>{/if}
+<main class="p-4 sm:p-6 md:p-10">
+  <ErrorBanner message={error} class="mb-4" />
   <div class="grid gap-4 lg:grid-cols-2">
-    {#each agents as agent (agent.role)}<article class="border-line bg-panel border p-5">
+    {#each agents as agent, index (agent.role)}<Card
+        hover
+        class="motion-safe:animate-fade-in-up"
+        style="animation-delay: {index * 60}ms"
+      >
         <div class="mb-5 flex items-center justify-between">
           <div>
-            <p class="text-accent font-mono text-[10px]">AGENT ROLE</p>
+            <p class="text-brand font-mono text-[10px]">AGENT ROLE</p>
             <h2 class="text-xl font-semibold">{agent.role}</h2>
           </div>
           <div class="flex items-center gap-3">
@@ -78,7 +82,7 @@
               class="font-mono text-[10px] {agent.status === 'RUNNING' || agent.status === 'READY'
                 ? 'text-accent'
                 : agent.status === 'NEEDS_CONFIGURATION'
-                  ? 'text-[#ffbd66]'
+                  ? 'text-warning'
                   : 'text-muted'}">{agent.status.replaceAll('_', ' ')}</span
             >
             <input
@@ -88,7 +92,9 @@
             />
           </div>
         </div>
-        <div class="border-line mb-5 grid grid-cols-2 border text-xs sm:grid-cols-5">
+        <div
+          class="border-line mb-5 grid grid-cols-2 overflow-hidden rounded-lg border text-xs sm:grid-cols-5"
+        >
           <div class="border-line border-r p-3">
             <b class="block text-base">{agent.active_jobs}</b><span class="text-muted">Active</span>
           </div>
@@ -116,7 +122,7 @@
         <div class="mb-4 grid grid-cols-2 gap-3">
           <label class="text-muted text-xs"
             >Input $ / 1M tokens<input
-              class="border-line mt-1.5 block w-full border bg-[#090c0a] p-3 text-white"
+              class="border-line mt-1.5 block w-full rounded-md border bg-input p-3 text-heading"
               type="number"
               min="0"
               step="0.000001"
@@ -126,7 +132,7 @@
           >
           <label class="text-muted text-xs"
             >Output $ / 1M tokens<input
-              class="border-line mt-1.5 block w-full border bg-[#090c0a] p-3 text-white"
+              class="border-line mt-1.5 block w-full rounded-md border bg-input p-3 text-heading"
               type="number"
               min="0"
               step="0.000001"
@@ -137,7 +143,7 @@
         </div>
         <label class="text-muted mb-3 block text-xs"
           >Provider<select
-            class="border-line mt-1.5 block w-full border bg-[#090c0a] p-3 text-white"
+            class="border-line mt-1.5 block w-full rounded-md border bg-input p-3 text-heading"
             bind:value={agent.provider}
             ><option value="openai">OpenAI</option><option value="anthropic">Anthropic</option
             ><option value="google">Google</option></select
@@ -146,18 +152,17 @@
         <div class="mb-3">
           <div class="flex items-end justify-between gap-3">
             <label class="text-muted text-xs" for={`model-${agent.role}`}>Model</label>
-            <button
-              class="border-line border px-2 py-1 text-[10px]"
-              type="button"
+            <Button
+              size="sm"
               disabled={loadingProvider === agent.provider}
               onclick={() => discoverModels(agent.provider)}
-              >{loadingProvider === agent.provider ? 'Loading…' : 'Discover models'}</button
+              >{loadingProvider === agent.provider ? 'Loading…' : 'Discover models'}</Button
             >
           </div>
           {#if catalogs[agent.provider]?.models.length}
             <select
               id={`model-${agent.role}`}
-              class="border-line mt-1.5 block w-full border bg-[#090c0a] p-3 text-white"
+              class="border-line mt-1.5 block w-full rounded-md border bg-input p-3 text-heading"
               bind:value={agent.model}
             >
               <option value="">Select model</option>
@@ -168,7 +173,7 @@
           {:else}
             <input
               id={`model-${agent.role}`}
-              class="border-line mt-1.5 block w-full border bg-[#090c0a] p-3 text-white"
+              class="border-line mt-1.5 block w-full rounded-md border bg-input p-3 text-heading"
               bind:value={agent.model}
               placeholder="Discover or enter model ID"
             />
@@ -180,11 +185,9 @@
             · {agent.last_duration_ms} ms
           {:else}No model run recorded yet.{/if}
         </div>
-        <button
-          class="bg-accent cursor-pointer px-4 py-2.5 text-xs font-bold text-[#07100a]"
-          onclick={() => save(agent)}
-          >{saved === agent.role ? 'Saved' : 'Save configuration'}</button
+        <Button variant="primary" class="w-full" onclick={() => save(agent)}
+          >{saved === agent.role ? 'Saved' : 'Save configuration'}</Button
         >
-      </article>{/each}
+      </Card>{/each}
   </div>
 </main>

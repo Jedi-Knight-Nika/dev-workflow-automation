@@ -1,5 +1,5 @@
 <script lang="ts">
-  import PageHeader from '$lib/PageHeader.svelte';
+  import PageHeader from '$lib/components/PageHeader.svelte';
 </script>
 
 <PageHeader
@@ -7,8 +7,8 @@
   title="Settings"
   description="Global execution, scheduling, and merge-policy defaults."
 />
-<main class="p-6 md:p-10">
-  <section class="border-line max-w-2xl border">
+<main class="p-4 sm:p-6 md:p-10">
+  <section class="border-line max-w-2xl overflow-hidden rounded-xl border">
     <div class="border-line flex justify-between border-b p-5">
       <div>
         <strong>Execution lane</strong>
