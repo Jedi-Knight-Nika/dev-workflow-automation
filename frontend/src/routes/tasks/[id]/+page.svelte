@@ -10,6 +10,7 @@
   import TimelineList from '$lib/components/task-detail/TimelineList.svelte';
   import ValidationList from '$lib/components/task-detail/ValidationList.svelte';
   import FindingList from '$lib/components/task-detail/FindingList.svelte';
+  import TaskMemoryPanel from '$lib/components/task-detail/TaskMemoryPanel.svelte';
   import { API_URL } from '$lib/api';
   import { debounce } from '$lib/debounce';
   import { planFromJobs, latestThinkerJob } from '$lib/task-plan';
@@ -24,15 +25,27 @@
     runTaskCommand,
     publishTaskPullRequest,
     mergeTaskPullRequest,
-    retryTaskLinearSync
+    retryTaskLinearSync,
+    getTaskMemory,
+    listTaskCheckpoints
   } from '$lib/services/tasks';
-  import type { Job, ReviewFinding, Task, TaskEvent, ValidationRecord } from '$lib/types';
+  import type {
+    AgentCheckpoint,
+    Job,
+    ReviewFinding,
+    Task,
+    TaskEvent,
+    TaskMemory,
+    ValidationRecord
+  } from '$lib/types';
   import { t } from '$lib/i18n/index.svelte';
   let task = $state<Task | null>(null);
   let jobs = $state<Job[]>([]);
   let events = $state<TaskEvent[]>([]);
   let validations = $state<ValidationRecord[]>([]);
   let findings = $state<ReviewFinding[]>([]);
+  let memory = $state<TaskMemory | null>(null);
+  let checkpoints = $state<AgentCheckpoint[]>([]);
   let error = $state('');
   let preparing = $state(false);
   let commanding = $state(false);
@@ -40,12 +53,14 @@
   let latestPlan = $derived(planFromJobs(jobs));
   async function refresh() {
     const taskId = page.params.id ?? '';
-    [task, jobs, events, validations, findings] = await Promise.all([
+    [task, jobs, events, validations, findings, memory, checkpoints] = await Promise.all([
       getTask(taskId),
       listTaskJobs(taskId),
       listTaskEvents(taskId),
       listTaskValidations(taskId),
-      listTaskFindings(taskId)
+      listTaskFindings(taskId),
+      getTaskMemory(taskId),
+      listTaskCheckpoints(taskId)
     ]);
   }
   const refreshOnUpdate = debounce(() => {
@@ -151,9 +166,11 @@
   {#if !task}
     <div class="skeleton h-24 rounded-sm xl:col-span-2"></div>
     <div class="skeleton h-16 rounded-sm xl:col-span-2"></div>
-    <div class="skeleton h-40 rounded-sm xl:col-span-2"></div>
-  {/if}
-  {#if task}
+    <div class="skeleton h-40 rounded-sm"></div>
+    <div class="skeleton h-40 rounded-sm"></div>
+    <div class="skeleton h-40 rounded-sm"></div>
+    <div class="skeleton h-40 rounded-sm"></div>
+  {:else}
     <TaskControls
       {task}
       {commanding}
@@ -164,10 +181,11 @@
       onRetryLinearSync={retryLinearSync}
     />
     <TaskWorkspacePanel {task} {preparing} onPrepareWorkspace={prepareWorkspace} />
+    <TaskPlanPanel {latestPlan} {latestThinker} />
+    <TaskMemoryPanel {memory} {checkpoints} />
+    <JobList {jobs} />
+    <TimelineList {events} />
+    <ValidationList {validations} />
+    <FindingList {findings} />
   {/if}
-  <TaskPlanPanel {latestPlan} {latestThinker} />
-  <JobList {jobs} />
-  <TimelineList {events} />
-  <ValidationList {validations} />
-  <FindingList {findings} />
 </main>

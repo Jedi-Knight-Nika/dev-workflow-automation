@@ -4,6 +4,7 @@
   import { API_URL } from '$lib/api';
   import ErrorBanner from '$lib/components/ErrorBanner.svelte';
   import PageHeader from '$lib/components/PageHeader.svelte';
+  import Skeleton from '$lib/components/Skeleton.svelte';
   import { getDashboardSummary, getDashboardTelemetry } from '$lib/services/dashboard';
   import { listApprovals, resolveApproval } from '$lib/services/execution-policy';
   import type {
@@ -106,7 +107,42 @@
     </div>
   </div>
   <ErrorBanner message={error} />
-  {#if loading && !dashboard}<div class="empty">INITIALIZING CONTROL SURFACE…</div>
+  {#if loading && !dashboard}
+    <section class="metrics" aria-busy="true">
+      <article class="health"><Skeleton class="h-[88px] w-[88px] rounded-full" /></article>
+      <!-- eslint-disable-next-line @typescript-eslint/no-unused-vars -->
+      {#each Array(5) as _, index (index)}
+        <article class="metric">
+          <Skeleton class="h-[9px] w-16" />
+          <Skeleton class="h-6 w-12" />
+          <Skeleton class="h-[9px] w-14" />
+        </article>
+      {/each}
+    </section>
+    <section class="split" aria-busy="true">
+      <article class="panel">
+        <Skeleton class="mb-3 h-4 w-24" />
+        <Skeleton class="mx-auto h-[75px] w-[75px] rounded-full" />
+        <Skeleton class="mx-auto mt-3 h-3 w-32" />
+      </article>
+      <article class="panel">
+        <Skeleton class="mb-3 h-4 w-32" />
+        <!-- eslint-disable-next-line @typescript-eslint/no-unused-vars -->
+        {#each Array(4) as _, index (index)}
+          <Skeleton class="mt-3 h-10 w-full" />
+        {/each}
+      </article>
+    </section>
+    <section class="teams" aria-busy="true">
+      <!-- eslint-disable-next-line @typescript-eslint/no-unused-vars -->
+      {#each Array(3) as _, index (index)}
+        <article class="team">
+          <Skeleton class="h-[38px] w-[38px] rounded-[0.6rem]" />
+          <Skeleton class="mt-3 h-16 w-full" />
+          <Skeleton class="mt-3 h-8 w-full" />
+        </article>
+      {/each}
+    </section>
   {:else if dashboard}
     <section class="metrics">
       <article class="health">

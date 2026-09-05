@@ -1,5 +1,13 @@
 import { api } from '$lib/api';
-import type { Job, ReviewFinding, Task, TaskEvent, ValidationRecord } from '$lib/types';
+import type {
+  AgentCheckpoint,
+  Job,
+  ReviewFinding,
+  Task,
+  TaskEvent,
+  TaskMemory,
+  ValidationRecord
+} from '$lib/types';
 
 export type CreateTaskInput = {
   title: string;
@@ -81,6 +89,14 @@ export function listTaskValidations(taskId: string): Promise<ValidationRecord[]>
 
 export function listTaskFindings(taskId: string): Promise<ReviewFinding[]> {
   return api<ReviewFinding[]>(`/tasks/${taskId}/findings`);
+}
+
+export function getTaskMemory(taskId: string): Promise<TaskMemory> {
+  return api<TaskMemory>(`/tasks/${taskId}/memory`);
+}
+
+export function listTaskCheckpoints(taskId: string): Promise<AgentCheckpoint[]> {
+  return api<AgentCheckpoint[]>(`/tasks/${taskId}/checkpoints`);
 }
 
 export function prepareTaskWorkspace(taskId: string): Promise<Task> {

@@ -15,6 +15,7 @@
   import '@xyflow/svelte/dist/style.css';
   import type { AgentConfig, Integration, Repository, WorkflowGraph } from '$lib/types';
   import Button from '$lib/components/Button.svelte';
+  import Spinner from '$lib/components/Spinner.svelte';
   import AgentNode from './AgentNode.svelte';
   import { discoverProviderModels, validateWorkflowNodeModel } from '$lib/services/agents';
   import type { ProviderCatalog } from '$lib/types';
@@ -160,7 +161,7 @@
       type: 'smoothstep',
       animated: true,
       markerEnd: MarkerType.ArrowClosed,
-      data: { outcome: edge.outcome, required: edge.required },
+      data: { ...edge },
       class: edgeClass(initialWorkflow.nodes.find((node) => node.id === edge.source_node_id)?.role)
     }))
   );
@@ -461,7 +462,15 @@
         type: 'smoothstep',
         animated: true,
         markerEnd: MarkerType.ArrowClosed,
-        data: { outcome: 'success', required: true },
+        data: {
+          outcome: 'success',
+          required: true,
+          job_type: null,
+          internal_task_state: null,
+          external_status_key: null,
+          priority_override: null,
+          configuration: {}
+        },
         class: 'route-neutral'
       },
       edges
@@ -588,7 +597,9 @@
           .ragRetrievalDepth as WorkflowGraph['nodes'][number]['rag_retrieval_depth'],
         fallback_provider: node.data.fallbackProvider || null,
         fallback_model: node.data.fallbackModel || null,
-        agent_id: node.data.agentId
+        agent_id: node.data.agentId,
+        node_type: 'AGENT',
+        system_node_type: null
       })),
       edges: edges
         .filter((edge) => nodeIds.has(edge.source) && nodeIds.has(edge.target))
@@ -597,7 +608,20 @@
           source_node_id: edge.source,
           target_node_id: edge.target,
           outcome: String(edge.data?.outcome || 'success'),
-          required: edge.data?.required !== false
+          required: edge.data?.required !== false,
+          job_type: edge.data?.job_type ? String(edge.data.job_type) : null,
+          internal_task_state: edge.data?.internal_task_state
+            ? String(edge.data.internal_task_state)
+            : null,
+          external_status_key: edge.data?.external_status_key
+            ? String(edge.data.external_status_key)
+            : null,
+          priority_override:
+            typeof edge.data?.priority_override === 'number' ? edge.data.priority_override : null,
+          configuration:
+            edge.data?.configuration && typeof edge.data.configuration === 'object'
+              ? (edge.data.configuration as Record<string, unknown>)
+              : {}
         }))
     };
     try {
@@ -658,7 +682,10 @@
       >{t('workflow.canvasStats', { nodes: nodes.length, edges: edges.length })}</span
     >
     <Button size="sm" variant="primary" disabled={saving || !dirty} onclick={persist}>
-      {saving ? t('workflow.saving') : dirty ? t('workflow.saveWorkflow') : t('workflow.saved')}
+      <span class="flex items-center gap-1.5">
+        {#if saving}<Spinner class="size-3" />{/if}
+        {saving ? t('workflow.saving') : dirty ? t('workflow.saveWorkflow') : t('workflow.saved')}
+      </span>
     </Button>
   </div>
   {#if selectedNodeId}
@@ -874,19 +901,25 @@
                 variant="ghost"
                 disabled={discoveringModels}
                 onclick={() => discoverModels(detailsNode.data.provider)}
-                >{discoveringModels
-                  ? t('workflow.loadingEllipsis')
-                  : t('workflow.loadAvailableModels')}</Button
               >
+                <span class="flex items-center gap-1.5">
+                  {#if discoveringModels}<Spinner class="size-3" />{/if}
+                  {discoveringModels
+                    ? t('workflow.loadingEllipsis')
+                    : t('workflow.loadAvailableModels')}
+                </span>
+              </Button>
               <Button
                 size="sm"
                 variant="success"
                 disabled={validatingModel || !detailsNode.data.model.trim()}
                 onclick={() => validateModel(detailsNode.id)}
-                >{validatingModel
-                  ? t('workflow.checkingEllipsis')
-                  : t('workflow.testModel')}</Button
               >
+                <span class="flex items-center gap-1.5">
+                  {#if validatingModel}<Spinner class="size-3" />{/if}
+                  {validatingModel ? t('workflow.checkingEllipsis') : t('workflow.testModel')}
+                </span>
+              </Button>
               {#if detailsNode.data.modelValidationMessage}<span class="text-muted text-[10px]"
                   >{detailsNode.data.modelValidationMessage}</span
                 >{/if}
@@ -1182,11 +1215,14 @@
                         >
                       </select>
                     </label>
-                    <Button size="sm" disabled={loadingLinearFilters} onclick={loadLinearFilters}
-                      >{loadingLinearFilters
-                        ? t('workflow.loadingEllipsis')
-                        : t('workflow.loadLinearUsersStates')}</Button
-                    >
+                    <Button size="sm" disabled={loadingLinearFilters} onclick={loadLinearFilters}>
+                      <span class="flex items-center gap-1.5">
+                        {#if loadingLinearFilters}<Spinner class="size-3" />{/if}
+                        {loadingLinearFilters
+                          ? t('workflow.loadingEllipsis')
+                          : t('workflow.loadLinearUsersStates')}
+                      </span>
+                    </Button>
                     <label>
                       <span>{t('workflow.assignedLinearUser')}</span>
                       <select
@@ -1273,13 +1309,16 @@
               onclick={() => onconsole(detailsNode.data.role, detailsNode.id)}
               >{t('workflow.liveConsoleButton')}</Button
             >
-            <Button size="sm" variant="primary" disabled={saving || !dirty} onclick={persist}
-              >{saving
-                ? t('workflow.saving')
-                : dirty
-                  ? t('workflow.saveNodeChanges')
-                  : t('workflow.saved')}</Button
-            >
+            <Button size="sm" variant="primary" disabled={saving || !dirty} onclick={persist}>
+              <span class="flex items-center gap-1.5">
+                {#if saving}<Spinner class="size-3" />{/if}
+                {saving
+                  ? t('workflow.saving')
+                  : dirty
+                    ? t('workflow.saveNodeChanges')
+                    : t('workflow.saved')}
+              </span>
+            </Button>
             <Button
               size="sm"
               variant="ghost"

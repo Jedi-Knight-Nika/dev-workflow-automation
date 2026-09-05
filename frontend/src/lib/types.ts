@@ -178,6 +178,8 @@ export type WorkflowNode = {
   fallback_provider: string | null;
   fallback_model: string | null;
   agent_id: string | null;
+  node_type: 'AGENT' | 'SYSTEM_GATE' | 'TERMINAL' | 'HUMAN_APPROVAL' | 'EXTERNAL_WAIT';
+  system_node_type: string | null;
 };
 
 export type WorkflowEdge = {
@@ -186,6 +188,11 @@ export type WorkflowEdge = {
   target_node_id: string;
   outcome: string;
   required: boolean;
+  job_type: string | null;
+  internal_task_state: string | null;
+  external_status_key: string | null;
+  priority_override: number | null;
+  configuration: Record<string, unknown>;
 };
 
 export type WorkflowGraph = {
@@ -452,6 +459,56 @@ export type ApprovalRequest = {
   state: string;
   created_at: string;
   expires_at: string;
+};
+
+export type AppNotification = {
+  id: string;
+  incident_id: string | null;
+  type: string;
+  severity: 'INFO' | 'WARNING' | 'ACTION_REQUIRED' | 'CRITICAL';
+  title: string;
+  message: string;
+  status: 'UNREAD' | 'READ' | 'ACKNOWLEDGED' | 'RESOLVED';
+  task_id: string | null;
+  action_target: string | null;
+  created_at: string;
+};
+
+export type TelegramStatus = {
+  configured: boolean;
+  connected: boolean;
+  username: string | null;
+  last_delivery_at: string | null;
+  last_delivery_error: string | null;
+  webhook_configured: boolean;
+};
+
+export type TaskMemory = {
+  task_id: string;
+  goal: string;
+  known_facts: string[];
+  decisions: string[];
+  rejected_approaches: { approach: string; reason: string }[];
+  invariants: string[];
+  important_files: string[];
+  important_symbols: string[];
+  open_questions: string[];
+  open_finding_ids: string[];
+  resolved_finding_summaries: string[];
+  current_plan_job_id: string | null;
+  current_sha: string | null;
+  version: number;
+};
+
+export type AgentCheckpoint = {
+  id: string;
+  job_id: string;
+  role: string;
+  repository_sha: string | null;
+  summary: string;
+  structured_data: Record<string, unknown>;
+  token_estimate: number | null;
+  created_at: string;
 };
 
 export type Role = {

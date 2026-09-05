@@ -4,6 +4,7 @@
   import ErrorBanner from '$lib/components/ErrorBanner.svelte';
   import PageHeader from '$lib/components/PageHeader.svelte';
   import TeamBadge from '$lib/components/TeamBadge.svelte';
+  import Skeleton from '$lib/components/Skeleton.svelte';
   import { listRepositories } from '$lib/services/repositories';
   import { getExecutionPolicy, saveExecutionPolicy } from '$lib/services/execution-policy';
   import { archiveTeam, createTeam, listTeams, updateTeam } from '$lib/services/teams';
@@ -14,7 +15,8 @@
   let editing = $state<Team | null>(null),
     showForm = $state(false),
     busy = $state(false);
-  let error = $state('');
+  let error = $state(''),
+    loading = $state(true);
   let name = $state(''),
     description = $state(''),
     concurrency = $state(1);
@@ -44,6 +46,8 @@
       [teams, repositories] = await Promise.all([listTeams(), listRepositories()]);
     } catch (cause) {
       error = String(cause);
+    } finally {
+      loading = false;
     }
   }
   async function open(team?: Team) {
@@ -132,7 +136,24 @@
     </p>
     <button class="primary" onclick={() => void open()}>Create team</button>
   </div>
-  <section class="team-grid">
+  <section class="team-grid" aria-busy={loading}>
+    {#if loading}
+      <!-- eslint-disable-next-line @typescript-eslint/no-unused-vars -->
+      {#each Array(3) as _, index (index)}
+        <article class="team-card">
+          <header>
+            <div>
+              <Skeleton class="h-6 w-6 rounded-full" />
+              <Skeleton class="h-4 w-24" />
+            </div>
+            <Skeleton class="h-5 w-20 rounded-full" />
+          </header>
+          <Skeleton class="h-10 w-full" />
+          <Skeleton class="h-14 w-full rounded-[0.7rem]" />
+          <Skeleton class="h-4 w-full" />
+        </article>
+      {/each}
+    {/if}
     {#each teams as team (team.id)}
       <article class="team-card">
         <header>

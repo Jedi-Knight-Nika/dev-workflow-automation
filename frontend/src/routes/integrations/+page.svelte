@@ -15,6 +15,7 @@
   import { repositoriesResource } from '$lib/stores/repositories.svelte';
   import LinearWorkflowFields from '$lib/components/integrations/LinearWorkflowFields.svelte';
   import TextField from '$lib/components/TextField.svelte';
+  import Skeleton from '$lib/components/Skeleton.svelte';
   import type { GitHubInstallationAccount, LinearWorkflowState } from '$lib/types';
   import { t } from '$lib/i18n/index.svelte';
   const providers = [
@@ -333,12 +334,16 @@
           </p>
         {/if}
         <div class="mt-6 flex flex-wrap items-center justify-between gap-2">
-          <span
-            class="font-mono text-[10px] {status(provider.name) === 'CONNECTED'
-              ? 'text-accent'
-              : 'text-muted'}"
-            >{provider.active ? status(provider.name) : t('integrations.comingSoon')}</span
-          >
+          {#if integrationsResource.loading && integrationsResource.data.length === 0}
+            <Skeleton class="h-3 w-20" />
+          {:else}
+            <span
+              class="font-mono text-[10px] {status(provider.name) === 'CONNECTED'
+                ? 'text-accent'
+                : 'text-muted'}"
+              >{provider.active ? status(provider.name) : t('integrations.comingSoon')}</span
+            >
+          {/if}
           <div class="flex flex-wrap gap-2">
             {#if provider.name === 'github'}
               <Button variant="primary" onclick={installGithubApp}>

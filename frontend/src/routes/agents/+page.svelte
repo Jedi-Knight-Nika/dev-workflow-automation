@@ -6,6 +6,7 @@
   import Button from '$lib/components/Button.svelte';
   import ErrorBanner from '$lib/components/ErrorBanner.svelte';
   import TextArea from '$lib/components/TextArea.svelte';
+  import Skeleton from '$lib/components/Skeleton.svelte';
   import WorkflowCanvas from '$lib/components/workflow/WorkflowCanvas.svelte';
   import TerminalConsole from '$lib/components/workflow/TerminalConsole.svelte';
   import {
@@ -185,8 +186,35 @@
       }}
       onsave={persistWorkflow}
     />
+  {:else if !error}
+    <section class="border-line bg-panel mb-6 overflow-hidden rounded-xl border" aria-busy="true">
+      <div class="border-line flex min-h-16 items-center gap-3 border-b px-4 py-3">
+        <Skeleton class="h-8 w-28" />
+        <Skeleton class="h-4 w-40" />
+        <Skeleton class="ml-auto h-8 w-24" />
+      </div>
+      <div class="relative flex h-[600px] items-center justify-center bg-surface">
+        <div class="flex items-center gap-3">
+          <Skeleton class="h-16 w-52 rounded-xl" />
+          <Skeleton class="h-16 w-52 rounded-xl" />
+        </div>
+      </div>
+    </section>
   {/if}
   <section id="agent-inspector" class="border-line bg-panel overflow-hidden rounded-xl border">
+    {#if !workflow && !error}
+      <div
+        class="flex flex-wrap items-center gap-4 border-b border-line px-5 py-4 sm:px-6"
+        aria-busy="true"
+      >
+        <Skeleton class="h-9 w-9 rounded-lg" />
+        <Skeleton class="h-5 w-32" />
+      </div>
+      <div class="grid gap-3 p-5 sm:p-6" aria-busy="true">
+        <Skeleton class="h-4 w-40" />
+        <Skeleton class="h-24 w-full" />
+      </div>
+    {/if}
     {#each agents.filter((item) => item.role === selectedRole) as agent (agent.role)}
       <header class="border-line flex flex-wrap items-center gap-4 border-b px-5 py-4 sm:px-6">
         <div class="agent-mark">{agent.role.slice(0, 2)}</div>
