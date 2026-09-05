@@ -5,6 +5,19 @@ SYSTEM_ROLES = frozenset({"ORCHESTRATOR", "DELIVERER"})
 AGENT_ROLES = frozenset({"INTAKE", "THINKER", "EXECUTOR", "REVIEWER", "TESTER"})
 ALLOWED_ROLES = SYSTEM_ROLES | AGENT_ROLES
 ALLOWED_OUTCOMES = frozenset({"success", "failure", "changes_requested", "always"})
+ALLOWED_NODE_TYPES = frozenset(
+    {"AGENT", "SYSTEM_GATE", "TERMINAL", "HUMAN_APPROVAL", "EXTERNAL_WAIT"}
+)
+SYSTEM_NODE_TYPES = frozenset(
+    {
+        "HUMAN_ATTENTION",
+        "SYSTEM_RETRY",
+        "WAIT_EXTERNAL",
+        "MERGE_GATE",
+        "TASK_COMPLETE",
+        "TASK_FAILED",
+    }
+)
 ALLOWED_ACTIVATION_POLICIES = frozenset({"any", "all", "required", "manual", "batch"})
 ALLOWED_MODEL_STATUSES = frozenset(
     {"NOT_CONFIGURED", "UNVERIFIED", "AVAILABLE", "MODEL_NOT_FOUND", "UNAUTHORIZED", "ERROR"}
@@ -48,6 +61,8 @@ class WorkflowNodeData:
     fallback_provider: str | None = None
     fallback_model: str | None = None
     agent_id: str | None = None
+    node_type: str = "AGENT"
+    system_node_type: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,6 +72,11 @@ class WorkflowEdgeData:
     target_node_id: str
     outcome: str = "success"
     required: bool = True
+    job_type: str | None = None
+    internal_task_state: str | None = None
+    external_status_key: str | None = None
+    priority_override: int | None = None
+    configuration: dict[str, object] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,13 +96,23 @@ def validate_workflow_graph(graph: WorkflowGraphData) -> None:
     if len(edge_ids) != len(set(edge_ids)):
         raise ValueError("Workflow edge IDs must be unique")
     roles = [node.role for node in graph.nodes]
-    unknown = set(roles) - ALLOWED_ROLES
+    unknown = {
+        node.role
+        for node in graph.nodes
+        if node.node_type == "AGENT" and node.agent_id is None and node.role not in ALLOWED_ROLES
+    }
     if unknown:
         raise ValueError(f"Unsupported workflow roles: {', '.join(sorted(unknown))}")
     for protected in SYSTEM_ROLES:
         if roles.count(protected) != 1:
             raise ValueError(f"Workflow requires exactly one {protected} node")
     for node in graph.nodes:
+        if node.node_type not in ALLOWED_NODE_TYPES:
+            raise ValueError(f"Unsupported workflow node type: {node.node_type}")
+        if node.node_type != "AGENT" and node.system_node_type not in SYSTEM_NODE_TYPES:
+            raise ValueError("System workflow nodes require a supported system node type")
+        if node.node_type == "AGENT" and node.system_node_type is not None:
+            raise ValueError("Agent workflow nodes cannot have a system node type")
         if not node.label.strip():
             raise ValueError("Workflow node nickname cannot be blank")
         if len(node.integration_ids) != len(set(node.integration_ids)):
@@ -123,16 +153,23 @@ def validate_workflow_graph(graph: WorkflowGraphData) -> None:
             raise ValueError("Unsupported RAG retrieval depth")
     known = set(node_ids)
     outgoing: dict[str, set[str]] = {node_id: set() for node_id in known}
+    route_keys: set[tuple[str, str]] = set()
     for edge in graph.edges:
         if edge.source_node_id not in known or edge.target_node_id not in known:
             raise ValueError("Workflow edge references a missing node")
         if edge.source_node_id == edge.target_node_id:
             raise ValueError("Workflow nodes cannot connect to themselves")
-        if edge.outcome not in ALLOWED_OUTCOMES:
+        if edge.outcome not in ALLOWED_OUTCOMES and not _valid_result_type(edge.outcome):
             raise ValueError(f"Unsupported edge outcome: {edge.outcome}")
+        if edge.priority_override is not None and not 0 <= edge.priority_override <= 5:
+            raise ValueError("Workflow route priority must be between 0 and 5")
+        route_key = (edge.source_node_id, edge.outcome)
+        if route_key in route_keys:
+            raise ValueError("Workflow cannot define multiple routes for the same result")
+        route_keys.add(route_key)
         outgoing[edge.source_node_id].add(edge.target_node_id)
     start = next(node.id for node in graph.nodes if node.role == "ORCHESTRATOR")
-    finish = next(node.id for node in graph.nodes if node.role == "DELIVERER")
+    finish = next((node.id for node in graph.nodes if node.role == "DELIVERER"), None)
     reachable = {start}
     pending = [start]
     while pending:
@@ -144,5 +181,19 @@ def validate_workflow_graph(graph: WorkflowGraphData) -> None:
     unreachable = enabled - reachable
     if unreachable:
         raise ValueError("Every enabled node must be reachable from Orchestrator")
-    if finish not in reachable:
+    terminal = any(
+        node.id in reachable
+        and (node.role == "DELIVERER" or node.node_type in {"TERMINAL", "EXTERNAL_WAIT"})
+        for node in graph.nodes
+    )
+    if finish is not None and finish not in reachable or not terminal:
         raise ValueError("Workflow must contain a path to Deliverer")
+
+
+def _valid_result_type(value: str) -> bool:
+    return (
+        bool(value)
+        and len(value) <= 80
+        and value.replace("_", "").isalnum()
+        and value.upper() == value
+    )

@@ -76,6 +76,7 @@ from app.schemas import (
     LinearMemberRead,
     LinearWorkflowStateRead,
     ProviderCatalogRead,
+    ProviderModelRead,
     RepositoryCreate,
     RepositoryRead,
     WebhookHealthRead,
@@ -119,7 +120,10 @@ async def provider_catalog(
     return ProviderCatalogRead(
         provider=catalog.provider,
         capabilities=catalog.capabilities,
-        models=[{"id": model.id, "display_name": model.display_name} for model in catalog.models],
+        models=[
+            ProviderModelRead(id=model.id, display_name=model.display_name)
+            for model in catalog.models
+        ],
     )
 
 
@@ -450,6 +454,8 @@ async def replace_workflow(
                 node.fallback_provider,
                 node.fallback_model,
                 str(node.agent_id) if node.agent_id else None,
+                node.node_type,
+                node.system_node_type,
             )
             for node in body.nodes
         ),
@@ -460,6 +466,11 @@ async def replace_workflow(
                 str(edge.target_node_id),
                 edge.outcome,
                 edge.required,
+                edge.job_type,
+                edge.internal_task_state,
+                edge.external_status_key,
+                edge.priority_override,
+                edge.configuration,
             )
             for edge in body.edges
         ),

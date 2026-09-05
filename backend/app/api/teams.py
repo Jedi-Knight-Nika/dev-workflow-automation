@@ -92,6 +92,8 @@ def _graph_data(body: WorkflowGraphRead) -> WorkflowGraphData:
                 node.fallback_provider,
                 node.fallback_model,
                 str(node.agent_id) if node.agent_id else None,
+                node.node_type,
+                node.system_node_type,
             )
             for node in body.nodes
         ),
@@ -102,6 +104,11 @@ def _graph_data(body: WorkflowGraphRead) -> WorkflowGraphData:
                 str(edge.target_node_id),
                 edge.outcome,
                 edge.required,
+                edge.job_type,
+                edge.internal_task_state,
+                edge.external_status_key,
+                edge.priority_override,
+                edge.configuration,
             )
             for edge in body.edges
         ),

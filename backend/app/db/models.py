@@ -42,6 +42,11 @@ class Task(Base):
         ForeignKey("repositories.id", ondelete="SET NULL")
     )
     team_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("teams.id", ondelete="SET NULL"))
+    workflow_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("workflow_definitions.id", ondelete="SET NULL")
+    )
+    workflow_version: Mapped[int | None] = mapped_column(Integer)
+    current_workflow_node_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     branch_name: Mapped[str | None] = mapped_column(String(255))
     workspace_path: Mapped[str | None] = mapped_column(Text)
     pull_request_number: Mapped[int | None] = mapped_column(Integer)
@@ -69,6 +74,11 @@ class Job(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     task_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tasks.id", ondelete="CASCADE"))
     role: Mapped[JobRole] = mapped_column(Enum(JobRole))
+    workflow_node_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    agent_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("ai_agents.id", ondelete="SET NULL")
+    )
+    team_workflow_version: Mapped[int | None] = mapped_column(Integer)
     action: Mapped[str] = mapped_column(String(100))
     priority: Mapped[int] = mapped_column(Integer, default=3)
     state: Mapped[JobState] = mapped_column(Enum(JobState), default=JobState.QUEUED)
@@ -194,6 +204,9 @@ class WorkflowDefinition(Base):
         ForeignKey("teams.id", ondelete="CASCADE"), unique=True
     )
     version: Mapped[int] = mapped_column(Integer, default=1)
+    name: Mapped[str] = mapped_column(String(120), default="Team workflow")
+    is_active: Mapped[bool] = mapped_column(default=True)
+    entry_node_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow
     )
@@ -209,6 +222,8 @@ class WorkflowNode(Base):
         ForeignKey("ai_agents.id", ondelete="SET NULL")
     )
     role: Mapped[str] = mapped_column(String(30))
+    node_type: Mapped[str] = mapped_column(String(30), default="AGENT")
+    system_node_type: Mapped[str | None] = mapped_column(String(30))
     label: Mapped[str] = mapped_column(String(100))
     position_x: Mapped[float] = mapped_column(Numeric(12, 3))
     position_y: Mapped[float] = mapped_column(Numeric(12, 3))
@@ -281,6 +296,30 @@ class WorkflowEdge(Base):
     )
     outcome: Mapped[str] = mapped_column(String(30), default="success")
     required: Mapped[bool] = mapped_column(default=True)
+    job_type: Mapped[str | None] = mapped_column(String(100))
+    internal_task_state: Mapped[str | None] = mapped_column(String(50))
+    external_status_key: Mapped[str | None] = mapped_column(String(100))
+    priority_override: Mapped[int | None] = mapped_column(Integer)
+    configuration: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+
+
+class WorkflowTransition(Base):
+    __tablename__ = "workflow_transitions"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    task_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tasks.id", ondelete="CASCADE"))
+    job_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("jobs.id", ondelete="CASCADE"))
+    workflow_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workflow_definitions.id", ondelete="CASCADE")
+    )
+    workflow_version: Mapped[int] = mapped_column(Integer)
+    from_node_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    result_type: Mapped[str] = mapped_column(String(80))
+    matched_edge_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    to_node_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    new_job_type: Mapped[str | None] = mapped_column(String(100))
+    internal_state: Mapped[str | None] = mapped_column(String(50))
+    external_status_key: Mapped[str | None] = mapped_column(String(100))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
 class TerminalSession(Base):

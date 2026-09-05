@@ -15,14 +15,19 @@ from app.db.models import (
     TaskEvent,
     TaskState,
     Team,
+    WorkflowDefinition,
+    WorkflowNode,
     WorkspaceLease,
 )
 
 ROLE_TASK_STATE = {
+    JobRole.ORCHESTRATOR: TaskState.NEW,
     JobRole.INTAKE: TaskState.NEW,
     JobRole.THINKER: TaskState.PLANNING,
     JobRole.EXECUTOR: TaskState.IMPLEMENTING,
     JobRole.REVIEWER: TaskState.INTERNAL_REVIEW,
+    JobRole.TESTER: TaskState.LOCAL_VALIDATION,
+    JobRole.DELIVERER: TaskState.WAITING_GITHUB,
 }
 
 
@@ -54,14 +59,56 @@ async def enqueue_job(
         payload=payload or {},
     )
     session.add(job)
+    await _pin_job_to_workflow(session, task, job)
     task.state = ROLE_TASK_STATE[role]
     await record_event(
         session,
         task.id,
         "JOB_QUEUED",
-        {"job_id": str(job.id), "role": role.value, "action": action},
+        {
+            "job_id": str(job.id),
+            "role": role.value,
+            "action": action,
+            "workflow_node_id": str(job.workflow_node_id) if job.workflow_node_id else None,
+            "workflow_version": job.team_workflow_version,
+        },
     )
     return job
+
+
+async def _pin_job_to_workflow(session: AsyncSession, task: Task, job: Job) -> None:
+    """Attach immutable routing identity without changing legacy execution behavior."""
+    definition: WorkflowDefinition | None = None
+    if task.workflow_id is not None:
+        definition = await session.get(WorkflowDefinition, task.workflow_id)
+    elif task.team_id is not None:
+        definition = await session.scalar(
+            select(WorkflowDefinition).where(
+                WorkflowDefinition.team_id == task.team_id,
+                WorkflowDefinition.is_active.is_(True),
+            )
+        )
+        if definition is not None:
+            task.workflow_id = definition.id
+            task.workflow_version = definition.version
+    if definition is None:
+        return
+    node = await session.scalar(
+        select(WorkflowNode)
+        .where(
+            WorkflowNode.workflow_id == definition.id,
+            WorkflowNode.role == job.role.value,
+            WorkflowNode.enabled.is_(True),
+        )
+        .order_by(WorkflowNode.id)
+        .limit(1)
+    )
+    if node is None:
+        return
+    job.workflow_node_id = node.id
+    job.agent_id = node.agent_id
+    job.team_workflow_version = task.workflow_version or definition.version
+    task.current_workflow_node_id = node.id
 
 
 async def claim_next_job(session: AsyncSession, worker_id: str, lease_seconds: int) -> Job | None:

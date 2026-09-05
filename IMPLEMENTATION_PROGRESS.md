@@ -893,3 +893,23 @@ This is the durable implementation ledger for the project. Update it whenever a 
 - Added task memory, checkpoint, context-history, and per-job context-metadata query APIs plus an AI
   Memory panel on task details.
 - Validation: backend formatting, Ruff, strict mypy, and all 225 tests pass.
+
+## 2026-09-06 — Versioned outcome-based Team workflow routing
+
+- Extended the existing graph model instead of replacing it: nodes now distinguish Agent, system
+  gate, terminal, human-approval, and external-wait behavior; routes carry result, next Job type,
+  internal Task state, external semantic status, priority override, and guarded configuration.
+- Added Validation and Delivery Role categories plus delivery capabilities, and upgraded the
+  built-in Tester, Reviewer, and Deliverer contracts to structured role-specific outcomes.
+- Added deterministic exact-result routing with an explicit `always` fallback and validation that
+  rejects ambiguous result routes, invalid system nodes, missing destinations, and unsafe priority
+  values.
+- Tasks now pin the active Team workflow/version when work is first queued. Jobs record their
+  concrete workflow node, Agent, and workflow version, while existing jobs without routing identity
+  remain backward compatible.
+- Added durable workflow-transition audit storage for every future routing decision. Existing Team
+  graphs and UI payloads remain compatible; the visual editor preserves the new routing metadata.
+- Added migration `0036_workflow_routing`; verified the full migration against the running
+  PostgreSQL container and confirmed backend readiness at Alembic head `0036`.
+- Validation: backend formatting, Ruff, strict mypy, all 229 backend tests, frontend Svelte/TypeScript
+  checks, and Docker backend/worker builds pass.

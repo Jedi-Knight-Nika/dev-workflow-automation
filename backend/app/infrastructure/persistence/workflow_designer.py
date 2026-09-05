@@ -1,7 +1,6 @@
 import uuid
 from dataclasses import replace
 from datetime import datetime
-from itertools import pairwise
 
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -22,10 +21,10 @@ def default_graph(team_id: uuid.UUID = WORKFLOW_ID) -> WorkflowGraphData:
         WorkflowNodeData("10000000-0000-0000-0000-000000000002", "INTAKE", "Intake", 300, 200),
         WorkflowNodeData("10000000-0000-0000-0000-000000000003", "THINKER", "Thinker", 560, 120),
         WorkflowNodeData("10000000-0000-0000-0000-000000000004", "EXECUTOR", "Executor", 820, 200),
-        WorkflowNodeData("10000000-0000-0000-0000-000000000005", "REVIEWER", "Reviewer", 1080, 120),
-        WorkflowNodeData("10000000-0000-0000-0000-000000000007", "TESTER", "Tester", 1210, 280),
+        WorkflowNodeData("10000000-0000-0000-0000-000000000007", "TESTER", "Tester", 1080, 280),
+        WorkflowNodeData("10000000-0000-0000-0000-000000000005", "REVIEWER", "Reviewer", 1300, 120),
         WorkflowNodeData(
-            "10000000-0000-0000-0000-000000000006", "DELIVERER", "Deliverer", 1470, 200
+            "10000000-0000-0000-0000-000000000006", "DELIVERER", "Deliverer", 1540, 200
         ),
     )
     if team_id != WORKFLOW_ID:
@@ -33,17 +32,33 @@ def default_graph(team_id: uuid.UUID = WORKFLOW_ID) -> WorkflowGraphData:
             replace(node, id=str(uuid.uuid5(team_id, f"node:{index}:{node.role}")))
             for index, node in enumerate(nodes)
         )
+    by_role = {node.role: node for node in nodes}
+    routes = (
+        ("ORCHESTRATOR", "always", "INTAKE", "CLASSIFY_EVENT", None),
+        ("INTAKE", "EVENT_INTERPRETED", "THINKER", "CREATE_PLAN", None),
+        ("THINKER", "PLAN_READY", "EXECUTOR", "IMPLEMENT_PLAN", "PLAN_READY"),
+        ("THINKER", "REPLAN_READY", "EXECUTOR", "IMPLEMENT_PLAN", "PLAN_READY"),
+        ("EXECUTOR", "IMPLEMENTED", "TESTER", "RUN_VALIDATION", "LOCAL_VALIDATION"),
+        ("EXECUTOR", "NEEDS_REPLAN", "THINKER", "REPLAN", "PLANNING"),
+        ("EXECUTOR", "PLAN_MISMATCH", "THINKER", "REPLAN", "PLANNING"),
+        ("TESTER", "TEST_PASS", "REVIEWER", "REVIEW_IMPLEMENTATION", "INTERNAL_REVIEW"),
+        ("TESTER", "TEST_FAILED", "EXECUTOR", "FIX_TEST_FAILURES", "FIX_REQUIRED"),
+        ("REVIEWER", "REVIEW_PASS", "DELIVERER", "PREPARE_DELIVERY", "WAITING_GITHUB"),
+        ("REVIEWER", "PASS", "DELIVERER", "PREPARE_DELIVERY", "WAITING_GITHUB"),
+        ("REVIEWER", "FAIL_ACTIONABLE", "EXECUTOR", "FIX_REVIEW_FINDINGS", "FIX_REQUIRED"),
+        ("REVIEWER", "FAIL_ARCHITECTURAL", "THINKER", "REPLAN", "PLANNING"),
+    )
     edges = tuple(
         WorkflowEdgeData(
-            (
-                f"20000000-0000-0000-0000-00000000000{index}"
-                if team_id == WORKFLOW_ID
-                else str(uuid.uuid5(team_id, f"edge:{index}:{source.role}:{target.role}"))
-            ),
-            source.id,
-            target.id,
+            str(uuid.uuid5(team_id, f"route:{index}:{source}:{outcome}:{target}")),
+            by_role[source].id,
+            by_role[target].id,
+            outcome,
+            True,
+            job_type,
+            internal_state,
         )
-        for index, (source, target) in enumerate(pairwise(nodes), start=1)
+        for index, (source, outcome, target, job_type, internal_state) in enumerate(routes)
     )
     return WorkflowGraphData(1, nodes, edges)
 
@@ -152,9 +167,14 @@ class SqlAlchemyWorkflowDesigner:
 
     async def _persist_new(self, graph: WorkflowGraphData) -> None:
         workflow_id = WORKFLOW_ID if self._team_id == WORKFLOW_ID else uuid.uuid4()
-        self._session.add(
-            WorkflowDefinition(id=workflow_id, team_id=self._team_id, version=graph.version)
+        entry = next(node for node in graph.nodes if node.role == "ORCHESTRATOR")
+        definition = WorkflowDefinition(
+            id=workflow_id,
+            team_id=self._team_id,
+            version=graph.version,
+            entry_node_id=uuid.UUID(entry.id),
         )
+        self._session.add(definition)
         await self._session.flush()
         await self._add_graph(graph, workflow_id)
         await self._session.commit()
@@ -231,6 +251,8 @@ class SqlAlchemyWorkflowDesigner:
                 rag_retrieval_depth=node.rag_retrieval_depth,
                 fallback_provider=node.fallback_provider,
                 fallback_model=node.fallback_model,
+                node_type=node.node_type,
+                system_node_type=node.system_node_type,
             )
             for node in graph.nodes
         )
@@ -243,6 +265,11 @@ class SqlAlchemyWorkflowDesigner:
                 target_node_id=uuid.UUID(edge.target_node_id),
                 outcome=edge.outcome,
                 required=edge.required,
+                job_type=edge.job_type,
+                internal_task_state=edge.internal_task_state,
+                external_status_key=edge.external_status_key,
+                priority_override=edge.priority_override,
+                configuration=edge.configuration or {},
             )
             for edge in graph.edges
         )
@@ -303,6 +330,8 @@ class SqlAlchemyWorkflowDesigner:
                     node.fallback_provider,
                     node.fallback_model,
                     str(node.agent_id) if node.agent_id else None,
+                    node.node_type,
+                    node.system_node_type,
                 )
                 for node in nodes
             ),
@@ -313,6 +342,11 @@ class SqlAlchemyWorkflowDesigner:
                     str(edge.target_node_id),
                     edge.outcome,
                     edge.required,
+                    edge.job_type,
+                    edge.internal_task_state,
+                    edge.external_status_key,
+                    edge.priority_override,
+                    edge.configuration,
                 )
                 for edge in edges
             ),

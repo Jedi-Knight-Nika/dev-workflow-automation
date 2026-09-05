@@ -2,7 +2,17 @@ import uuid
 from dataclasses import dataclass
 
 ROLE_CATEGORIES = frozenset(
-    {"INTAKE", "PLANNING", "EXECUTION", "REVIEW", "COORDINATION", "SPECIALIST", "CUSTOM"}
+    {
+        "INTAKE",
+        "PLANNING",
+        "EXECUTION",
+        "VALIDATION",
+        "REVIEW",
+        "DELIVERY",
+        "COORDINATION",
+        "SPECIALIST",
+        "CUSTOM",
+    }
 )
 ROLE_CAPABILITIES = frozenset(
     {
@@ -13,6 +23,8 @@ ROLE_CAPABILITIES = frozenset(
         "CAN_CLASSIFY_EXTERNAL_EVENT",
         "CAN_PRODUCE_FINDINGS",
         "CAN_RUN_VALIDATION",
+        "CAN_PREPARE_DELIVERY",
+        "CAN_CREATE_PR_METADATA",
     }
 )
 ROLE_PERMISSIONS = frozenset(

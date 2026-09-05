@@ -280,6 +280,10 @@ class WorkflowNodeRead(BaseModel):
     fallback_provider: str | None = Field(default=None, pattern="^(openai|anthropic|google)$")
     fallback_model: str | None = Field(default=None, max_length=255)
     agent_id: uuid.UUID | None = None
+    node_type: str = Field(
+        default="AGENT", pattern="^(AGENT|SYSTEM_GATE|TERMINAL|HUMAN_APPROVAL|EXTERNAL_WAIT)$"
+    )
+    system_node_type: str | None = None
 
 
 class LinearMemberRead(BaseModel):
@@ -302,6 +306,11 @@ class WorkflowEdgeRead(BaseModel):
     target_node_id: uuid.UUID
     outcome: str = "success"
     required: bool = True
+    job_type: str | None = Field(default=None, max_length=100)
+    internal_task_state: str | None = Field(default=None, max_length=50)
+    external_status_key: str | None = Field(default=None, max_length=100)
+    priority_override: int | None = Field(default=None, ge=0, le=5)
+    configuration: dict[str, object] = Field(default_factory=dict)
 
 
 class WorkflowGraphRead(BaseModel):

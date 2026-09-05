@@ -68,3 +68,12 @@ def test_workflow_rejects_unknown_activation_policy() -> None:
     )
     with pytest.raises(ValueError, match="activation policy"):
         validate_workflow_graph(WorkflowGraphData(graph.version, changed, graph.edges))
+
+
+def test_workflow_rejects_ambiguous_outcome_routes() -> None:
+    graph = valid_graph()
+    edges = graph.edges + (
+        WorkflowEdgeData("duplicate", "reviewer", "orchestrator", "changes_requested"),
+    )
+    with pytest.raises(ValueError, match="multiple routes"):
+        validate_workflow_graph(WorkflowGraphData(graph.version, graph.nodes, edges))
