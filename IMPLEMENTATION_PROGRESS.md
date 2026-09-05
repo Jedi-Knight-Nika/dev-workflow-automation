@@ -828,3 +828,9 @@ This is the durable implementation ledger for the project. Update it whenever a 
 - Creation is deliberately non-running while unassigned; selecting a Team uses the existing assignment workflow to create the Team-owned Intake job safely.
 - Added provider-neutral project, label, and estimate storage to Tasks through migration `0032_manual_task_properties`, preserving those fields independently of Linear/GitHub snapshots.
 - Manual properties are returned by task queries, displayed on board cards/details, and included in project/label filters alongside external-provider metadata.
+
+## 2026-09-06 — Fresh-database migration reliability
+
+- Corrected historical PostgreSQL enum migrations to commit newly added enum values before later revisions use them in data backfills or runtime constraints.
+- Covered `MERGED`, `CONTEXT_PENDING`, `TESTER`, `ORCHESTRATOR`, and `DELIVERER` instead of fixing only the first value reported by CI.
+- Reproduced the GitHub Actions database path against an isolated empty PostgreSQL database and successfully applied the complete `0001 -> 0032` Alembic chain.

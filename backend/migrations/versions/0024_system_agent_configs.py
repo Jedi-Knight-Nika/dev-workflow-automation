@@ -15,8 +15,9 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    op.execute("ALTER TYPE jobrole ADD VALUE IF NOT EXISTS 'ORCHESTRATOR'")
-    op.execute("ALTER TYPE jobrole ADD VALUE IF NOT EXISTS 'DELIVERER'")
+    with op.get_context().autocommit_block():
+        op.execute("ALTER TYPE jobrole ADD VALUE IF NOT EXISTS 'ORCHESTRATOR'")
+        op.execute("ALTER TYPE jobrole ADD VALUE IF NOT EXISTS 'DELIVERER'")
 
 
 def downgrade() -> None:

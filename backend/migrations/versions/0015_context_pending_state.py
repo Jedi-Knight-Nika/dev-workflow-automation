@@ -15,7 +15,8 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    op.execute("ALTER TYPE taskstate ADD VALUE IF NOT EXISTS 'CONTEXT_PENDING' AFTER 'NEW'")
+    with op.get_context().autocommit_block():
+        op.execute("ALTER TYPE taskstate ADD VALUE IF NOT EXISTS 'CONTEXT_PENDING' AFTER 'NEW'")
 
 
 def downgrade() -> None:

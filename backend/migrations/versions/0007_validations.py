@@ -17,7 +17,12 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    op.execute("ALTER TYPE taskstate ADD VALUE IF NOT EXISTS 'MERGED'")
+    # PostgreSQL forbids using a newly-added enum value until the transaction
+    # that added it has committed. Alembic may run the complete revision chain
+    # in one outer transaction on a fresh database, so commit this DDL block
+    # explicitly before later migrations backfill rows using MERGED.
+    with op.get_context().autocommit_block():
+        op.execute("ALTER TYPE taskstate ADD VALUE IF NOT EXISTS 'MERGED'")
     op.create_table(
         "validation_records",
         sa.Column("id", sa.Uuid(), nullable=False),
