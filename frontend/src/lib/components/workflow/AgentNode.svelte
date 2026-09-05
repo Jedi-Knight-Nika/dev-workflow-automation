@@ -6,6 +6,7 @@
     role: string;
     status: string;
     system: boolean;
+    onMenu?: (event: MouseEvent) => void;
   };
 
   let { data }: NodeProps = $props();
@@ -28,7 +29,15 @@
       </span>
     </div>
   </div>
-  <span class="menu-hint" aria-hidden="true">•••</span>
+  <button
+    class="menu-hint nodrag"
+    type="button"
+    aria-label={`Open ${agent.displayName} actions`}
+    onclick={(event) => {
+      event.stopPropagation();
+      agent.onMenu?.(event);
+    }}>•••</button
+  >
 </div>
 <Handle type="source" position={Position.Right} />
 
@@ -79,8 +88,16 @@
     box-shadow: 0 0 9px rgb(52 211 153 / 75%);
   }
   .menu-hint {
+    border: 0;
+    border-radius: 0.35rem;
+    background: transparent;
+    padding: 0.25rem;
     color: #64748b;
     font-size: 0.75rem;
     letter-spacing: 0.08em;
+  }
+  .menu-hint:hover {
+    background: rgb(51 65 85 / 45%);
+    color: #cbd5e1;
   }
 </style>

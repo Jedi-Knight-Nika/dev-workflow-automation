@@ -717,3 +717,7 @@ This is the durable implementation ledger for the project. Update it whenever a 
 - Added a left-click agent action menu with **Edit configuration** and **Delete from graph** actions. Orchestrator and Deliverer remain visibly protected from deletion.
 - Redesigned the agent configuration form as a focused inspector with Instructions, Model & cost, and Knowledge tabs, compact runtime metrics, status, enable control, save action, and live console access.
 - Preserved workflow routing, drag/connect behavior, activation policies, model discovery, cost configuration, custom prompts, repository context, and manual vector knowledge.
+- Refined canvas interaction conventions: single-click selects, double-click opens a status/details dialog, and right-click or the node's three-dot control opens Edit/Delete actions.
+- Added persistent user-defined agent nicknames without changing stable backend role identity; nicknames are edited in the details dialog and saved with the workflow graph.
+- Corrected graph route semantics: manually configured directional wires remain neutral regardless of their trigger condition, while bright animated cyan is reserved for a source agent that is actually processing. Trigger conditions are edited in the selected-route toolbar instead of being shown as misleading success/failure badges on idle wires.
+- Removed the unnecessary workflow minimap so the compact graph no longer has a visually disconnected rectangle competing with its primary controls.

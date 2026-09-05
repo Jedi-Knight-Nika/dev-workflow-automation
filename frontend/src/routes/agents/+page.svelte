@@ -157,6 +157,10 @@
         selectedRole = role;
         selectedNodeId = nodeId;
       }}
+      onconsole={(role, nodeId) => {
+        selectedNodeId = nodeId;
+        consoleAgent = agents.find((agent) => agent.role === role) || null;
+      }}
       onsave={persistWorkflow}
     />
   {/if}
