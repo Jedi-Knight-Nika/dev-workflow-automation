@@ -858,3 +858,38 @@ This is the durable implementation ledger for the project. Update it whenever a 
 - Added regression coverage for invalid capabilities, invalid limits, and protected worker
   environments.
 - Validation: backend formatting, Ruff, strict mypy, and all 219 tests pass.
+
+## 2026-09-06 — Notification and Telegram alerting foundation
+
+- Added durable incidents, in-app notifications, channel delivery attempts, one-time Telegram
+  connection tokens, Telegram connections, and webhook idempotency through migration `0034`.
+- Added explicit INFO/WARNING in-app routing and ACTION_REQUIRED/CRITICAL Telegram routing policy.
+- Added incident fingerprint deduplication with occurrence tracking and separate acknowledge,
+  resolve, and mute semantics.
+- Added notification/incident APIs, unread counts, a global notification bell and attention drawer.
+- Added Telegram configuration to Settings. Bot tokens are verified with Telegram, encrypted using
+  the existing credential cipher, stored in PostgreSQL, replaceable, and never returned to the UI.
+- Added optional automatic webhook registration for a user-supplied public HTTPS backend URL,
+  hashed one-time account linking, webhook secret verification, idempotent updates, safe
+  acknowledgement callbacks, bounded delivery attempts, and sanitized compact messages.
+- Approval-required Tool Gateway decisions now create deduplicated actionable incidents. Telegram
+  delivery runs independently and cannot fail the engineering workflow.
+- Validation: backend formatting, Ruff, strict mypy, and all 223 tests pass; frontend lint,
+  formatting, Svelte/TypeScript checks, 23 tests, and production build pass.
+
+## 2026-09-06 — Fresh sessions with persistent task memory
+
+- Confirmed that every Job already creates an independent provider request and that task worktrees
+  persist independently of worker/provider session lifetime.
+- Added structured, versioned Task Memory, role-specific Agent Checkpoints, and Job Context audit
+  metadata through migration `0035` without storing raw compiled prompts.
+- Added deterministic checkpoint extraction for Intake, Thinker, Executor, and Reviewer results;
+  memory updates reuse system-known plans, revisions, files, questions, and open finding IDs.
+- Extended the Context Compiler with role-specific memory views, previous same-role checkpoints,
+  stale-revision indicators, context-size estimates, compiler timing, retrieval references, and
+  low-priority trimming through the existing context budget.
+- Preserved incremental repository indexing and content-hash embedding reuse already present in the
+  repository intelligence pipeline.
+- Added task memory, checkpoint, context-history, and per-job context-metadata query APIs plus an AI
+  Memory panel on task details.
+- Validation: backend formatting, Ruff, strict mypy, and all 225 tests pass.

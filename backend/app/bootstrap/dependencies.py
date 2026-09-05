@@ -27,6 +27,7 @@ from app.infrastructure.persistence.repository_management import (
 from app.infrastructure.persistence.role_management import SqlAlchemyRoleManagementWorkflow
 from app.infrastructure.persistence.task_history import SqlAlchemyTaskHistoryQueries
 from app.infrastructure.persistence.task_lifecycle import SqlAlchemyTaskLifecycleUnitOfWorkFactory
+from app.infrastructure.persistence.task_memory import SqlAlchemyTaskMemoryQueries
 from app.infrastructure.persistence.task_queries import SqlAlchemyTaskQueries
 from app.infrastructure.persistence.team_management import SqlAlchemyTeamManagementWorkflow
 from app.infrastructure.persistence.terminal_sessions import SqlAlchemyTerminalSessionGateway
@@ -103,6 +104,12 @@ def get_task_history_queries(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> SqlAlchemyTaskHistoryQueries:
     return SqlAlchemyTaskHistoryQueries(session)
+
+
+def get_task_memory_queries(
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> SqlAlchemyTaskMemoryQueries:
+    return SqlAlchemyTaskMemoryQueries(session)
 
 
 def get_operations_queries(

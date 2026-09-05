@@ -1,4 +1,6 @@
 import json
+import time
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -6,9 +8,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import IndexStatus, Job, JobRole, Repository, ReviewFinding, Task
+from app.domain.memory import render_memory
 from app.infrastructure.agent_knowledge import search_agent_knowledge
 from app.infrastructure.git.workspaces import run_git
 from app.infrastructure.indexing import semantic_search
+from app.infrastructure.persistence.task_memory import TaskMemoryService
 from app.infrastructure.workers.executor import repository_context
 
 DEFAULT_CONTEXT_CHARS = 160_000
@@ -67,6 +71,57 @@ class ContextCompiler:
             },
             "job": {"id": str(job.id), "action": job.action, "payload": job.payload},
         }
+
+    async def _persistent_memory(self, task: Task, role: JobRole) -> dict[str, Any]:
+        return render_memory(await TaskMemoryService(self.session).load(task), role)
+
+    async def _previous_checkpoint(self, task: Task, role: JobRole) -> dict[str, Any] | None:
+        checkpoint = await TaskMemoryService(self.session).latest_checkpoint(task.id, role)
+        if checkpoint is None:
+            return None
+        return {
+            "id": str(checkpoint.id),
+            "summary": checkpoint.summary,
+            "repository_sha": checkpoint.repository_sha,
+            "structured_data": checkpoint.structured_data,
+            "stale": bool(
+                checkpoint.repository_sha
+                and task.current_revision
+                and checkpoint.repository_sha != task.current_revision
+            ),
+        }
+
+    async def _finish(
+        self, task: Task, job: Job, context: dict[str, Any], started: float
+    ) -> dict[str, Any]:
+        fitted = fit_context(context, self.max_chars)
+        serialized = json.dumps(fitted, ensure_ascii=False)
+        memory = await TaskMemoryService(self.session).load(task)
+        previous = fitted.get("previous_role_checkpoint")
+        checkpoint_ids = [str(previous["id"])] if isinstance(previous, dict) else []
+        findings = fitted.get("open_findings", [])
+        finding_ids = [
+            str(item["id"]) for item in findings if isinstance(item, dict) and "id" in item
+        ]
+        knowledge = fitted.get("retrieved_knowledge", [])
+        rag_ids = [
+            f"{item.get('file_path')}:{item.get('chunk_index')}"
+            for item in knowledge
+            if isinstance(item, dict)
+        ]
+        plan_id = memory.current_plan_job_id
+        await TaskMemoryService(self.session).record_context(
+            job,
+            memory.version,
+            task.current_revision,
+            checkpoint_ids,
+            uuid.UUID(plan_id) if plan_id else None,
+            finding_ids,
+            rag_ids,
+            max(1, len(serialized) // 4),
+            round((time.monotonic() - started) * 1000),
+        )
+        return fitted
 
     async def _knowledge(
         self, task: Task, repository: Repository | None, role: JobRole
@@ -134,21 +189,31 @@ class ContextCompiler:
         ]
 
     async def compile_for_intake(self, task: Task, job: Job) -> dict[str, Any]:
+        started = time.monotonic()
         context = self._base(task, job)
+        context["task_memory"] = await self._persistent_memory(task, JobRole.INTAKE)
         context["retrieved_knowledge"] = await self._knowledge(task, None, JobRole.INTAKE)
-        return fit_context(context, self.max_chars)
+        return await self._finish(task, job, context, started)
 
     async def compile_for_thinker(
         self, task: Task, job: Job, repository: Repository | None
     ) -> dict[str, Any]:
+        started = time.monotonic()
         context = self._base(task, job)
+        context["task_memory"] = await self._persistent_memory(task, JobRole.THINKER)
+        context["previous_role_checkpoint"] = await self._previous_checkpoint(task, JobRole.THINKER)
         context["retrieved_knowledge"] = await self._knowledge(task, repository, JobRole.THINKER)
-        return fit_context(context, self.max_chars)
+        return await self._finish(task, job, context, started)
 
     async def compile_for_executor(
         self, task: Task, job: Job, repository: Repository, workspace: Path
     ) -> dict[str, Any]:
+        started = time.monotonic()
         context = self._base(task, job)
+        context["task_memory"] = await self._persistent_memory(task, JobRole.EXECUTOR)
+        context["previous_role_checkpoint"] = await self._previous_checkpoint(
+            task, JobRole.EXECUTOR
+        )
         context["technical_plan"] = await self._plan(task)
         context["retrieved_knowledge"] = await self._knowledge(task, repository, JobRole.EXECUTOR)
         context["open_findings"] = await self._findings(task)
@@ -157,12 +222,14 @@ class ContextCompiler:
             "revision": task.current_revision,
             "files": await repository_context(workspace),
         }
-        return fit_context(context, self.max_chars)
+        return await self._finish(task, job, context, started)
 
     async def compile_for_reviewer(
         self, task: Task, job: Job, repository: Repository, workspace: Path
     ) -> dict[str, Any]:
+        started = time.monotonic()
         context = self._base(task, job)
+        context["task_memory"] = await self._persistent_memory(task, JobRole.REVIEWER)
         context["technical_plan"] = await self._plan(task)
         context["retrieved_knowledge"] = await self._knowledge(task, repository, JobRole.REVIEWER)
         context["open_findings"] = await self._findings(task)
@@ -171,4 +238,4 @@ class ContextCompiler:
             "revision": task.current_revision,
             "diff": await run_git("diff", "--no-ext-diff", cwd=workspace),
         }
-        return fit_context(context, self.max_chars)
+        return await self._finish(task, job, context, started)

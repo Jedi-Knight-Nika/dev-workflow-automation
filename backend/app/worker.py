@@ -25,6 +25,7 @@ from app.db.models import (
 from app.db.session import SessionLocal
 from app.domain.security import Decision, ExecutionMode, TeamExecutionPolicy
 from app.infrastructure.git.workspaces import prepare_workspace, run_git
+from app.infrastructure.persistence.task_memory import TaskMemoryService
 from app.infrastructure.security.crypto import cipher
 from app.infrastructure.tools import GatewayContext, ToolGateway, ToolNeedsApproval
 from app.infrastructure.workers.context_compiler import ContextCompiler
@@ -453,6 +454,16 @@ async def run(job_id: uuid.UUID) -> WorkerResult:
             data = review.model_dump(mode="json")
         if config.allowed_results and result not in config.allowed_results:
             raise RuntimeError(f"Agent role does not allow structured result {result}")
+        checkpoint_data = dict(data)
+        checkpoint_data["result"] = result
+        await TaskMemoryService(session).checkpoint(
+            task,
+            job,
+            checkpoint_data,
+            summary,
+            config.agent_id,
+            config.role_id,
+        )
         return WorkerResult(
             job_id=job.id,
             task_id=job.task_id,

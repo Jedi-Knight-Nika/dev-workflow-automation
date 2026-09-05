@@ -333,6 +333,72 @@ class WorkerRun(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class TaskMemory(Base):
+    __tablename__ = "task_memories"
+    task_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("tasks.id", ondelete="CASCADE"), primary_key=True
+    )
+    goal: Mapped[str] = mapped_column(Text, default="")
+    known_facts: Mapped[list[str]] = mapped_column(JSON, default=list)
+    decisions: Mapped[list[str]] = mapped_column(JSON, default=list)
+    rejected_approaches: Mapped[list[dict[str, str]]] = mapped_column(JSON, default=list)
+    invariants: Mapped[list[str]] = mapped_column(JSON, default=list)
+    important_files: Mapped[list[str]] = mapped_column(JSON, default=list)
+    important_symbols: Mapped[list[str]] = mapped_column(JSON, default=list)
+    open_questions: Mapped[list[str]] = mapped_column(JSON, default=list)
+    open_finding_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
+    resolved_finding_summaries: Mapped[list[str]] = mapped_column(JSON, default=list)
+    current_plan_job_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("jobs.id", ondelete="SET NULL")
+    )
+    current_sha: Mapped[str | None] = mapped_column(String(64))
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+
+class AgentCheckpoint(Base):
+    __tablename__ = "agent_checkpoints"
+    __table_args__ = (Index("ix_checkpoints_task_role_created", "task_id", "role", "created_at"),)
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    task_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tasks.id", ondelete="CASCADE"))
+    job_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("jobs.id", ondelete="CASCADE"), unique=True
+    )
+    agent_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("ai_agents.id", ondelete="SET NULL")
+    )
+    role_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("roles.id", ondelete="SET NULL"))
+    role: Mapped[JobRole] = mapped_column(Enum(JobRole))
+    checkpoint_type: Mapped[str] = mapped_column(String(50))
+    repository_sha: Mapped[str | None] = mapped_column(String(64))
+    summary: Mapped[str] = mapped_column(Text)
+    structured_data: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    token_estimate: Mapped[int | None] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class JobContext(Base):
+    __tablename__ = "job_contexts"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    job_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("jobs.id", ondelete="CASCADE"), unique=True
+    )
+    compiler_version: Mapped[str] = mapped_column(String(30))
+    task_memory_version: Mapped[int | None] = mapped_column(Integer)
+    repository_sha: Mapped[str | None] = mapped_column(String(64))
+    checkpoint_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
+    plan_job_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("jobs.id", ondelete="SET NULL")
+    )
+    finding_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
+    rag_chunk_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
+    estimated_input_tokens: Mapped[int] = mapped_column(Integer)
+    compilation_duration_ms: Mapped[int] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class Team(Base):
     __tablename__ = "teams"
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
