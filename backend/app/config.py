@@ -43,7 +43,11 @@ class Settings(BaseSettings):
     worker_container_memory_mb: int = Field(default=1536, ge=128)
     worker_container_cpus: float = Field(default=1.5, gt=0)
     github_webhook_secret: str = ""
-    github_app_return_url: str = "http://localhost:3000/integrations"
+    github_app_slug: str = ""
+    github_app_id: str = ""
+    github_app_private_key: str = ""
+    github_app_private_key_file: Path | None = None
+    github_app_return_url: str = "http://localhost:3000/repositories"
     linear_webhook_secret: str = ""
 
     @model_validator(mode="after")

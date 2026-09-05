@@ -1,6 +1,8 @@
 import asyncio
+import base64
 import os
 import re
+import shutil
 from pathlib import Path
 
 from sqlalchemy import select
@@ -16,6 +18,11 @@ class GitCommandError(RuntimeError):
     pass
 
 
+def git_authorization_header(token: str) -> str:
+    encoded = base64.b64encode(f"x-access-token:{token}".encode()).decode()
+    return f"Authorization: Basic {encoded}"
+
+
 def task_branch(task: Task) -> str:
     source = task.external_key or str(task.id)[:8]
     slug = re.sub(r"[^a-zA-Z0-9._-]+", "-", source).strip("-").lower()
@@ -29,7 +36,7 @@ async def run_git(*args: str, cwd: Path | None = None, token: str | None = None)
             {
                 "GIT_CONFIG_COUNT": "1",
                 "GIT_CONFIG_KEY_0": "http.extraHeader",
-                "GIT_CONFIG_VALUE_0": f"Authorization: Bearer {token}",
+                "GIT_CONFIG_VALUE_0": git_authorization_header(token),
                 "GIT_TERMINAL_PROMPT": "0",
             }
         )
@@ -63,6 +70,8 @@ async def prepare_repository_cache(session: AsyncSession, repository: Repository
     repositories_root.mkdir(parents=True, exist_ok=True)
     cache = repositories_root / str(repository.id)
     token = await github_token(session) if repository.provider == "github" else None
+    if cache.exists() and not (cache / ".git").is_dir():
+        shutil.rmtree(cache)
     if not cache.exists():
         await run_git("clone", "--no-checkout", repository.clone_url, str(cache), token=token)
     else:

@@ -22,3 +22,6 @@ class ManageRepositories:
 
     async def queue_index(self, repository_id: uuid.UUID) -> RepositoryView:
         return await self._workflow.queue_index(repository_id)
+
+    async def delete(self, repository_id: uuid.UUID) -> None:
+        await self._workflow.delete(repository_id)

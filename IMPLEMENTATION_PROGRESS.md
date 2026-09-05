@@ -657,3 +657,45 @@ This is the durable implementation ledger for the project. Update it whenever a 
 - Rebuilt the Python 3.12 backend, Node 22 Svelte frontend, and polyglot Python/Node/Git worker images successfully after all module relocations.
 - Started the complete Compose stack from the rebuilt images; PostgreSQL and FastAPI report healthy, the dedicated scheduler worker remains running, and the frontend remains running.
 - Verified `GET /health/ready` returns database-ready JSON and the frontend root returns HTTP 200 through the published host ports.
+
+## 2026-09-05 — Guided GitHub repository onboarding
+
+- Reworked repository setup into an explicit three-step flow: connect/authenticate GitHub, select the repositories the AI may access, then observe automatic knowledge preparation.
+- Added connection-aware controls and navigation between GitHub authentication and repository selection; discovery remains unavailable until the integration has been verified as connected.
+- Replaced internal index-state presentation with user-facing AI knowledge states: not ready, embedding, AI ready, and failed, including chunk counts and actionable retry controls.
+- Kept clone-URL import available as a secondary fallback while making authenticated GitHub discovery the primary path.
+- Added end-to-end repository removal through the application port, SQLAlchemy adapter, HTTP API, and typed frontend service. Removal also deletes repository knowledge through the existing database cascade and requires explicit browser confirmation.
+- The frontend passes ESLint, Prettier, TypeScript/Svelte checks with 0 errors and 0 warnings, all 21 unit tests, and its production build. Ruff and strict MyPy pass and all 181 backend tests pass.
+
+## 2026-09-05 — Vercel-style GitHub App connection
+
+- Removed GitHub App IDs, slugs, installation IDs, private keys, and personal tokens from the end-user interface.
+- Moved the platform-owned GitHub App configuration to server environment variables; it is configured once by the deployment operator and never exposed by the API.
+- The GitHub card now offers one Connect GitHub action. It redirects to GitHub's installation approval, validates a signed/expiring callback state, records the returned installation ID encrypted, verifies repository access with GitHub, and returns the user to repository selection.
+- Added Compose and environment-template parameters for the GitHub App slug, ID, private key, and post-install return page.
+- Ruff, strict MyPy, all 182 backend tests, ESLint, Prettier, 0-error/0-warning Svelte type checking, all 21 frontend tests, and the production frontend build pass.
+- Added read-only PEM-file secret mounting for local Compose, configured the locally created GitHub App, validated its RSA key, and ignored PEM files repository-wide to prevent accidental credential commits.
+- Added an empty-access recovery state and server-derived GitHub installation management URL so a connected installation with zero granted repositories no longer appears to silently fail.
+- Corrected authenticated Git smart-HTTP cloning to use GitHub's `x-access-token` Basic-auth convention instead of a REST-style Bearer header, and made retries discard only incomplete UUID-scoped repository caches left by failed clones.
+- Added a server-verified GitHub installation identity endpoint and account/avatar presentation on both connection surfaces, so connected state identifies the user or organization that owns the installation.
+- Simplified provider configuration lifecycle: credentials are verified automatically once after save, configured cards show the persisted verification result, and one page-level Refresh statuses action rechecks all credentialed connections on demand without continuous background API traffic.
+
+## 2026-09-05 — Workflow-builder foundation
+
+- Made each AI role's system prompt a persisted runtime setting with the safe built-in role contract retained as its fallback.
+- Added an explicit per-role repository-knowledge policy and wired it into context compilation, allowing codebase RAG retrieval to be enabled or disabled independently for every worker.
+- Replaced the agent-list framing with a single visual graph from deterministic Orchestrator through the AI roles to deterministic Deliverer; workflow nodes are selectable and expose live readiness.
+- Added persistent manual knowledge sources scoped to each role. Text is chunked, embedded through the configured OpenAI embedding model, stored in pgvector, listed/deletable in the UI, and retrieved only for that role during execution.
+- Added migration `0019_agent_knowledge` and REST operations for role knowledge lifecycle.
+- Renamed the navigation entry from Agents to Workflow.
+- Frontend lint, formatting, type checking, 21 unit tests, and production build pass. Backend Ruff, strict MyPy, and all 184 tests pass.
+
+## 2026-09-05 — Durable drag-and-drop workflow designer
+
+- Added the MIT-licensed Svelte Flow canvas behind a project-owned workflow component, with smooth node dragging, pan/zoom, minimap, animated routed edges, handle-based one-to-many and many-to-one connections, node/edge selection, and protected system nodes.
+- Added agent palette controls for Intake, Thinker, Executor, Reviewer, and Tester plus deletion and editable edge outcomes.
+- Added per-node activation policies (`any`, `all`, `required`, `manual`, and `batch`) to define fan-in behavior explicitly.
+- Added a framework-free workflow graph domain, application use case/port, SQLAlchemy adapter, REST API, normalized PostgreSQL tables, and optimistic version conflict protection.
+- Backend validation owns structural integrity: unique identities, allowed roles/outcomes/policies, exactly one Orchestrator and Deliverer, valid references, no self-routing, and reachability from Orchestrator to every enabled node and Deliverer.
+- Added the Tester role to the persisted agent configuration model and PostgreSQL enum so it can be configured from the same role panel.
+- Added domain tests for valid repair loops and invalid unreachable/protected/policy states.

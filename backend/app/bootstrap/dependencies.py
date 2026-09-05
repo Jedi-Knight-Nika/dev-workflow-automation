@@ -24,6 +24,7 @@ from app.infrastructure.persistence.task_lifecycle import SqlAlchemyTaskLifecycl
 from app.infrastructure.persistence.task_queries import SqlAlchemyTaskQueries
 from app.infrastructure.persistence.tracker_sync import SqlAlchemyLinearSyncWorkflow
 from app.infrastructure.persistence.worker_queries import SqlAlchemyWorkerQueries
+from app.infrastructure.persistence.workflow_designer import SqlAlchemyWorkflowDesigner
 from app.infrastructure.providers import EncryptedProviderCatalogWorkflow
 from app.infrastructure.pull_requests import (
     SqlAlchemyGitHubMergeWorkflow,
@@ -117,6 +118,12 @@ def get_agent_configuration_workflow(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> SqlAlchemyAgentConfigurationWorkflow:
     return SqlAlchemyAgentConfigurationWorkflow(session)
+
+
+def get_workflow_designer(
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> SqlAlchemyWorkflowDesigner:
+    return SqlAlchemyWorkflowDesigner(session)
 
 
 def get_integration_discovery_workflow(

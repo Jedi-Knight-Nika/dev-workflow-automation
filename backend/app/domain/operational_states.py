@@ -17,6 +17,7 @@ class JobRole(StrEnum):
     THINKER = "THINKER"
     EXECUTOR = "EXECUTOR"
     REVIEWER = "REVIEWER"
+    TESTER = "TESTER"
 
 
 class IntegrationStatus(StrEnum):

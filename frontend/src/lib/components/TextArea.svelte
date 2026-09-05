@@ -6,6 +6,7 @@
     placeholder = '',
     required = false,
     rows,
+    oninput,
     class: extraClass = ''
   }: {
     value?: string;
@@ -14,6 +15,7 @@
     placeholder?: string;
     required?: boolean;
     rows?: number;
+    oninput?: (event: Event) => void;
     class?: string;
   } = $props();
 </script>
@@ -25,5 +27,6 @@
   {required}
   {rows}
   bind:value
+  {oninput}
   class="border-line w-full resize-y rounded-md border bg-input p-3 text-heading outline-none focus:border-brand {extraClass}"
 ></textarea>

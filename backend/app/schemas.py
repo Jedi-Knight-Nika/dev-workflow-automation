@@ -167,6 +167,45 @@ class AgentConfigRead(AgentConfigUpdate):
     last_model: str | None = None
 
 
+class AgentKnowledgeCreate(BaseModel):
+    title: str = Field(min_length=1, max_length=255)
+    content: str = Field(min_length=20, max_length=500_000)
+
+
+class AgentKnowledgeRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    role: AgentRole
+    title: str
+    chunk_count: int
+    created_at: datetime
+
+
+class WorkflowNodeRead(BaseModel):
+    id: uuid.UUID
+    role: str
+    label: str = Field(min_length=1, max_length=100)
+    position_x: float
+    position_y: float
+    enabled: bool = True
+    activation_policy: str = "any"
+    batch_window_seconds: int = Field(default=0, ge=0, le=300)
+
+
+class WorkflowEdgeRead(BaseModel):
+    id: uuid.UUID
+    source_node_id: uuid.UUID
+    target_node_id: uuid.UUID
+    outcome: str = "success"
+    required: bool = True
+
+
+class WorkflowGraphRead(BaseModel):
+    version: int = Field(ge=0)
+    nodes: list[WorkflowNodeRead]
+    edges: list[WorkflowEdgeRead]
+
+
 class ProviderModelRead(BaseModel):
     id: str
     display_name: str

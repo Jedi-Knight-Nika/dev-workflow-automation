@@ -1,5 +1,10 @@
 import { api } from '$lib/api';
-import type { Integration, LinearWorkflowState, WebhookHealth } from '$lib/types';
+import type {
+  GitHubInstallationAccount,
+  Integration,
+  LinearWorkflowState,
+  WebhookHealth
+} from '$lib/types';
 
 export type SaveIntegrationInput = {
   provider_type: string;
@@ -26,12 +31,20 @@ export function saveIntegration(
   });
 }
 
-export function testIntegration(providerName: string): Promise<unknown> {
-  return api(`/integrations/${providerName}/test`, { method: 'POST' });
+export function testIntegration(providerName: string): Promise<Integration> {
+  return api<Integration>(`/integrations/${providerName}/test`, { method: 'POST' });
 }
 
 export function getGithubAppInstallUrl(): Promise<{ url: string }> {
   return api<{ url: string }>('/github/app/install-url');
+}
+
+export function getGithubAppManageUrl(): Promise<{ url: string }> {
+  return api<{ url: string }>('/github/app/manage-url');
+}
+
+export function getGithubInstallationAccount(): Promise<GitHubInstallationAccount> {
+  return api<GitHubInstallationAccount>('/github/app/account');
 }
 
 export function listLinearWorkflowStates(): Promise<LinearWorkflowState[]> {

@@ -6,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import IndexStatus, Job, JobRole, Repository, ReviewFinding, Task
+from app.infrastructure.agent_knowledge import search_agent_knowledge
 from app.infrastructure.git.workspaces import run_git
 from app.infrastructure.indexing import semantic_search
 from app.infrastructure.workers.executor import repository_context
@@ -42,9 +43,15 @@ def fit_context(context: dict[str, Any], limit: int) -> dict[str, Any]:
 
 
 class ContextCompiler:
-    def __init__(self, session: AsyncSession, max_chars: int = DEFAULT_CONTEXT_CHARS) -> None:
+    def __init__(
+        self,
+        session: AsyncSession,
+        max_chars: int = DEFAULT_CONTEXT_CHARS,
+        include_repository_knowledge: bool = True,
+    ) -> None:
         self.session = session
         self.max_chars = max_chars
+        self.include_repository_knowledge = include_repository_knowledge
 
     def _base(self, task: Task, job: Job) -> dict[str, Any]:
         return {
@@ -59,11 +66,26 @@ class ContextCompiler:
             "job": {"id": str(job.id), "action": job.action, "payload": job.payload},
         }
 
-    async def _knowledge(self, task: Task, repository: Repository | None) -> list[dict[str, Any]]:
-        if repository is None or repository.index_status != IndexStatus.READY:
-            return []
-        rows = await semantic_search(
-            self.session, repository.id, f"{task.title}\n{task.description}", limit=8
+    async def _knowledge(
+        self, task: Task, repository: Repository | None, role: JobRole
+    ) -> list[dict[str, Any]]:
+        query = f"{task.title}\n{task.description}"
+        rows: list[dict[str, Any]] = []
+        if (
+            self.include_repository_knowledge
+            and repository is not None
+            and repository.index_status == IndexStatus.READY
+        ):
+            rows.extend(await semantic_search(self.session, repository.id, query, limit=8))
+        manual = await search_agent_knowledge(self.session, role, query, limit=6)
+        rows.extend(
+            {
+                "file_path": f"manual://{row['source_id']}",
+                "chunk_index": row["chunk_index"],
+                "content": row["content"],
+                "score": row["score"],
+            }
+            for row in manual
         )
         unique: dict[tuple[str, int, str], dict[str, Any]] = {}
         for row in rows:
@@ -106,13 +128,15 @@ class ContextCompiler:
         ]
 
     async def compile_for_intake(self, task: Task, job: Job) -> dict[str, Any]:
-        return fit_context(self._base(task, job), self.max_chars)
+        context = self._base(task, job)
+        context["retrieved_knowledge"] = await self._knowledge(task, None, JobRole.INTAKE)
+        return fit_context(context, self.max_chars)
 
     async def compile_for_thinker(
         self, task: Task, job: Job, repository: Repository | None
     ) -> dict[str, Any]:
         context = self._base(task, job)
-        context["retrieved_knowledge"] = await self._knowledge(task, repository)
+        context["retrieved_knowledge"] = await self._knowledge(task, repository, JobRole.THINKER)
         return fit_context(context, self.max_chars)
 
     async def compile_for_executor(
@@ -120,7 +144,7 @@ class ContextCompiler:
     ) -> dict[str, Any]:
         context = self._base(task, job)
         context["technical_plan"] = await self._plan(task)
-        context["retrieved_knowledge"] = await self._knowledge(task, repository)
+        context["retrieved_knowledge"] = await self._knowledge(task, repository, JobRole.EXECUTOR)
         context["open_findings"] = await self._findings(task)
         context["repository"] = {
             "branch": task.branch_name,
@@ -134,6 +158,7 @@ class ContextCompiler:
     ) -> dict[str, Any]:
         context = self._base(task, job)
         context["technical_plan"] = await self._plan(task)
+        context["retrieved_knowledge"] = await self._knowledge(task, repository, JobRole.REVIEWER)
         context["open_findings"] = await self._findings(task)
         context["repository"] = {
             "branch": task.branch_name,

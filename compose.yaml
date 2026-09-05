@@ -24,7 +24,11 @@ services:
       DATABASE_URL_SYNC: ${DATABASE_URL_SYNC:-postgresql+psycopg://engineering_worker:change-me@postgres:5432/engineering_worker}
       APP_SECRET_KEY: ${APP_SECRET_KEY:-development-only-secret-change-me}
       GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-}
-      GITHUB_APP_RETURN_URL: ${GITHUB_APP_RETURN_URL:-http://localhost:3000/integrations}
+      GITHUB_APP_SLUG: ${GITHUB_APP_SLUG:-}
+      GITHUB_APP_ID: ${GITHUB_APP_ID:-}
+      GITHUB_APP_PRIVATE_KEY: ${GITHUB_APP_PRIVATE_KEY:-}
+      GITHUB_APP_PRIVATE_KEY_FILE: /run/secrets/github_app_private_key
+      GITHUB_APP_RETURN_URL: ${GITHUB_APP_RETURN_URL:-http://localhost:3000/repositories}
       LINEAR_WEBHOOK_SECRET: ${LINEAR_WEBHOOK_SECRET:-}
       WORKSPACE_ROOT: /data/workspaces
       SCHEDULER_ENABLED: "false"
@@ -45,6 +49,7 @@ services:
         condition: service_healthy
     volumes:
       - workspaces:/data/workspaces
+      - ${GITHUB_APP_PRIVATE_KEY_FILE_HOST:-./github-app.private-key.pem}:/run/secrets/github_app_private_key:ro
     ports:
       - "8000:8000"
     healthcheck:

@@ -90,3 +90,8 @@ class SqlAlchemyRepositoryManagementWorkflow:
         item.index_status, item.index_error = IndexStatus.QUEUED, None
         await self._session.commit()
         return await self._view(item)
+
+    async def delete(self, repository_id: uuid.UUID) -> None:
+        item = await self._locked(repository_id)
+        await self._session.delete(item)
+        await self._session.commit()

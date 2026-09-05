@@ -2,7 +2,7 @@ export const NAV_ITEMS = [
   { href: '/', label: 'Dashboard' },
   { href: '/tasks', label: 'Tasks' },
   { href: '/repositories', label: 'Repositories' },
-  { href: '/agents', label: 'Agents' },
+  { href: '/agents', label: 'Workflow' },
   { href: '/integrations', label: 'Integrations' },
   { href: '/settings', label: 'Settings' }
 ] as const;

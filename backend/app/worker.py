@@ -42,6 +42,7 @@ ROLE_INSTRUCTIONS = {
     "THINKER": "Act as the technical planning agent. Return concise JSON with result (PLAN_READY, NEEDS_CONTEXT, or NEEDS_HUMAN), goal, targets, ordered_steps, constraints, required_tests, risks, acceptance_criteria, reason, and questions. PLAN_READY requires a concrete goal, steps, and acceptance criteria. NEEDS_CONTEXT requires a reason and precise questions. NEEDS_HUMAN requires a reason. Escalate ambiguity instead of inventing requirements. Do not modify code.",
     "EXECUTOR": "Act as the implementation agent. Return only JSON matching: {result, summary, files: [{path, content}], delete_files: [], plan_mismatch, reason}. result must be IMPLEMENTED, PLAN_MISMATCH, BLOCKED, NEEDS_REPLAN, or NEEDS_HUMAN. Only IMPLEMENTED may contain file changes. PLAN_MISMATCH and NEEDS_REPLAN require plan_mismatch details; BLOCKED and NEEDS_HUMAN require a reason. Supply complete file contents. Modify only files needed for the task; never include secrets, generated dependencies, lockfiles unless necessary, or paths outside the repository.",
     "REVIEWER": "Act as an independent code reviewer. Inspect the supplied task, plan, and actual Git diff. Return only JSON matching {result, summary, findings: [{severity, path, line, message}], reason}. result must be PASS, FAIL_ACTIONABLE, FAIL_ARCHITECTURAL, UNCERTAIN, or NEEDS_HUMAN. PASS has no findings. Failure outcomes require concrete findings. UNCERTAIN and NEEDS_HUMAN require a reason. Report only evidenced correctness, security, architectural, regression, or missing-test problems; do not invent evidence.",
+    "TESTER": "Act as an independent verification agent. Evaluate the supplied changes and test evidence. Return JSON with result PASS, FAIL_ACTIONABLE, UNCERTAIN, or NEEDS_HUMAN; a concise summary; concrete findings; and reason when blocked or uncertain. Never claim a command ran unless its captured result is supplied.",
 }
 
 
@@ -152,7 +153,12 @@ async def run(job_id: uuid.UUID) -> WorkerResult:
         max_context_chars = (
             int(configured_limit) if isinstance(configured_limit, (int, str)) else 160_000
         )
-        compiler = ContextCompiler(session, max_context_chars)
+        use_repository_knowledge = config.configuration.get("use_repository_knowledge", True)
+        compiler = ContextCompiler(
+            session,
+            max_context_chars,
+            include_repository_knowledge=use_repository_knowledge is not False,
+        )
         if job.role == JobRole.INTAKE:
             prompt_data = await compiler.compile_for_intake(task, job)
         elif job.role == JobRole.THINKER:
@@ -171,7 +177,10 @@ async def run(job_id: uuid.UUID) -> WorkerResult:
                 provider,
                 ProviderRequest(
                     model=config.model,
-                    system=ROLE_INSTRUCTIONS[job.role.value],
+                    system=str(
+                        config.configuration.get("system_prompt")
+                        or ROLE_INSTRUCTIONS[job.role.value]
+                    ),
                     prompt=prompt,
                 ),
                 job.role,

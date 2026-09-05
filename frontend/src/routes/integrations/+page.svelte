@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { resolve } from '$app/paths';
   import PageHeader from '$lib/components/PageHeader.svelte';
   import Button from '$lib/components/Button.svelte';
   import ErrorBanner from '$lib/components/ErrorBanner.svelte';
@@ -7,15 +8,14 @@
     saveIntegration,
     testIntegration,
     getGithubAppInstallUrl,
+    getGithubInstallationAccount,
     listLinearWorkflowStates
   } from '$lib/services/integrations';
   import { integrationsResource, webhookHealthResource } from '$lib/stores/integrations.svelte';
   import { repositoriesResource } from '$lib/stores/repositories.svelte';
-  import GithubAppFields from '$lib/components/integrations/GithubAppFields.svelte';
   import LinearWorkflowFields from '$lib/components/integrations/LinearWorkflowFields.svelte';
   import TextField from '$lib/components/TextField.svelte';
-  import Select from '$lib/components/Select.svelte';
-  import type { LinearWorkflowState } from '$lib/types';
+  import type { GitHubInstallationAccount, LinearWorkflowState } from '$lib/types';
   const providers = [
     { name: 'github', type: 'source_control', label: 'GitHub', active: true },
     { name: 'linear', type: 'task_management', label: 'Linear', active: true },
@@ -41,13 +41,17 @@
   let doneStateId = '';
   let linearStates: LinearWorkflowState[] = [];
   let loadingLinearStates = false;
-  let testing = '';
-  let githubAuthType = 'token';
-  let githubAppSlug = '';
-  let githubAppId = '';
-  let githubInstallationId = '';
-  let githubPrivateKey = '';
+  let refreshingStatuses = false;
+  let statusesRefreshedAt: Date | null = null;
   let registryUrl = '';
+  let githubAccount: GitHubInstallationAccount | null = null;
+  async function loadGithubAccount() {
+    try {
+      githubAccount = await getGithubInstallationAccount();
+    } catch {
+      githubAccount = null;
+    }
+  }
   async function installGithubApp() {
     error = '';
     try {
@@ -61,12 +65,16 @@
     integrationsResource.load();
     webhookHealthResource.load();
     repositoriesResource.load();
+    loadGithubAccount();
   });
   function status(name: string) {
     return (
       integrationsResource.data.find((item) => item.provider_name === name)?.status ||
       'DISCONNECTED'
     );
+  }
+  function integration(name: string) {
+    return integrationsResource.data.find((item) => item.provider_name === name);
   }
   function deliveryHealth(name: string) {
     return webhookHealthResource.data.find((item) => item.provider === name);
@@ -75,15 +83,6 @@
     saving = true;
     error = '';
     try {
-      const githubAppCredential =
-        provider.name === 'github' && githubAuthType === 'github_app' && githubPrivateKey
-          ? JSON.stringify({
-              auth_type: 'github_app',
-              app_id: githubAppId,
-              installation_id: githubInstallationId,
-              private_key: githubPrivateKey
-            })
-          : null;
       await saveIntegration(provider.name, {
         provider_type: provider.type,
         status: 'CONFIGURED',
@@ -99,15 +98,14 @@
                 ready_for_testing_state_id: readyForTestingStateId || null,
                 done_state_id: doneStateId || null
               }
-            : provider.name === 'github'
-              ? { auth_type: githubAuthType, app_slug: githubAppSlug || null }
-              : provider.name === 'npm_registry'
-                ? { registry_url: registryUrl || null }
-                : provider.name === 'pypi_registry'
-                  ? { index_url: registryUrl || null }
-                  : {},
-        credential: githubAppCredential || credential || null
+            : provider.name === 'npm_registry'
+              ? { registry_url: registryUrl || null }
+              : provider.name === 'pypi_registry'
+                ? { index_url: registryUrl || null }
+                : {},
+        credential: credential || null
       });
+      await testIntegration(provider.name);
       credential = '';
       editing = '';
       await integrationsResource.refresh();
@@ -151,16 +149,24 @@
       loadingLinearStates = false;
     }
   }
-  async function testConnection(providerName: string) {
-    testing = providerName;
+  async function refreshStatuses() {
+    refreshingStatuses = true;
     error = '';
     try {
-      await testIntegration(providerName);
-      await integrationsResource.refresh();
-    } catch (cause) {
-      error = String(cause);
+      const configured = integrationsResource.data.filter((item) => item.has_credentials);
+      const results = await Promise.allSettled(
+        configured.map((item) => testIntegration(item.provider_name))
+      );
+      await Promise.all([
+        integrationsResource.refresh(),
+        webhookHealthResource.refresh(),
+        loadGithubAccount()
+      ]);
+      statusesRefreshedAt = new Date();
+      const rejected = results.filter((result) => result.status === 'rejected');
+      if (rejected.length) error = `${rejected.length} connection checks could not be completed.`;
     } finally {
-      testing = '';
+      refreshingStatuses = false;
     }
   }
 </script>
@@ -175,6 +181,17 @@
     message={error || integrationsResource.error || webhookHealthResource.error}
     class="mb-4"
   />
+  <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
+    <p class="text-muted text-xs">
+      Statuses are tested automatically after initial configuration.
+      {#if statusesRefreshedAt}
+        Last refreshed {statusesRefreshedAt.toLocaleTimeString()}.
+      {/if}
+    </p>
+    <Button onclick={refreshStatuses} disabled={refreshingStatuses}>
+      {refreshingStatuses ? 'Checking connections…' : 'Refresh statuses'}
+    </Button>
+  </div>
   <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
     {#each providers as provider, index (provider.name)}<article
         class="border-line bg-panel rounded-xl border p-5 card-hover motion-safe:animate-fade-in-up"
@@ -184,6 +201,25 @@
           {provider.type.replaceAll('_', ' ')}
         </p>
         <h2 class="my-2 text-xl font-semibold">{provider.label}</h2>
+        {#if provider.name === 'github'}
+          <p class="text-muted mb-3 text-xs">
+            Authenticate GitHub first, then choose exactly which repositories the AI may access.
+          </p>
+          {#if githubAccount}
+            <button
+              type="button"
+              class="border-line bg-panel-alt mb-3 flex items-center gap-3 rounded-lg border p-3 hover:border-brand"
+              onclick={() =>
+                window.open(githubAccount?.profile_url, '_blank', 'noopener,noreferrer')}
+            >
+              <img class="h-9 w-9 rounded-full" src={githubAccount.avatar_url} alt="" />
+              <span>
+                <strong class="block text-sm">@{githubAccount.login}</strong>
+                <span class="text-muted text-[10px]">{githubAccount.account_type} account</span>
+              </span>
+            </button>
+          {/if}
+        {/if}
         {#if deliveryHealth(provider.name)}
           {@const health = deliveryHealth(provider.name)!}
           <div
@@ -198,7 +234,7 @@
             <p class="mb-3 text-xs text-danger">Last delivery error: {health.last_error}</p>
           {/if}
         {/if}
-        {#if editing === provider.name}
+        {#if editing === provider.name && provider.name !== 'github'}
           <form
             class="mt-4"
             onsubmit={(event) => {
@@ -206,42 +242,21 @@
               save(provider);
             }}
           >
-            {#if provider.name === 'github'}
-              <label class="text-muted mb-1.5 block text-xs" for={`auth-type-${provider.name}`}
-                >Authentication</label
-              >
-              <Select id={`auth-type-${provider.name}`} bind:value={githubAuthType} class="mb-3">
-                <option value="token">Personal access token</option>
-                <option value="github_app">GitHub App installation</option>
-              </Select>
-            {/if}
-            {#if provider.name !== 'github' || githubAuthType === 'token'}
-              <TextField
-                id={`credential-${provider.name}`}
-                label={`API key or token ${
-                  integrationsResource.data.find((item) => item.provider_name === provider.name)
-                    ?.has_credentials
-                    ? '(leave blank to keep existing)'
-                    : ''
-                }`}
-                type="password"
-                bind:value={credential}
-                autocomplete="off"
-                required={!integrationsResource.data.find(
-                  (item) => item.provider_name === provider.name
-                )?.has_credentials}
-              />
-            {:else}
-              <GithubAppFields
-                bind:appSlug={githubAppSlug}
-                bind:appId={githubAppId}
-                bind:installationId={githubInstallationId}
-                bind:privateKey={githubPrivateKey}
-                hasCredentials={!!integrationsResource.data.find(
-                  (item) => item.provider_name === 'github'
-                )?.has_credentials}
-              />
-            {/if}
+            <TextField
+              id={`credential-${provider.name}`}
+              label={`API key or token ${
+                integrationsResource.data.find((item) => item.provider_name === provider.name)
+                  ?.has_credentials
+                  ? '(leave blank to keep existing)'
+                  : ''
+              }`}
+              type="password"
+              bind:value={credential}
+              autocomplete="off"
+              required={!integrationsResource.data.find(
+                (item) => item.provider_name === provider.name
+              )?.has_credentials}
+            />
             {#if provider.name === 'linear'}
               <LinearWorkflowFields
                 bind:triggerLabel
@@ -296,6 +311,15 @@
               ?.last_error}
           </p>
         {/if}
+        {#if integration(provider.name)?.has_credentials && status(provider.name) !== 'DISCONNECTED'}
+          <p class="text-muted mt-2 text-[10px]">
+            {status(provider.name) === 'CONNECTED'
+              ? 'Credentials verified successfully.'
+              : status(provider.name) === 'ERROR'
+                ? 'Credential verification failed.'
+                : 'Credentials saved; verification pending.'}
+          </p>
+        {/if}
         <div class="mt-6 flex flex-wrap items-center justify-between gap-2">
           <span
             class="font-mono text-[10px] {status(provider.name) === 'CONNECTED'
@@ -303,40 +327,43 @@
               : 'text-muted'}">{provider.active ? status(provider.name) : 'COMING SOON'}</span
           >
           <div class="flex flex-wrap gap-2">
-            {#if provider.name === 'github' && integrationsResource.data.find((item) => item.provider_name === 'github')?.has_credentials && integrationsResource.data.find((item) => item.provider_name === 'github')?.configuration?.auth_type === 'github_app'}
-              <Button onclick={installGithubApp}>Install app</Button>
+            {#if provider.name === 'github'}
+              <Button variant="primary" onclick={installGithubApp}>
+                {status('github') === 'CONNECTED' ? 'Reconnect GitHub' : 'Connect GitHub'}
+              </Button>
             {/if}
-            {#if provider.active && integrationsResource.data.find((item) => item.provider_name === provider.name)?.has_credentials}
-              <Button
-                disabled={testing === provider.name}
-                onclick={() => testConnection(provider.name)}
-                >{testing === provider.name ? 'Testing…' : 'Test'}</Button
+            {#if provider.name === 'github' && status('github') === 'CONNECTED'}
+              <a
+                class="border-line rounded-lg border px-3 py-2 text-xs text-muted hover:border-brand hover:text-brand"
+                href={resolve('/repositories')}
               >
+                Choose repositories
+              </a>
             {/if}
-            <Button
-              disabled={!provider.active}
-              onclick={() => {
-                editing = provider.name;
-                credential = '';
-                const existing = integrationsResource.data.find(
-                  (item) => item.provider_name === provider.name
-                )?.configuration;
-                triggerLabel = String(existing?.trigger_label || 'AI Ready');
-                repositoryId = String(existing?.repository_id || '');
-                inReviewStateId = String(existing?.in_review_state_id || '');
-                readyForTestingStateId = String(existing?.ready_for_testing_state_id || '');
-                todoStateId = String(existing?.todo_state_id || '');
-                inProgressStateId = String(existing?.in_progress_state_id || '');
-                blockedStateId = String(existing?.blocked_state_id || '');
-                doneStateId = String(existing?.done_state_id || '');
-                githubAuthType = String(existing?.auth_type || 'token');
-                githubAppSlug = String(existing?.app_slug || '');
-                githubAppId = '';
-                githubInstallationId = '';
-                githubPrivateKey = '';
-                registryUrl = String(existing?.registry_url || existing?.index_url || '');
-              }}>{status(provider.name) === 'DISCONNECTED' ? 'Configure' : 'Update'}</Button
-            >
+            {#if provider.name !== 'github'}<Button
+                disabled={!provider.active}
+                onclick={() => {
+                  editing = provider.name;
+                  credential = '';
+                  const existing = integrationsResource.data.find(
+                    (item) => item.provider_name === provider.name
+                  )?.configuration;
+                  triggerLabel = String(existing?.trigger_label || 'AI Ready');
+                  repositoryId = String(existing?.repository_id || '');
+                  inReviewStateId = String(existing?.in_review_state_id || '');
+                  readyForTestingStateId = String(existing?.ready_for_testing_state_id || '');
+                  todoStateId = String(existing?.todo_state_id || '');
+                  inProgressStateId = String(existing?.in_progress_state_id || '');
+                  blockedStateId = String(existing?.blocked_state_id || '');
+                  doneStateId = String(existing?.done_state_id || '');
+                  registryUrl = String(existing?.registry_url || existing?.index_url || '');
+                }}
+                >{provider.name === 'github' && status(provider.name) === 'DISCONNECTED'
+                  ? 'Connect GitHub'
+                  : status(provider.name) === 'DISCONNECTED'
+                    ? 'Configure'
+                    : 'Update'}</Button
+              >{/if}
           </div>
         </div>
       </article>{/each}

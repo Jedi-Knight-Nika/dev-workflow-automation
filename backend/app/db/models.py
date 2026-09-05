@@ -157,6 +157,78 @@ class AgentConfig(Base):
     )
 
 
+class AgentKnowledgeSource(Base):
+    __tablename__ = "agent_knowledge_sources"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    role: Mapped[JobRole] = mapped_column(Enum(JobRole))
+    title: Mapped[str] = mapped_column(String(255))
+    content: Mapped[str] = mapped_column(Text)
+    chunk_count: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class AgentKnowledgeChunk(Base):
+    __tablename__ = "agent_knowledge_chunks"
+    __table_args__ = (Index("ix_agent_knowledge_chunks_role", "role"),)
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    source_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("agent_knowledge_sources.id", ondelete="CASCADE")
+    )
+    role: Mapped[JobRole] = mapped_column(Enum(JobRole))
+    chunk_index: Mapped[int] = mapped_column(Integer)
+    content: Mapped[str] = mapped_column(Text)
+    embedding: Mapped[str] = mapped_column(Text)
+
+
+class WorkflowDefinition(Base):
+    __tablename__ = "workflow_definitions"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+
+class WorkflowNode(Base):
+    __tablename__ = "workflow_nodes"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    workflow_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workflow_definitions.id", ondelete="CASCADE")
+    )
+    role: Mapped[str] = mapped_column(String(30))
+    label: Mapped[str] = mapped_column(String(100))
+    position_x: Mapped[float] = mapped_column(Numeric(12, 3))
+    position_y: Mapped[float] = mapped_column(Numeric(12, 3))
+    enabled: Mapped[bool] = mapped_column(default=True)
+    activation_policy: Mapped[str] = mapped_column(String(20), default="any")
+    batch_window_seconds: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class WorkflowEdge(Base):
+    __tablename__ = "workflow_edges"
+    __table_args__ = (
+        UniqueConstraint(
+            "workflow_id",
+            "source_node_id",
+            "target_node_id",
+            "outcome",
+            name="uq_workflow_edge_route",
+        ),
+    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    workflow_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workflow_definitions.id", ondelete="CASCADE")
+    )
+    source_node_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workflow_nodes.id", ondelete="CASCADE")
+    )
+    target_node_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workflow_nodes.id", ondelete="CASCADE")
+    )
+    outcome: Mapped[str] = mapped_column(String(30), default="success")
+    required: Mapped[bool] = mapped_column(default=True)
+
+
 class WorkerRun(Base):
     __tablename__ = "worker_runs"
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)

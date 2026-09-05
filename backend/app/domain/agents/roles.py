@@ -6,3 +6,4 @@ class AgentRole(StrEnum):
     THINKER = "THINKER"
     EXECUTOR = "EXECUTOR"
     REVIEWER = "REVIEWER"
+    TESTER = "TESTER"

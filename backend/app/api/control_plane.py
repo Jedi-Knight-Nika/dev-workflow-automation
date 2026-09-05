@@ -1,8 +1,11 @@
 import uuid
+from dataclasses import asdict
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import RedirectResponse
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.application.design_workflow import DesignWorkflow
 from app.application.discover_integrations import DiscoverIntegrations
 from app.application.discover_provider_catalog import DiscoverProviderCatalog
 from app.application.manage_agents import ManageAgents
@@ -22,6 +25,7 @@ from app.application.ports.repository_management import (
     ManagedRepositoryConflict,
     ManagedRepositoryNotFound,
 )
+from app.application.ports.workflow_designer import WorkflowVersionConflict
 from app.application.query_workers import QueryWorkers
 from app.application.search_knowledge import SearchKnowledge
 from app.bootstrap.dependencies import (
@@ -34,9 +38,18 @@ from app.bootstrap.dependencies import (
     get_provider_catalog_workflow,
     get_repository_management_workflow,
     get_worker_queries,
+    get_workflow_designer,
 )
 from app.config import Settings, get_settings
+from app.db.session import get_session
 from app.domain.agents import AgentRole
+from app.domain.operational_states import JobRole
+from app.domain.workflows import WorkflowEdgeData, WorkflowGraphData, WorkflowNodeData
+from app.infrastructure.agent_knowledge import (
+    create_agent_knowledge,
+    delete_agent_knowledge,
+    list_agent_knowledge,
+)
 from app.infrastructure.github_installation import EncryptedGitHubInstallationWorkflow
 from app.infrastructure.integration_discovery import EncryptedIntegrationDiscoveryWorkflow
 from app.infrastructure.integration_management import EncryptedIntegrationManagementWorkflow
@@ -47,10 +60,13 @@ from app.infrastructure.persistence.repository_management import (
     SqlAlchemyRepositoryManagementWorkflow,
 )
 from app.infrastructure.persistence.worker_queries import SqlAlchemyWorkerQueries
+from app.infrastructure.persistence.workflow_designer import SqlAlchemyWorkflowDesigner
 from app.infrastructure.providers import EncryptedProviderCatalogWorkflow
 from app.schemas import (
     AgentConfigRead,
     AgentConfigUpdate,
+    AgentKnowledgeCreate,
+    AgentKnowledgeRead,
     DashboardActivityRead,
     DiscoveredRepository,
     IntegrationRead,
@@ -62,6 +78,7 @@ from app.schemas import (
     RepositoryRead,
     WebhookHealthRead,
     WorkerNodeRead,
+    WorkflowGraphRead,
 )
 
 router = APIRouter(tags=["control-plane"])
@@ -136,6 +153,33 @@ async def github_install_url(
     except GitHubAppSlugInvalid as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return {"url": url}
+
+
+@router.get("/github/app/manage-url")
+async def github_manage_url(
+    workflow: EncryptedGitHubInstallationWorkflow = Depends(get_github_installation_workflow),
+) -> dict[str, str]:
+    try:
+        url = await ManageGitHubInstallation(workflow).manage_url()
+    except GitHubInstallationNotConfigured as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"url": url}
+
+
+@router.get("/github/app/account")
+async def github_installation_account(
+    workflow: EncryptedGitHubInstallationWorkflow = Depends(get_github_installation_workflow),
+) -> dict[str, str]:
+    try:
+        account = await ManageGitHubInstallation(workflow).account()
+    except GitHubInstallationNotConfigured as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {
+        "login": account.login,
+        "account_type": account.account_type,
+        "avatar_url": account.avatar_url,
+        "profile_url": account.profile_url,
+    }
 
 
 @router.get("/github/app/callback", response_model=None)
@@ -250,6 +294,17 @@ async def queue_repository_index(
     return RepositoryRead.model_validate(result, from_attributes=True)
 
 
+@router.delete("/repositories/{repository_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_repository(
+    repository_id: uuid.UUID,
+    workflow: SqlAlchemyRepositoryManagementWorkflow = Depends(get_repository_management_workflow),
+) -> None:
+    try:
+        await ManageRepositories(workflow).delete(repository_id)
+    except ManagedRepositoryNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
 @router.get("/repositories/{repository_id}/search", response_model=list[KnowledgeSearchResult])
 async def search_repository_knowledge(
     repository_id: uuid.UUID,
@@ -286,6 +341,93 @@ async def update_agent_config(
         AgentConfigCommand(role.value, body.enabled, body.provider, body.model, body.configuration)
     )
     return AgentConfigRead.model_validate(result, from_attributes=True)
+
+
+@router.get("/agents/{role}/knowledge", response_model=list[AgentKnowledgeRead])
+async def list_role_knowledge(
+    role: AgentRole, session: AsyncSession = Depends(get_session)
+) -> list[AgentKnowledgeRead]:
+    return [
+        AgentKnowledgeRead.model_validate(item, from_attributes=True)
+        for item in await list_agent_knowledge(session, JobRole(role.value))
+    ]
+
+
+@router.post("/agents/{role}/knowledge", response_model=AgentKnowledgeRead, status_code=201)
+async def add_role_knowledge(
+    role: AgentRole, body: AgentKnowledgeCreate, session: AsyncSession = Depends(get_session)
+) -> AgentKnowledgeRead:
+    try:
+        result = await create_agent_knowledge(
+            session, JobRole(role.value), body.title, body.content
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return AgentKnowledgeRead.model_validate(result, from_attributes=True)
+
+
+@router.delete("/agents/{role}/knowledge/{source_id}", status_code=204)
+async def remove_role_knowledge(
+    role: AgentRole, source_id: uuid.UUID, session: AsyncSession = Depends(get_session)
+) -> None:
+    if not await delete_agent_knowledge(session, JobRole(role.value), source_id):
+        raise HTTPException(status_code=404, detail="Agent knowledge source not found")
+
+
+def workflow_response(graph: WorkflowGraphData) -> WorkflowGraphRead:
+    return WorkflowGraphRead.model_validate(
+        {
+            "version": graph.version,
+            "nodes": [asdict(node) for node in graph.nodes],
+            "edges": [asdict(edge) for edge in graph.edges],
+        }
+    )
+
+
+@router.get("/workflow", response_model=WorkflowGraphRead)
+async def get_workflow(
+    designer: SqlAlchemyWorkflowDesigner = Depends(get_workflow_designer),
+) -> WorkflowGraphRead:
+    return workflow_response(await DesignWorkflow(designer).get())
+
+
+@router.put("/workflow", response_model=WorkflowGraphRead)
+async def replace_workflow(
+    body: WorkflowGraphRead,
+    designer: SqlAlchemyWorkflowDesigner = Depends(get_workflow_designer),
+) -> WorkflowGraphRead:
+    graph = WorkflowGraphData(
+        body.version,
+        tuple(
+            WorkflowNodeData(
+                str(node.id),
+                node.role,
+                node.label,
+                node.position_x,
+                node.position_y,
+                node.enabled,
+                node.activation_policy,
+                node.batch_window_seconds,
+            )
+            for node in body.nodes
+        ),
+        tuple(
+            WorkflowEdgeData(
+                str(edge.id),
+                str(edge.source_node_id),
+                str(edge.target_node_id),
+                edge.outcome,
+                edge.required,
+            )
+            for edge in body.edges
+        ),
+    )
+    try:
+        return workflow_response(await DesignWorkflow(designer).replace(graph))
+    except WorkflowVersionConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 from app.application.manage_github_installation import ManageGitHubInstallation

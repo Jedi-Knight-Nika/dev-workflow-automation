@@ -1,5 +1,5 @@
 import { api } from '$lib/api';
-import type { AgentConfig, ProviderCatalog } from '$lib/types';
+import type { AgentConfig, AgentKnowledge, ProviderCatalog, WorkflowGraph } from '$lib/types';
 
 export type SaveAgentInput = {
   enabled: boolean;
@@ -18,4 +18,33 @@ export function saveAgent(role: string, input: SaveAgentInput): Promise<AgentCon
 
 export function discoverProviderModels(provider: string): Promise<ProviderCatalog> {
   return api<ProviderCatalog>(`/providers/${provider}/catalog`);
+}
+
+export function listAgentKnowledge(role: string): Promise<AgentKnowledge[]> {
+  return api<AgentKnowledge[]>(`/agents/${role}/knowledge`);
+}
+
+export function addAgentKnowledge(
+  role: string,
+  input: { title: string; content: string }
+): Promise<AgentKnowledge> {
+  return api<AgentKnowledge>(`/agents/${role}/knowledge`, {
+    method: 'POST',
+    body: JSON.stringify(input)
+  });
+}
+
+export function deleteAgentKnowledge(role: string, id: string): Promise<void> {
+  return api<void>(`/agents/${role}/knowledge/${id}`, { method: 'DELETE' });
+}
+
+export function getWorkflow(): Promise<WorkflowGraph> {
+  return api<WorkflowGraph>('/workflow');
+}
+
+export function saveWorkflow(workflow: WorkflowGraph): Promise<WorkflowGraph> {
+  return api<WorkflowGraph>('/workflow', {
+    method: 'PUT',
+    body: JSON.stringify(workflow)
+  });
 }

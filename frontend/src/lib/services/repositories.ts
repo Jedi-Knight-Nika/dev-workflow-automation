@@ -30,6 +30,10 @@ export function setRepositoryEnabled(repositoryId: string, enabled: boolean): Pr
   return api(`/repositories/${repositoryId}/enabled?enabled=${enabled}`, { method: 'PATCH' });
 }
 
+export function deleteRepository(repositoryId: string): Promise<void> {
+  return api<void>(`/repositories/${repositoryId}`, { method: 'DELETE' });
+}
+
 export function searchRepositoryKnowledge(
   repositoryId: string,
   query: string

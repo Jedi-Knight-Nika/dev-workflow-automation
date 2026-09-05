@@ -57,6 +57,13 @@ export type Integration = {
   updated_at: string;
 };
 
+export type GitHubInstallationAccount = {
+  login: string;
+  account_type: string;
+  avatar_url: string;
+  profile_url: string;
+};
+
 export type WebhookHealth = {
   provider: string;
   pending: number;
@@ -83,6 +90,39 @@ export type AgentConfig = {
   last_duration_ms: number | null;
   last_provider: string | null;
   last_model: string | null;
+};
+
+export type AgentKnowledge = {
+  id: string;
+  role: string;
+  title: string;
+  chunk_count: number;
+  created_at: string;
+};
+
+export type WorkflowNode = {
+  id: string;
+  role: string;
+  label: string;
+  position_x: number;
+  position_y: number;
+  enabled: boolean;
+  activation_policy: string;
+  batch_window_seconds: number;
+};
+
+export type WorkflowEdge = {
+  id: string;
+  source_node_id: string;
+  target_node_id: string;
+  outcome: string;
+  required: boolean;
+};
+
+export type WorkflowGraph = {
+  version: number;
+  nodes: WorkflowNode[];
+  edges: WorkflowEdge[];
 };
 
 export type ProviderCatalog = {

@@ -4,13 +4,30 @@
   import Button from '$lib/components/Button.svelte';
   import ErrorBanner from '$lib/components/ErrorBanner.svelte';
   import Card from '$lib/components/Card.svelte';
-  import { listAgents, saveAgent, discoverProviderModels } from '$lib/services/agents';
-  import type { AgentConfig, ProviderCatalog } from '$lib/types';
+  import TextArea from '$lib/components/TextArea.svelte';
+  import WorkflowCanvas from '$lib/components/workflow/WorkflowCanvas.svelte';
+  import {
+    addAgentKnowledge,
+    deleteAgentKnowledge,
+    discoverProviderModels,
+    getWorkflow,
+    listAgentKnowledge,
+    listAgents,
+    saveAgent,
+    saveWorkflow
+  } from '$lib/services/agents';
+  import type { AgentConfig, AgentKnowledge, ProviderCatalog, WorkflowGraph } from '$lib/types';
   let agents: AgentConfig[] = [];
   let error = '';
   let saved = '';
   let catalogs: Record<string, ProviderCatalog> = {};
   let loadingProvider = '';
+  let selectedRole = 'INTAKE';
+  let knowledge: Record<string, AgentKnowledge[]> = {};
+  let knowledgeTitle = '';
+  let knowledgeContent = '';
+  let preparingKnowledge = false;
+  let workflow: WorkflowGraph | null = null;
   const number = new Intl.NumberFormat();
   const date = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' });
   function configuredNumber(agent: AgentConfig, key: string): number | '' {
@@ -21,8 +38,62 @@
     const value = (event.currentTarget as HTMLInputElement).value;
     agent.configuration[key] = value === '' ? null : Number(value);
   }
+  function configuredText(agent: AgentConfig, key: string) {
+    return typeof agent.configuration[key] === 'string' ? String(agent.configuration[key]) : '';
+  }
+  function setConfiguredText(agent: AgentConfig, key: string, value: string) {
+    agent.configuration[key] = value;
+  }
+  function repositoryKnowledgeEnabled(agent: AgentConfig) {
+    return agent.configuration.use_repository_knowledge !== false;
+  }
+  function setRepositoryKnowledge(agent: AgentConfig, event: Event) {
+    agent.configuration.use_repository_knowledge = (
+      event.currentTarget as HTMLInputElement
+    ).checked;
+  }
   async function load() {
-    agents = await listAgents();
+    [agents, workflow] = await Promise.all([listAgents(), getWorkflow()]);
+    const entries = await Promise.all(
+      agents.map(async (agent) => [agent.role, await listAgentKnowledge(agent.role)] as const)
+    );
+    knowledge = Object.fromEntries(entries);
+  }
+  async function persistWorkflow(graph: WorkflowGraph) {
+    try {
+      workflow = await saveWorkflow(graph);
+      saved = 'WORKFLOW';
+      setTimeout(() => (saved = ''), 1500);
+    } catch (cause) {
+      error = String(cause);
+      throw cause;
+    }
+  }
+  async function prepareKnowledge() {
+    if (!knowledgeTitle.trim() || !knowledgeContent.trim()) return;
+    preparingKnowledge = true;
+    error = '';
+    try {
+      const source = await addAgentKnowledge(selectedRole, {
+        title: knowledgeTitle,
+        content: knowledgeContent
+      });
+      knowledge[selectedRole] = [source, ...(knowledge[selectedRole] || [])];
+      knowledge = { ...knowledge };
+      knowledgeTitle = '';
+      knowledgeContent = '';
+    } catch (cause) {
+      error = String(cause);
+    } finally {
+      preparingKnowledge = false;
+    }
+  }
+  async function removeKnowledge(source: AgentKnowledge) {
+    await deleteAgentKnowledge(selectedRole, source.id);
+    knowledge[selectedRole] = (knowledge[selectedRole] || []).filter(
+      (item) => item.id !== source.id
+    );
+    knowledge = { ...knowledge };
   }
   async function save(agent: AgentConfig) {
     try {
@@ -60,14 +131,22 @@
 </script>
 
 <PageHeader
-  eyebrow="MODEL ROUTING"
-  title="Agents"
-  description="Choose the provider and model used by each specialized worker role."
+  eyebrow="WORKFLOW BUILDER"
+  title="Engineering workflow"
+  description="Configure the single pipeline, its AI workers, prompts, models, and knowledge access."
 />
 <main class="p-4 sm:p-6 md:p-10">
   <ErrorBanner message={error} class="mb-4" />
-  <div class="grid gap-4 lg:grid-cols-2">
-    {#each agents as agent, index (agent.role)}<Card
+  {#if workflow}
+    <WorkflowCanvas
+      {workflow}
+      {selectedRole}
+      onselect={(role) => (selectedRole = role)}
+      onsave={persistWorkflow}
+    />
+  {/if}
+  <div>
+    {#each agents.filter((item) => item.role === selectedRole) as agent, index (agent.role)}<Card
         hover
         class="motion-safe:animate-fade-in-up"
         style="animation-delay: {index * 60}ms"
@@ -140,6 +219,73 @@
               oninput={(event) => setConfiguredNumber(agent, 'output_cost_per_million', event)}
             /></label
           >
+        </div>
+        <div class="border-line mb-4 rounded-lg border p-4">
+          <div class="flex items-center justify-between gap-3">
+            <div>
+              <strong class="text-sm">Repository knowledge</strong>
+              <p class="text-muted text-[10px]">Retrieve relevant indexed code for this role.</p>
+            </div>
+            <input
+              type="checkbox"
+              checked={repositoryKnowledgeEnabled(agent)}
+              onchange={(event) => setRepositoryKnowledge(agent, event)}
+              aria-label={`Use repository knowledge for ${agent.role}`}
+            />
+          </div>
+        </div>
+        <TextArea
+          label="System prompt"
+          rows={8}
+          value={configuredText(agent, 'system_prompt')}
+          oninput={(event: Event) =>
+            setConfiguredText(
+              agent,
+              'system_prompt',
+              (event.currentTarget as HTMLTextAreaElement).value
+            )}
+          placeholder="Leave blank to use the safe built-in role prompt."
+          class="mb-4 font-mono text-xs"
+        />
+        <div class="border-line mb-4 rounded-lg border p-4">
+          <div class="mb-3">
+            <strong class="text-sm">Manual role knowledge</strong>
+            <p class="text-muted text-[10px]">
+              Text is chunked and vector-embedded for this role only. It is retrieved during runs.
+            </p>
+          </div>
+          <input
+            class="border-line mb-2 block w-full rounded-md border bg-input p-3 text-heading"
+            bind:value={knowledgeTitle}
+            placeholder="Knowledge title"
+          />
+          <TextArea
+            rows={6}
+            bind:value={knowledgeContent}
+            placeholder="Paste architecture rules, product context, examples, or operating instructions…"
+            class="mb-2 text-xs"
+          />
+          <Button
+            size="sm"
+            disabled={preparingKnowledge || knowledgeContent.trim().length < 20}
+            onclick={prepareKnowledge}
+          >
+            {preparingKnowledge ? 'Embedding…' : 'Embed knowledge'}
+          </Button>
+          {#if (knowledge[selectedRole] || []).length}
+            <div class="mt-3 space-y-2">
+              {#each knowledge[selectedRole] || [] as source (source.id)}
+                <div
+                  class="border-line flex items-center justify-between rounded border p-2 text-xs"
+                >
+                  <span><b>{source.title}</b> · {source.chunk_count} chunks</span>
+                  <Button size="sm" variant="ghost" onclick={() => removeKnowledge(source)}
+                    >Delete</Button
+                  >
+                </div>
+              {/each}
+            </div>
+          {/if}
         </div>
         <label class="text-muted mb-3 block text-xs"
           >Provider<select
