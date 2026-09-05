@@ -1,5 +1,6 @@
+import json
 import uuid
-from dataclasses import replace
+from dataclasses import asdict, replace
 from datetime import datetime
 
 from sqlalchemy import delete, select
@@ -7,7 +8,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.application.ports.model_validation import ModelValidationResult
 from app.application.ports.workflow_designer import WorkflowVersionConflict
-from app.db.models import AIAgent, Role, WorkflowDefinition, WorkflowEdge, WorkflowNode
+from app.db.models import (
+    AIAgent,
+    Role,
+    WorkflowDefinition,
+    WorkflowEdge,
+    WorkflowNode,
+    WorkflowRevision,
+)
 from app.domain.workflows import WorkflowEdgeData, WorkflowGraphData, WorkflowNodeData
 
 WORKFLOW_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
@@ -143,6 +151,7 @@ class SqlAlchemyWorkflowDesigner:
         await self._session.flush()
         definition.version += 1
         await self._add_graph(graph, definition.id)
+        self._add_revision(definition.id, definition.version, graph)
         await self._session.commit()
         return WorkflowGraphData(definition.version, graph.nodes, graph.edges)
 
@@ -177,7 +186,25 @@ class SqlAlchemyWorkflowDesigner:
         self._session.add(definition)
         await self._session.flush()
         await self._add_graph(graph, workflow_id)
+        self._add_revision(workflow_id, graph.version, graph)
         await self._session.commit()
+
+    def _add_revision(self, workflow_id: uuid.UUID, version: int, graph: WorkflowGraphData) -> None:
+        self._session.add(
+            WorkflowRevision(
+                workflow_id=workflow_id,
+                version=version,
+                graph={
+                    "version": version,
+                    "nodes": [
+                        json.loads(json.dumps(asdict(node), default=str)) for node in graph.nodes
+                    ],
+                    "edges": [
+                        json.loads(json.dumps(asdict(edge), default=str)) for edge in graph.edges
+                    ],
+                },
+            )
+        )
 
     async def _add_graph(self, graph: WorkflowGraphData, workflow_id: uuid.UUID) -> None:
         roles = {

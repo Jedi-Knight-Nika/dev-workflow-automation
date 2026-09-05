@@ -212,6 +212,22 @@ class WorkflowDefinition(Base):
     )
 
 
+class WorkflowRevision(Base):
+    """Immutable graph snapshot used to explain historical routing decisions."""
+
+    __tablename__ = "workflow_revisions"
+    __table_args__ = (
+        UniqueConstraint("workflow_id", "version", name="uq_workflow_revision_version"),
+    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    workflow_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workflow_definitions.id", ondelete="CASCADE")
+    )
+    version: Mapped[int] = mapped_column(Integer)
+    graph: Mapped[dict[str, Any]] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class WorkflowNode(Base):
     __tablename__ = "workflow_nodes"
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)

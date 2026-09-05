@@ -30,11 +30,13 @@ class SqlAlchemyTeamManagementWorkflow:
                 )
             ).all()
         )
-        return [await self._view(team) for team in teams]
+        return await self._views(teams)
 
     async def get(self, team_id: uuid.UUID) -> TeamView | None:
         team = await self._session.get(Team, team_id)
-        return None if team is None or team.archived_at else await self._view(team)
+        if team is None or team.archived_at:
+            return None
+        return (await self._views([team]))[0]
 
     async def create(self, command: SaveTeamCommand) -> TeamView:
         self._validate(command)
@@ -52,7 +54,7 @@ class SqlAlchemyTeamManagementWorkflow:
         except IntegrityError as exc:
             await self._session.rollback()
             raise TeamConflict("A team with this name already exists") from exc
-        return await self._view(team)
+        return (await self._views([team]))[0]
 
     async def update(self, team_id: uuid.UUID, command: SaveTeamCommand) -> TeamView:
         self._validate(command)
@@ -69,7 +71,7 @@ class SqlAlchemyTeamManagementWorkflow:
         except IntegrityError as exc:
             await self._session.rollback()
             raise TeamConflict("A team with this name already exists") from exc
-        return await self._view(team)
+        return (await self._views([team]))[0]
 
     async def archive(self, team_id: uuid.UUID) -> None:
         team = await self._session.get(Team, team_id)
@@ -205,44 +207,53 @@ class SqlAlchemyTeamManagementWorkflow:
         )
         return [self._assignment_view(item) for item in records]
 
-    async def _view(self, team: Team) -> TeamView:
-        counts = (
+    async def _views(self, teams: builtins.list[Team]) -> builtins.list[TeamView]:
+        if not teams:
+            return []
+        team_ids = [team.id for team in teams]
+        count_rows = (
             await self._session.execute(
                 select(
+                    TaskAssignment.team_id,
                     func.count().filter(TaskAssignment.status == "QUEUED"),
                     func.count().filter(TaskAssignment.status == "RUNNING"),
                     func.count().filter(TaskAssignment.status == "COMPLETED"),
-                ).where(TaskAssignment.team_id == team.id)
+                )
+                .where(TaskAssignment.team_id.in_(team_ids))
+                .group_by(TaskAssignment.team_id)
             )
-        ).one()
-        usage = (
+        ).all()
+        counts = {row[0]: (int(row[1]), int(row[2]), int(row[3])) for row in count_rows}
+        usage_rows = (
             await self._session.execute(
                 select(
+                    Task.team_id,
                     func.coalesce(func.sum(WorkerRun.input_tokens), 0),
                     func.coalesce(func.sum(WorkerRun.output_tokens), 0),
                     func.coalesce(func.sum(WorkerRun.estimated_cost_usd), 0),
                 )
-                .join(Job, Job.id == WorkerRun.job_id)
-                .join(Task, Task.id == Job.task_id)
-                .where(Task.team_id == team.id)
+                .join(Job, Job.task_id == Task.id)
+                .join(WorkerRun, WorkerRun.job_id == Job.id)
+                .where(Task.team_id.in_(team_ids))
+                .group_by(Task.team_id)
             )
-        ).one()
-        return TeamView(
-            team.id,
-            team.name,
-            team.description,
-            team.enabled,
-            team.max_concurrent_tasks,
-            tuple(uuid.UUID(value) for value in team.repository_ids or []),
-            int(counts[0]),
-            int(counts[1]),
-            int(counts[2]),
-            int(usage[0]),
-            int(usage[1]),
-            float(usage[2]),
-            team.created_at,
-            team.updated_at,
-        )
+        ).all()
+        usage = {row[0]: (int(row[1]), int(row[2]), float(row[3])) for row in usage_rows}
+        return [
+            TeamView(
+                team.id,
+                team.name,
+                team.description,
+                team.enabled,
+                team.max_concurrent_tasks,
+                tuple(uuid.UUID(value) for value in team.repository_ids or []),
+                *counts.get(team.id, (0, 0, 0)),
+                *usage.get(team.id, (0, 0, 0.0)),
+                team.created_at,
+                team.updated_at,
+            )
+            for team in teams
+        ]
 
     @staticmethod
     def _assignment_view(item: TaskAssignment) -> TaskAssignmentView:

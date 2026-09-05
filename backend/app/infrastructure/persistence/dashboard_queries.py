@@ -414,43 +414,51 @@ class SqlAlchemyDashboardQueries:
         return "WORKING" if queued else "IDLE"
 
     async def _history(self, start: datetime, days: int, *, usage: bool) -> list[TimeBucketView]:
-        result: list[TimeBucketView] = []
         first = start.replace(hour=0, minute=0, second=0, microsecond=0)
-        for offset in range(days):
-            day, end = first + timedelta(days=offset), first + timedelta(days=offset + 1)
-            if usage:
-                inputs, outputs = (
-                    await self._session.execute(
-                        select(
-                            func.coalesce(func.sum(WorkerRun.input_tokens), 0),
-                            func.coalesce(func.sum(WorkerRun.output_tokens), 0),
-                        ).where(WorkerRun.created_at >= day, WorkerRun.created_at < end)
+        if usage:
+            bucket = func.date_trunc("day", WorkerRun.created_at).label("bucket")
+            rows = (
+                await self._session.execute(
+                    select(
+                        bucket,
+                        func.coalesce(func.sum(WorkerRun.input_tokens), 0),
+                        func.coalesce(func.sum(WorkerRun.output_tokens), 0),
                     )
-                ).one()
-                result.append(
-                    TimeBucketView(
-                        day.date().isoformat(), input_tokens=int(inputs), output_tokens=int(outputs)
-                    )
+                    .where(WorkerRun.created_at >= first)
+                    .group_by(bucket)
                 )
-            else:
-                completed, failed, human = (
-                    await self._session.execute(
-                        select(
-                            func.sum(case((Task.state == TaskState.MERGED, 1), else_=0)),
-                            func.sum(case((Task.state == TaskState.FAILED, 1), else_=0)),
-                            func.sum(case((Task.manual_takeover.is_(True), 1), else_=0)),
-                        ).where(Task.updated_at >= day, Task.updated_at < end)
-                    )
-                ).one()
-                result.append(
-                    TimeBucketView(
-                        day.date().isoformat(),
-                        int(completed or 0),
-                        int(failed or 0),
-                        int(human or 0),
-                    )
+            ).all()
+            usage_values = {row[0].date(): (int(row[1]), int(row[2])) for row in rows}
+            return [
+                TimeBucketView(
+                    day.date().isoformat(),
+                    input_tokens=usage_values.get(day.date(), (0, 0))[0],
+                    output_tokens=usage_values.get(day.date(), (0, 0))[1],
                 )
-        return result
+                for offset in range(days)
+                if (day := first + timedelta(days=offset))
+            ]
+        bucket = func.date_trunc("day", Task.updated_at).label("bucket")
+        rows = (
+            await self._session.execute(
+                select(
+                    bucket,
+                    func.sum(case((Task.state == TaskState.MERGED, 1), else_=0)),
+                    func.sum(case((Task.state == TaskState.FAILED, 1), else_=0)),
+                    func.sum(case((Task.manual_takeover.is_(True), 1), else_=0)),
+                )
+                .where(Task.updated_at >= first)
+                .group_by(bucket)
+            )
+        ).all()
+        task_values = {
+            row[0].date(): (int(row[1] or 0), int(row[2] or 0), int(row[3] or 0)) for row in rows
+        }
+        return [
+            TimeBucketView(day.date().isoformat(), *task_values.get(day.date(), (0, 0, 0)))
+            for offset in range(days)
+            if (day := first + timedelta(days=offset))
+        ]
 
     async def _health(self, now: datetime) -> list[HealthCheckView]:
         checks = [HealthCheckView("Database", "HEALTHY", "Connected", now)]

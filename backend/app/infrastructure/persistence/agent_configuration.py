@@ -1,3 +1,6 @@
+import builtins
+from datetime import UTC, datetime
+
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -15,14 +18,17 @@ class SqlAlchemyAgentConfigurationWorkflow:
         existing = {config.role for config in configs}
         for role in JobRole:
             if role not in existing:
-                config = AgentConfig(role=role, provider="openai", model="", enabled=True)
-                self._session.add(config)
-                configs.append(config)
-        if len(existing) != len(JobRole):
-            await self._session.commit()
-        return [
-            await self._view(config) for config in sorted(configs, key=lambda item: item.role.value)
-        ]
+                configs.append(
+                    AgentConfig(
+                        role=role,
+                        provider="openai",
+                        model="",
+                        enabled=True,
+                        configuration={},
+                        updated_at=datetime.now(UTC),
+                    )
+                )
+        return await self._views(sorted(configs, key=lambda item: item.role.value))
 
     async def update(self, command: AgentConfigCommand) -> AgentView:
         role = JobRole(command.role)
@@ -36,61 +42,94 @@ class SqlAlchemyAgentConfigurationWorkflow:
         config.configuration = command.configuration
         await self._session.commit()
         await self._session.refresh(config)
-        return await self._view(config)
+        return (await self._views([config]))[0]
 
-    async def _view(self, config: AgentConfig) -> AgentView:
-        totals = (
-            await self._session.execute(
-                select(
-                    func.count(WorkerRun.id),
-                    func.coalesce(func.sum(WorkerRun.input_tokens), 0),
-                    func.coalesce(func.sum(WorkerRun.output_tokens), 0),
-                    func.coalesce(func.sum(WorkerRun.estimated_cost_usd), 0),
-                ).where(WorkerRun.role == config.role)
+    async def _views(self, configs: builtins.list[AgentConfig]) -> builtins.list[AgentView]:
+        roles = [config.role for config in configs]
+        totals = {
+            row[0]: row[1:]
+            for row in (
+                await self._session.execute(
+                    select(
+                        WorkerRun.role,
+                        func.count(WorkerRun.id),
+                        func.coalesce(func.sum(WorkerRun.input_tokens), 0),
+                        func.coalesce(func.sum(WorkerRun.output_tokens), 0),
+                        func.coalesce(func.sum(WorkerRun.estimated_cost_usd), 0),
+                    )
+                    .where(WorkerRun.role.in_(roles))
+                    .group_by(WorkerRun.role)
+                )
+            ).all()
+        }
+        latest_ranked = select(
+            WorkerRun.role,
+            WorkerRun.created_at,
+            WorkerRun.duration_ms,
+            WorkerRun.provider,
+            WorkerRun.model,
+            func.row_number()
+            .over(partition_by=WorkerRun.role, order_by=WorkerRun.created_at.desc())
+            .label("rank"),
+        ).subquery()
+        latest = {
+            row[0]: row[1:]
+            for row in (
+                await self._session.execute(select(latest_ranked).where(latest_ranked.c.rank == 1))
+            ).all()
+        }
+        active_ranked = (
+            select(
+                Job.role,
+                Job.task_id,
+                func.count(Job.id).over(partition_by=Job.role).label("active_count"),
+                func.row_number()
+                .over(partition_by=Job.role, order_by=Job.started_at.desc().nullslast())
+                .label("rank"),
             )
-        ).one()
-        latest = await self._session.scalar(
-            select(WorkerRun)
-            .where(WorkerRun.role == config.role)
-            .order_by(WorkerRun.created_at.desc())
-            .limit(1)
+            .where(Job.role.in_(roles), Job.state.in_([JobState.CLAIMED, JobState.RUNNING]))
+            .subquery()
         )
-        active_jobs = int(
-            await self._session.scalar(
-                select(func.count(Job.id)).where(
-                    Job.role == config.role, Job.state.in_([JobState.CLAIMED, JobState.RUNNING])
+        active = {
+            row[0]: row[1:]
+            for row in (
+                await self._session.execute(
+                    select(active_ranked, Task)
+                    .join(Task, Task.id == active_ranked.c.task_id)
+                    .where(active_ranked.c.rank == 1)
+                )
+            ).all()
+        }
+        views = []
+        for config in configs:
+            role_totals = totals.get(config.role, (0, 0, 0, 0))
+            last = latest.get(config.role)
+            current = active.get(config.role)
+            active_count = int(current[1]) if current else 0
+            task = current[3] if current else None
+            views.append(
+                AgentView(
+                    config.role.value,
+                    config.enabled,
+                    config.provider,
+                    config.model,
+                    config.configuration,
+                    config.updated_at,
+                    agent_status(
+                        enabled=config.enabled, model=config.model, active_jobs=active_count
+                    ),
+                    active_count,
+                    int(role_totals[0]),
+                    int(role_totals[1]),
+                    int(role_totals[2]),
+                    float(role_totals[3]),
+                    last[0] if last else None,
+                    last[1] if last else None,
+                    last[2] if last else None,
+                    last[3] if last else None,
+                    str(task.id) if task else None,
+                    task.manual_takeover if task else False,
+                    bool(task and task.workspace_path),
                 )
             )
-            or 0
-        )
-        active_job = await self._session.scalar(
-            select(Job)
-            .where(
-                Job.role == config.role,
-                Job.state.in_([JobState.CLAIMED, JobState.RUNNING]),
-            )
-            .order_by(Job.started_at.desc().nullslast())
-            .limit(1)
-        )
-        active_task = await self._session.get(Task, active_job.task_id) if active_job else None
-        return AgentView(
-            config.role.value,
-            config.enabled,
-            config.provider,
-            config.model,
-            config.configuration,
-            config.updated_at,
-            agent_status(enabled=config.enabled, model=config.model, active_jobs=active_jobs),
-            active_jobs,
-            int(totals[0]),
-            int(totals[1]),
-            int(totals[2]),
-            float(totals[3]),
-            latest.created_at if latest else None,
-            latest.duration_ms if latest else None,
-            latest.provider if latest else None,
-            latest.model if latest else None,
-            str(active_task.id) if active_task else None,
-            active_task.manual_takeover if active_task else False,
-            bool(active_task and active_task.workspace_path),
-        )
+        return views
