@@ -834,3 +834,15 @@ This is the durable implementation ledger for the project. Update it whenever a 
 - Corrected historical PostgreSQL enum migrations to commit newly added enum values before later revisions use them in data backfills or runtime constraints.
 - Covered `MERGED`, `CONTEXT_PENDING`, `TESTER`, `ORCHESTRATOR`, and `DELIVERER` instead of fixing only the first value reported by CI.
 - Reproduced the GitHub Actions database path against an isolated empty PostgreSQL database and successfully applied the complete `0001 -> 0032` Alembic chain.
+
+## 2026-09-06 — Autonomous execution policy and Tool Gateway foundation
+
+- Added deterministic `ALLOW` / `DENY` / `REQUIRE_HUMAN` policy evaluation with Autonomous, Conservative, and Custom Team modes. Platform hard-denies override user configuration.
+- Expanded the Role capability catalogue for filesystem, shell, build/lint/test, Git/task-branch, GitHub, task-management, knowledge, and network operations; legacy permissions resolve to their narrower runtime equivalents.
+- Added canonical workspace path enforcement with traversal, sibling-prefix, symlink, Windows drive, separator, and case-insensitive ancestry coverage.
+- Added an audited Tool Gateway for writes, creates, deletes, bounded shell execution, and task-branch push authorization. Executor file changes and validation commands now pass through it.
+- Added hard denial for privilege/system/container-management commands and Docker daemon access, direct executable execution, non-interactive environments, command timeouts, cross-platform process-tree termination, output caps, and secret sanitization.
+- Added persistent Team execution policies, exact-argument approval requests with expiry/one-time consumption, and sanitized tool execution events through migration `0033_execution_policy_gateway`.
+- Added policy, approval, and task/job audit APIs; Team configuration now exposes execution modes/capability decisions, while the dashboard exposes pending approvals with Allow Once and Deny actions.
+- Strengthened platform agent instructions around untrusted external content, non-escalation, non-self-modification, routine autonomy, and deterministic runtime authority.
+- Validation: strict backend formatting/lint/typing passes with 213 tests; frontend lint, formatting, Svelte/TypeScript checks, 23 tests, and production build pass.

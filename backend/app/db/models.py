@@ -409,6 +409,68 @@ class TaskAssignment(Base):
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class ExecutionPolicy(Base):
+    __tablename__ = "execution_policies"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    team_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("teams.id", ondelete="CASCADE"), unique=True
+    )
+    mode: Mapped[str] = mapped_column(String(30), default="AUTONOMOUS")
+    settings: Mapped[dict[str, str]] = mapped_column(JSON, default=dict)
+    approved_hosts: Mapped[list[str]] = mapped_column(JSON, default=list)
+    max_command_timeout_seconds: Mapped[int] = mapped_column(Integer, default=1200)
+    max_output_bytes: Mapped[int] = mapped_column(Integer, default=1_000_000)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+
+class ApprovalRequest(Base):
+    __tablename__ = "approval_requests"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    team_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("teams.id", ondelete="CASCADE"))
+    task_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tasks.id", ondelete="CASCADE"))
+    job_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("jobs.id", ondelete="CASCADE"))
+    agent_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("ai_agents.id", ondelete="SET NULL")
+    )
+    tool: Mapped[str] = mapped_column(String(80))
+    action: Mapped[str] = mapped_column(String(120))
+    arguments: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    arguments_hash: Mapped[str] = mapped_column(String(64))
+    reason: Mapped[str] = mapped_column(Text)
+    state: Mapped[str] = mapped_column(String(30), default="PENDING")
+    resolution_scope: Mapped[str | None] = mapped_column(String(30))
+    resolved_by: Mapped[str | None] = mapped_column(String(255))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class ToolExecutionEvent(Base):
+    __tablename__ = "tool_execution_events"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    team_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("teams.id", ondelete="CASCADE"))
+    task_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tasks.id", ondelete="CASCADE"))
+    job_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("jobs.id", ondelete="CASCADE"))
+    worker_run_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("worker_runs.id", ondelete="SET NULL")
+    )
+    agent_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("ai_agents.id", ondelete="SET NULL")
+    )
+    role_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("roles.id", ondelete="SET NULL"))
+    tool: Mapped[str] = mapped_column(String(80))
+    action: Mapped[str] = mapped_column(String(120))
+    decision: Mapped[str] = mapped_column(String(30))
+    policy_rule: Mapped[str] = mapped_column(String(255))
+    arguments_sanitized: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    exit_code: Mapped[int | None] = mapped_column(Integer)
+    duration_ms: Mapped[int | None] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class WorkerNode(Base):
     __tablename__ = "worker_nodes"
     id: Mapped[str] = mapped_column(String(200), primary_key=True)

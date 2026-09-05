@@ -16,6 +16,7 @@ from app.infrastructure.persistence import SqlAlchemyUnitOfWork
 from app.infrastructure.persistence.agent_configuration import SqlAlchemyAgentConfigurationWorkflow
 from app.infrastructure.persistence.dashboard_queries import SqlAlchemyDashboardQueries
 from app.infrastructure.persistence.event_queries import SqlAlchemyEventQueries
+from app.infrastructure.persistence.execution_policy import SqlAlchemyExecutionPolicyStore
 from app.infrastructure.persistence.job_enqueueing import SqlAlchemyJobEnqueueWorkflow
 from app.infrastructure.persistence.operations_queries import SqlAlchemyOperationsQueries
 from app.infrastructure.persistence.readiness import SqlAlchemyReadinessProbe
@@ -113,6 +114,12 @@ def get_dashboard_queries(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> SqlAlchemyDashboardQueries:
     return SqlAlchemyDashboardQueries(session)
+
+
+def get_execution_policy_store(
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> SqlAlchemyExecutionPolicyStore:
+    return SqlAlchemyExecutionPolicyStore(session)
 
 
 def get_telemetry_collector() -> PsutilHostTelemetryCollector:

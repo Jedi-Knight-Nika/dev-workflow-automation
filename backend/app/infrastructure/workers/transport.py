@@ -1,9 +1,12 @@
 import asyncio
+import os
+import signal
 import sys
 import uuid
 from typing import Any
 
 import httpx
+import psutil
 
 from app.application.ports.worker_runtime import WorkerExecution
 from app.config import Settings
@@ -78,16 +81,34 @@ async def _run_local(settings: Settings, job_id: uuid.UUID) -> WorkerExecution:
         str(job_id),
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
+        start_new_session=os.name != "nt",
     )
     try:
         stdout, stderr = await asyncio.wait_for(
             process.communicate(), timeout=settings.worker_timeout_seconds
         )
     except TimeoutError:
-        process.kill()
-        await process.wait()
+        await _terminate_process_tree(process.pid)
         return WorkerExecution(-1, b"", b"Worker timed out", timed_out=True)
-    return WorkerExecution(process.returncode or 0, stdout, stderr)
+    limit = 1_000_000
+    return WorkerExecution(process.returncode or 0, stdout[-limit:], stderr[-limit:])
+
+
+async def _terminate_process_tree(pid: int) -> None:
+    if os.name != "nt":
+        try:
+            os.killpg(pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        return
+    try:
+        parent = psutil.Process(pid)
+        processes = parent.children(recursive=True) + [parent]
+        for process in processes:
+            process.kill()
+        await asyncio.to_thread(psutil.wait_procs, processes, 3)
+    except psutil.Error:
+        return
 
 
 async def _run_docker(settings: Settings, job_id: uuid.UUID) -> WorkerExecution:
@@ -121,7 +142,8 @@ async def _run_docker(settings: Settings, job_id: uuid.UUID) -> WorkerExecution:
             )
             logs.raise_for_status()
             stdout, stderr = demultiplex_docker_logs(logs.content)
-            return WorkerExecution(int(wait.json()["StatusCode"]), stdout, stderr)
+            limit = 1_000_000
+            return WorkerExecution(int(wait.json()["StatusCode"]), stdout[-limit:], stderr[-limit:])
         finally:
             if container_id:
                 await client.delete(f"/containers/{container_id}", params={"force": True})

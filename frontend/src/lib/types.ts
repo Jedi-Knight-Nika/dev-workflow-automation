@@ -429,6 +429,31 @@ export type Team = {
   updated_at: string;
 };
 
+export type ExecutionPolicy = {
+  mode: 'CONSERVATIVE' | 'AUTONOMOUS' | 'CUSTOM';
+  settings: Record<string, 'ALLOW' | 'DENY' | 'REQUIRE_HUMAN'>;
+  approved_hosts: string[];
+  max_command_timeout_seconds: number;
+  max_output_bytes: number;
+  isolation_level: string;
+  execution_environment: string;
+};
+
+export type ApprovalRequest = {
+  id: string;
+  team_id: string;
+  task_id: string;
+  job_id: string;
+  agent_id: string | null;
+  tool: string;
+  action: string;
+  arguments: Record<string, unknown>;
+  reason: string;
+  state: string;
+  created_at: string;
+  expires_at: string;
+};
+
 export type Role = {
   id: string;
   name: string;

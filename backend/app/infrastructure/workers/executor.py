@@ -10,6 +10,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.infrastructure.git.workspaces import run_git
+from app.infrastructure.tools import ToolGateway
 
 MAX_CONTEXT_BYTES = 120_000
 MAX_FILE_BYTES = 40_000
@@ -136,6 +137,13 @@ def apply_proposal(workspace: Path, proposal: ExecutorProposal) -> None:
         path.unlink()
 
 
+async def apply_proposal_via_gateway(gateway: ToolGateway, proposal: ExecutorProposal) -> None:
+    for change in proposal.files:
+        await gateway.write_file(change.path, change.content)
+    for relative in proposal.delete_files:
+        await gateway.delete_file(relative)
+
+
 def detected_checks(workspace: Path) -> list[list[str]]:
     checks: list[list[str]] = []
     if (workspace / "package.json").exists():
@@ -163,6 +171,7 @@ async def run_checks(
     workspace: Path,
     timeout_seconds: int = 180,
     credential_environment: dict[str, str] | None = None,
+    gateway: ToolGateway | None = None,
 ) -> list[CheckResult]:
     results: list[CheckResult] = []
     setup_commands = dependency_setup_commands(workspace)
@@ -178,6 +187,29 @@ async def run_checks(
     )
     supplied = credential_environment or {}
     for command in commands:
+        if gateway is not None:
+            capability = (
+                "INSTALL_DEPENDENCIES"
+                if command in setup_commands
+                else "RUN_LINTER"
+                if any(part in {"lint", "ruff", "check"} for part in command)
+                else "RUN_TESTS"
+            )
+            outcome = await gateway.run_command(
+                command,
+                capability=capability,
+                timeout_seconds=timeout_seconds,
+                environment=credential_subprocess_environment(supplied)
+                if command in setup_commands
+                else None,
+            )
+            output = (outcome.stdout + "\n" + outcome.stderr).strip()[-6000:]
+            results.append(
+                CheckResult(command=command, passed=outcome.exit_code == 0, output=output)
+            )
+            if outcome.exit_code != 0 and command in setup_commands:
+                break
+            continue
         process: asyncio.subprocess.Process | None = None
         try:
             command_environment = environment.copy()

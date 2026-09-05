@@ -5,7 +5,13 @@
   import ErrorBanner from '$lib/components/ErrorBanner.svelte';
   import PageHeader from '$lib/components/PageHeader.svelte';
   import { getDashboardSummary, getDashboardTelemetry } from '$lib/services/dashboard';
-  import type { DashboardSnapshot, DashboardUsageBucket, HostTelemetry } from '$lib/types';
+  import { listApprovals, resolveApproval } from '$lib/services/execution-policy';
+  import type {
+    ApprovalRequest,
+    DashboardSnapshot,
+    DashboardUsageBucket,
+    HostTelemetry
+  } from '$lib/types';
 
   let dashboard = $state<DashboardSnapshot | null>(null);
   let period = $state<'today' | '7d' | '30d'>('today');
@@ -13,6 +19,7 @@
     live = $state(false),
     loading = $state(true);
   let telemetry = $state<HostTelemetry | null>(null);
+  let approvals = $state<ApprovalRequest[]>([]);
   let refreshTimer: ReturnType<typeof setTimeout> | undefined;
   const compact = new Intl.NumberFormat(undefined, {
     notation: 'compact',
@@ -28,15 +35,24 @@
 
   async function load() {
     try {
-      [dashboard, telemetry] = await Promise.all([
+      [dashboard, telemetry, approvals] = await Promise.all([
         getDashboardSummary(period),
-        getDashboardTelemetry()
+        getDashboardTelemetry(),
+        listApprovals()
       ]);
       error = '';
     } catch (cause) {
       error = cause instanceof Error ? cause.message : String(cause);
     } finally {
       loading = false;
+    }
+  }
+  async function decideApproval(id: string, approved: boolean) {
+    try {
+      await resolveApproval(id, approved);
+      approvals = await listApprovals();
+    } catch (cause) {
+      error = cause instanceof Error ? cause.message : String(cause);
     }
   }
   async function selectPeriod(value: typeof period) {
@@ -295,6 +311,39 @@
         </div>
       </article>
     </section>
+    {#if approvals.length}
+      <section class="panel approvals">
+        <header>
+          <div>
+            <span>APPROVAL REQUIRED</span>
+            <h2>Protected operations waiting for you</h2>
+          </div>
+          <b>{approvals.length}</b>
+        </header>
+        <div>
+          {#each approvals as approval (approval.id)}
+            <article>
+              <div>
+                <strong>{approval.tool} · {approval.action}</strong>
+                <p>{approval.reason}</p>
+                <small
+                  >Task {approval.task_id.slice(0, 8)} · expires {time.format(
+                    new Date(approval.expires_at)
+                  )}</small
+                >
+              </div>
+              <footer>
+                <button class="deny" onclick={() => void decideApproval(approval.id, false)}
+                  >Deny</button
+                ><button class="allow" onclick={() => void decideApproval(approval.id, true)}
+                  >Allow once</button
+                >
+              </footer>
+            </article>
+          {/each}
+        </div>
+      </section>
+    {/if}
     {#if telemetry}
       <section class="panel telemetry">
         <header>
@@ -334,6 +383,45 @@
     padding: 1.25rem;
     display: grid;
     gap: 1.25rem;
+  }
+  .approvals {
+    border-color: color-mix(in srgb, #f59e0b 55%, var(--color-line));
+  }
+  .approvals > div {
+    display: grid;
+    gap: 0.6rem;
+    padding: 0.9rem;
+  }
+  .approvals article {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    border: 1px solid var(--color-line);
+    border-radius: 0.7rem;
+    padding: 0.8rem;
+  }
+  .approvals p,
+  .approvals small {
+    color: var(--color-muted);
+    font-size: 0.72rem;
+  }
+  .approvals footer {
+    display: flex;
+    gap: 0.5rem;
+  }
+  .approvals button {
+    border: 1px solid var(--color-line);
+    border-radius: 0.5rem;
+    padding: 0.5rem 0.7rem;
+    font-size: 0.72rem;
+  }
+  .approvals .allow {
+    background: var(--color-brand);
+    color: white;
+  }
+  .approvals .deny {
+    color: #e5484d;
   }
   .toolbar,
   .section-title,

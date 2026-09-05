@@ -22,6 +22,24 @@ class TaskCreate(BaseModel):
     due_at: datetime | None = None
 
 
+class ExecutionPolicyWrite(BaseModel):
+    mode: str = Field(pattern="^(CONSERVATIVE|AUTONOMOUS|CUSTOM)$")
+    settings: dict[str, str] = Field(default_factory=dict)
+    approved_hosts: list[str] = Field(default_factory=list, max_length=100)
+    max_command_timeout_seconds: int = Field(default=1200, ge=10, le=7200)
+    max_output_bytes: int = Field(default=1_000_000, ge=1024, le=5_000_000)
+
+
+class ExecutionPolicyRead(ExecutionPolicyWrite):
+    isolation_level: str
+    execution_environment: str
+
+
+class ApprovalResolution(BaseModel):
+    resolved_by: str = Field(default="local-user", min_length=1, max_length=255)
+    scope: str = Field(default="ONCE", pattern="^(ONCE|TASK)$")
+
+
 class ExternalTaskRead(BaseModel):
     provider: str
     external_id: str

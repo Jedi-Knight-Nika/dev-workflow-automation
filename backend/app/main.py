@@ -13,6 +13,7 @@ from starlette.responses import Response
 from app.api.control_plane import router as control_plane_router
 from app.api.dashboard import router as dashboard_router
 from app.api.events import router as events_router
+from app.api.execution_policy import router as execution_policy_router
 from app.api.health import router as health_router
 from app.api.roles import router as roles_router
 from app.api.tasks import router as tasks_router
@@ -54,6 +55,7 @@ app.include_router(roles_router, prefix="/api/v1")
 app.include_router(terminals_router, prefix="/api/v1")
 app.include_router(control_plane_router, prefix="/api/v1")
 app.include_router(events_router, prefix="/api/v1")
+app.include_router(execution_policy_router, prefix="/api/v1")
 app.include_router(webhooks_router)
 
 

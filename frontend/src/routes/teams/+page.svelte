@@ -5,6 +5,7 @@
   import PageHeader from '$lib/components/PageHeader.svelte';
   import TeamBadge from '$lib/components/TeamBadge.svelte';
   import { listRepositories } from '$lib/services/repositories';
+  import { getExecutionPolicy, saveExecutionPolicy } from '$lib/services/execution-policy';
   import { archiveTeam, createTeam, listTeams, updateTeam } from '$lib/services/teams';
   import type { Repository, Team } from '$lib/types';
 
@@ -18,6 +19,23 @@
     description = $state(''),
     concurrency = $state(1);
   let repositoryIds = $state<string[]>([]);
+  let policyMode = $state<'CONSERVATIVE' | 'AUTONOMOUS' | 'CUSTOM'>('AUTONOMOUS');
+  let policySettings = $state<Record<string, 'ALLOW' | 'DENY' | 'REQUIRE_HUMAN'>>({});
+  let approvedHosts = $state('');
+  let commandTimeout = $state(1200);
+  let isolation = $state('Not measured');
+  const policyCapabilities = [
+    ['WRITE_REPOSITORY', 'Write repository'],
+    ['DELETE_FILES', 'Delete files'],
+    ['RUN_COMMANDS', 'Run commands'],
+    ['RUN_TESTS', 'Run tests'],
+    ['INSTALL_DEPENDENCIES', 'Install dependencies'],
+    ['CREATE_COMMIT', 'Create commits'],
+    ['PUSH_TASK_BRANCH', 'Push task branch'],
+    ['CREATE_PR', 'Create pull requests'],
+    ['MERGE_PR', 'Merge pull requests'],
+    ['NETWORK_APPROVED_HOSTS', 'Approved network hosts']
+  ];
   const integer = new Intl.NumberFormat();
   const money = new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD' });
 
@@ -28,13 +46,30 @@
       error = String(cause);
     }
   }
-  function open(team?: Team) {
+  async function open(team?: Team) {
     editing = team ?? null;
     name = team?.name ?? '';
     description = team?.description ?? '';
     concurrency = team?.max_concurrent_tasks ?? 1;
     repositoryIds = [...(team?.repository_ids ?? [])];
+    policyMode = 'AUTONOMOUS';
+    policySettings = {};
+    approvedHosts = '';
+    commandTimeout = 1200;
+    isolation = 'Not measured';
     showForm = true;
+    if (team) {
+      try {
+        const policy = await getExecutionPolicy(team.id);
+        policyMode = policy.mode;
+        policySettings = policy.settings;
+        approvedHosts = policy.approved_hosts.join(', ');
+        commandTimeout = policy.max_command_timeout_seconds;
+        isolation = `${policy.execution_environment} · ${policy.isolation_level} isolation`;
+      } catch (cause) {
+        error = String(cause);
+      }
+    }
   }
   function toggleRepository(id: string) {
     repositoryIds = repositoryIds.includes(id)
@@ -53,8 +88,17 @@
       repository_ids: repositoryIds
     };
     try {
-      if (editing) await updateTeam(editing.id, input);
-      else await createTeam(input);
+      const savedTeam = editing ? await updateTeam(editing.id, input) : await createTeam(input);
+      await saveExecutionPolicy(savedTeam.id, {
+        mode: policyMode,
+        settings: policySettings,
+        approved_hosts: approvedHosts
+          .split(',')
+          .map((host) => host.trim())
+          .filter(Boolean),
+        max_command_timeout_seconds: commandTimeout,
+        max_output_bytes: 1_000_000
+      });
       showForm = false;
       await load();
     } catch (cause) {
@@ -86,7 +130,7 @@
     <p class="text-muted text-sm">
       Each team works sequentially by default. Teams run independently.
     </p>
-    <button class="primary" onclick={() => open()}>Create team</button>
+    <button class="primary" onclick={() => void open()}>Create team</button>
   </div>
   <section class="team-grid">
     {#each teams as team (team.id)}
@@ -118,7 +162,7 @@
           <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
           <a class="primary" href={`${resolve('/agents')}?team=${team.id}`}>Open workflow</a><button
             class="edit"
-            onclick={() => open(team)}
+            onclick={() => void open(team)}
             aria-label={`Edit ${team.name}`}><span aria-hidden="true">✎</span> Edit</button
           >{#if team.id !== '00000000-0000-0000-0000-000000000001'}<button
               class="danger"
@@ -176,6 +220,54 @@
               ></label
             >{/each}
         </div>
+      </fieldset>
+      <fieldset>
+        <legend>Execution policy</legend>
+        <p>
+          Ordinary engineering work can run automatically. Platform hard-denies cannot be
+          overridden.<br /><strong>{isolation}</strong>
+        </p>
+        <label
+          ><span>Mode</span><select bind:value={policyMode}
+            ><option value="AUTONOMOUS">Autonomous</option><option value="CONSERVATIVE"
+              >Conservative</option
+            ><option value="CUSTOM">Custom</option></select
+          ></label
+        >
+        <div class="policy-grid">
+          {#each policyCapabilities as capability (capability[0])}
+            <label
+              ><span>{capability[1]}</span><select
+                value={policySettings[capability[0]] || ''}
+                onchange={(event) => {
+                  const value = event.currentTarget.value;
+                  if (value)
+                    policySettings[capability[0]] = value as 'ALLOW' | 'DENY' | 'REQUIRE_HUMAN';
+                  else delete policySettings[capability[0]];
+                  policySettings = { ...policySettings };
+                }}
+                ><option value="">Mode default</option><option value="ALLOW">Auto</option><option
+                  value="REQUIRE_HUMAN">Require human</option
+                ><option value="DENY">Deny</option></select
+              ></label
+            >
+          {/each}
+        </div>
+        <label
+          ><span>Approved network hosts</span><input
+            bind:value={approvedHosts}
+            placeholder="registry.npmjs.org, pypi.org"
+          /><small>Comma-separated. Arbitrary network and production access remain denied.</small
+          ></label
+        >
+        <label
+          ><span>Maximum command timeout</span><input
+            bind:value={commandTimeout}
+            type="number"
+            min="10"
+            max="7200"
+          /><small>Seconds; every command still has its own smaller timeout.</small></label
+        >
       </fieldset>
     </div>
     <footer>
@@ -390,12 +482,32 @@
     gap: 0.4rem;
   }
   .body input,
-  .body textarea {
+  .body textarea,
+  .body select {
     border: 1px solid var(--color-line);
     border-radius: 0.6rem;
     background: var(--color-panel);
     padding: 0.7rem;
     color: var(--color-text);
+  }
+  fieldset {
+    display: grid;
+    gap: 0.7rem;
+    border: 1px solid var(--color-line);
+    border-radius: 0.75rem;
+    padding: 0.9rem;
+  }
+  fieldset > label,
+  .policy-grid label {
+    display: grid;
+    gap: 0.35rem;
+    color: var(--color-muted);
+    font-size: 0.72rem;
+  }
+  .policy-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.55rem;
   }
   .body small,
   fieldset > p {
