@@ -730,3 +730,10 @@ This is the durable implementation ledger for the project. Update it whenever a 
 - Added provider-switch safety that clears incompatible model IDs, explicit `NOT SET`/`UNVERIFIED`/`READY`/failure state labels on graph nodes, and real provider-catalog validation through a clean application port rather than accepting arbitrary text as valid.
 - Applied workflow migrations through `0025_workflow_node_models` to the Dockerized PostgreSQL database and rebuilt the API, scheduler worker, and frontend. The deployed health check, workflow API, page response, and unconfigured-model validation path pass.
 - Backend Ruff, strict MyPy, and all 193 tests pass. Frontend ESLint, Prettier, Svelte type checking, all 21 unit tests, and production build pass.
+
+## 2026-09-05 — CI-only GitHub quality gate
+
+- Simplified GitHub Actions to deterministic backend and frontend quality jobs; deployment/browser-environment validation is disabled until a stable deployment target exists.
+- Backend CI checks Ruff lint and formatting, strict MyPy, the complete Alembic migration chain against pgvector/PostgreSQL, and all tests.
+- Frontend CI checks ESLint, Prettier, Svelte/TypeScript typing, unit tests, and the production build.
+- Formatted three older migration files that previously caused the repository-wide Ruff format gate to fail; all backend CI commands now pass locally with 193 tests.

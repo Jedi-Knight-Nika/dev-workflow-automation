@@ -33,16 +33,25 @@ def upgrade() -> None:
     op.create_table(
         "agent_knowledge_chunks",
         sa.Column("id", sa.Uuid(), nullable=False),
-        sa.Column("source_id", sa.Uuid(), sa.ForeignKey("agent_knowledge_sources.id", ondelete="CASCADE"), nullable=False),
+        sa.Column(
+            "source_id",
+            sa.Uuid(),
+            sa.ForeignKey("agent_knowledge_sources.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
         sa.Column("role", job_role, nullable=False),
         sa.Column("chunk_index", sa.Integer(), nullable=False),
         sa.Column("content", sa.Text(), nullable=False),
         sa.Column("embedding", sa.Text(), nullable=False),
         sa.PrimaryKeyConstraint("id"),
     )
-    op.execute("ALTER TABLE agent_knowledge_chunks ALTER COLUMN embedding TYPE vector(1536) USING embedding::vector")
+    op.execute(
+        "ALTER TABLE agent_knowledge_chunks ALTER COLUMN embedding TYPE vector(1536) USING embedding::vector"
+    )
     op.create_index("ix_agent_knowledge_chunks_role", "agent_knowledge_chunks", ["role"])
-    op.execute("CREATE INDEX ix_agent_knowledge_chunks_embedding ON agent_knowledge_chunks USING ivfflat (embedding vector_cosine_ops) WITH (lists = 20)")
+    op.execute(
+        "CREATE INDEX ix_agent_knowledge_chunks_embedding ON agent_knowledge_chunks USING ivfflat (embedding vector_cosine_ops) WITH (lists = 20)"
+    )
 
 
 def downgrade() -> None:

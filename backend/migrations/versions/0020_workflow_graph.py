@@ -26,7 +26,12 @@ def upgrade() -> None:
     op.create_table(
         "workflow_nodes",
         sa.Column("id", sa.Uuid(), nullable=False),
-        sa.Column("workflow_id", sa.Uuid(), sa.ForeignKey("workflow_definitions.id", ondelete="CASCADE"), nullable=False),
+        sa.Column(
+            "workflow_id",
+            sa.Uuid(),
+            sa.ForeignKey("workflow_definitions.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
         sa.Column("role", sa.String(30), nullable=False),
         sa.Column("label", sa.String(100), nullable=False),
         sa.Column("position_x", sa.Numeric(12, 3), nullable=False),
@@ -39,13 +44,34 @@ def upgrade() -> None:
     op.create_table(
         "workflow_edges",
         sa.Column("id", sa.Uuid(), nullable=False),
-        sa.Column("workflow_id", sa.Uuid(), sa.ForeignKey("workflow_definitions.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("source_node_id", sa.Uuid(), sa.ForeignKey("workflow_nodes.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("target_node_id", sa.Uuid(), sa.ForeignKey("workflow_nodes.id", ondelete="CASCADE"), nullable=False),
+        sa.Column(
+            "workflow_id",
+            sa.Uuid(),
+            sa.ForeignKey("workflow_definitions.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+        sa.Column(
+            "source_node_id",
+            sa.Uuid(),
+            sa.ForeignKey("workflow_nodes.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+        sa.Column(
+            "target_node_id",
+            sa.Uuid(),
+            sa.ForeignKey("workflow_nodes.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
         sa.Column("outcome", sa.String(30), nullable=False, server_default="success"),
         sa.Column("required", sa.Boolean(), nullable=False, server_default=sa.true()),
         sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint("workflow_id", "source_node_id", "target_node_id", "outcome", name="uq_workflow_edge_route"),
+        sa.UniqueConstraint(
+            "workflow_id",
+            "source_node_id",
+            "target_node_id",
+            "outcome",
+            name="uq_workflow_edge_route",
+        ),
     )
 
 
