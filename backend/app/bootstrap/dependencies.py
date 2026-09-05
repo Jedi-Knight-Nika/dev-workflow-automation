@@ -22,6 +22,7 @@ from app.infrastructure.persistence.repository_management import (
 from app.infrastructure.persistence.task_history import SqlAlchemyTaskHistoryQueries
 from app.infrastructure.persistence.task_lifecycle import SqlAlchemyTaskLifecycleUnitOfWorkFactory
 from app.infrastructure.persistence.task_queries import SqlAlchemyTaskQueries
+from app.infrastructure.persistence.terminal_sessions import SqlAlchemyTerminalSessionGateway
 from app.infrastructure.persistence.tracker_sync import SqlAlchemyLinearSyncWorkflow
 from app.infrastructure.persistence.worker_queries import SqlAlchemyWorkerQueries
 from app.infrastructure.persistence.workflow_designer import SqlAlchemyWorkflowDesigner
@@ -124,6 +125,13 @@ def get_workflow_designer(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> SqlAlchemyWorkflowDesigner:
     return SqlAlchemyWorkflowDesigner(session)
+
+
+def get_terminal_session_gateway(
+    session: Annotated[AsyncSession, Depends(get_session)],
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> SqlAlchemyTerminalSessionGateway:
+    return SqlAlchemyTerminalSessionGateway(session, settings.workspace_root)
 
 
 def get_integration_discovery_workflow(

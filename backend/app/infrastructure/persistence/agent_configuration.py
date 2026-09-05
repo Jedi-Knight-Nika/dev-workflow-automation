@@ -2,7 +2,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.application.ports.agent_configuration import AgentConfigCommand, AgentView
-from app.db.models import AgentConfig, Job, JobRole, JobState, WorkerRun
+from app.db.models import AgentConfig, Job, JobRole, JobState, Task, WorkerRun
 from app.domain.agents import agent_status
 
 
@@ -63,6 +63,16 @@ class SqlAlchemyAgentConfigurationWorkflow:
             )
             or 0
         )
+        active_job = await self._session.scalar(
+            select(Job)
+            .where(
+                Job.role == config.role,
+                Job.state.in_([JobState.CLAIMED, JobState.RUNNING]),
+            )
+            .order_by(Job.started_at.desc().nullslast())
+            .limit(1)
+        )
+        active_task = await self._session.get(Task, active_job.task_id) if active_job else None
         return AgentView(
             config.role.value,
             config.enabled,
@@ -80,4 +90,7 @@ class SqlAlchemyAgentConfigurationWorkflow:
             latest.duration_ms if latest else None,
             latest.provider if latest else None,
             latest.model if latest else None,
+            str(active_task.id) if active_task else None,
+            active_task.manual_takeover if active_task else False,
+            bool(active_task and active_task.workspace_path),
         )

@@ -14,6 +14,7 @@ from app.api.control_plane import router as control_plane_router
 from app.api.events import router as events_router
 from app.api.health import router as health_router
 from app.api.tasks import router as tasks_router
+from app.api.terminals import router as terminals_router
 from app.api.webhooks import router as webhooks_router
 from app.bootstrap.scheduler import create_scheduler
 from app.config import get_settings
@@ -44,6 +45,7 @@ app.add_middleware(
 )
 app.include_router(health_router)
 app.include_router(tasks_router, prefix="/api/v1")
+app.include_router(terminals_router, prefix="/api/v1")
 app.include_router(control_plane_router, prefix="/api/v1")
 app.include_router(events_router, prefix="/api/v1")
 app.include_router(webhooks_router)

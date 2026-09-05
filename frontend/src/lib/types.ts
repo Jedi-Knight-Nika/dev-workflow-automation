@@ -90,6 +90,17 @@ export type AgentConfig = {
   last_duration_ms: number | null;
   last_provider: string | null;
   last_model: string | null;
+  active_task_id: string | null;
+  active_task_manual_takeover: boolean;
+  active_task_has_workspace: boolean;
+};
+
+export type TerminalAccess = {
+  session_id: string;
+  token: string;
+  status: string;
+  cols: number;
+  rows: number;
 };
 
 export type AgentKnowledge = {

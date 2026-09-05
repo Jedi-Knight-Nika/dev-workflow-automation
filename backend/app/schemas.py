@@ -165,6 +165,9 @@ class AgentConfigRead(AgentConfigUpdate):
     last_duration_ms: int | None = None
     last_provider: str | None = None
     last_model: str | None = None
+    active_task_id: uuid.UUID | None = None
+    active_task_manual_takeover: bool = False
+    active_task_has_workspace: bool = False
 
 
 class AgentKnowledgeCreate(BaseModel):
@@ -204,6 +207,20 @@ class WorkflowGraphRead(BaseModel):
     version: int = Field(ge=0)
     nodes: list[WorkflowNodeRead]
     edges: list[WorkflowEdgeRead]
+
+
+class TerminalOpen(BaseModel):
+    node_id: uuid.UUID | None = None
+    cols: int = Field(default=120, ge=40, le=300)
+    rows: int = Field(default=32, ge=10, le=100)
+
+
+class TerminalAccessRead(BaseModel):
+    session_id: uuid.UUID
+    token: str
+    status: str
+    cols: int
+    rows: int
 
 
 class ProviderModelRead(BaseModel):

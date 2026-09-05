@@ -14,6 +14,9 @@ COPY . .
 RUN uv sync --frozen --all-extras
 
 FROM base AS api
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git vim-tiny \
+    && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
 EXPOSE 8000
 CMD ["sh", "-c", ".venv/bin/alembic upgrade head && exec .venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000"]
 

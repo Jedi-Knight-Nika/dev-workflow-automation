@@ -699,3 +699,21 @@ This is the durable implementation ledger for the project. Update it whenever a 
 - Backend validation owns structural integrity: unique identities, allowed roles/outcomes/policies, exactly one Orchestrator and Deliverer, valid references, no self-routing, and reachability from Orchestrator to every enabled node and Deliverer.
 - Added the Tester role to the persisted agent configuration model and PostgreSQL enum so it can be configured from the same role panel.
 - Added domain tests for valid repair loops and invalid unreachable/protected/policy states.
+
+## 2026-09-05 — Controlled live workspace console
+
+- Added an xterm.js cloud-console modal with full interactive terminal input, ANSI rendering, resizing, scrollback, Vim-compatible PTY behavior, and explicit Ctrl+C delivery.
+- Opening a console requires an active task workspace and an explicit manual takeover. The existing lifecycle pauses the task, cancels queued AI jobs, blocks new claims, emits takeover events, and rejects stale worker results.
+- Added a safe-checkpoint gate that prevents a human PTY from sharing a writable workspace with a still-running agent process.
+- Added short-lived one-time terminal access tokens stored only as SHA-256 hashes, managed-root path validation, bounded terminal dimensions/input/output/history, a minimal child environment, basic credential redaction, and explicit release/resume.
+- Added durable PostgreSQL terminal session and audit-event tables behind an application port and use case, with a local PTY infrastructure adapter and authenticated WebSocket transport.
+- Added live SSE-driven agent status refresh and a pulsing graph-node state while an agent is running.
+- Added Git and Vim Tiny to the API image used by the controlled workspace console; Docker/host control is not exposed to the browser.
+- Added terminal security unit tests; backend Ruff, strict MyPy, and all 190 tests pass. Frontend lint, formatting, type checking, unit tests, and production build pass.
+# Workflow builder interaction and inspector redesign
+
+- Replaced generic workflow boxes with purpose-built agent nodes showing role, core-agent identity, and live runtime state in a compact visual hierarchy.
+- Added a persistent top-level **Add agent** menu; removed optional roles remain available there and can be restored to the canvas.
+- Added a left-click agent action menu with **Edit configuration** and **Delete from graph** actions. Orchestrator and Deliverer remain visibly protected from deletion.
+- Redesigned the agent configuration form as a focused inspector with Instructions, Model & cost, and Knowledge tabs, compact runtime metrics, status, enable control, save action, and live console access.
+- Preserved workflow routing, drag/connect behavior, activation policies, model discovery, cost configuration, custom prompts, repository context, and manual vector knowledge.

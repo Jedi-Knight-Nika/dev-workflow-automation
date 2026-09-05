@@ -30,6 +30,9 @@ class AgentView:
     last_duration_ms: int | None = None
     last_provider: str | None = None
     last_model: str | None = None
+    active_task_id: str | None = None
+    active_task_manual_takeover: bool = False
+    active_task_has_workspace: bool = False
 
 
 class AgentConfigurationWorkflow(Protocol):
