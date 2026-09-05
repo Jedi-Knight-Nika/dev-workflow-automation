@@ -228,6 +228,115 @@ export type DashboardActivity = {
   queued_jobs: Job[];
 };
 
+export type DashboardUsageBucket = {
+  key: string;
+  input_tokens: number;
+  output_tokens: number;
+  estimated_cost: number | null;
+};
+
+export type DashboardTimeBucket = {
+  period: string;
+  completed: number;
+  failed: number;
+  human_assisted: number;
+  input_tokens: number;
+  output_tokens: number;
+};
+
+export type DashboardSnapshot = {
+  period: 'today' | '7d' | '30d';
+  generated_at: string;
+  system_status: string;
+  health_score: number;
+  active_tasks: number;
+  queued_jobs: number;
+  ready_to_merge: number;
+  needs_human: number;
+  completed: number;
+  failed: number;
+  tokens: number;
+  estimated_cost: number | null;
+  autonomy_rate: number | null;
+  active_worker: null | {
+    job_id: string;
+    task_id: string;
+    task_label: string;
+    team_id: string | null;
+    team_name: string | null;
+    agent_name: string | null;
+    role: string;
+    provider: string | null;
+    model: string | null;
+    started_at: string | null;
+    input_tokens: number;
+    output_tokens: number;
+  };
+  queue: Array<{
+    job_id: string;
+    task_id: string;
+    task_label: string;
+    team_id: string | null;
+    team_name: string | null;
+    role: string;
+    action: string;
+    priority: number;
+    state: string;
+    created_at: string;
+  }>;
+  teams: Array<{
+    team_id: string;
+    name: string;
+    status: string;
+    current_task_id: string | null;
+    current_task_label: string | null;
+    agent_name: string | null;
+    role: string | null;
+    provider: string | null;
+    model: string | null;
+    queued_jobs: number;
+    open_pull_requests: number;
+    ready_to_merge: number;
+    tokens: number;
+  }>;
+  recent_events: Array<{
+    id: string;
+    timestamp: string;
+    team_id: string | null;
+    team_name: string | null;
+    task_id: string;
+    task_label: string;
+    source: string;
+    severity: string;
+    event_type: string;
+    summary: string;
+  }>;
+  usage_by_role: DashboardUsageBucket[];
+  usage_by_provider: DashboardUsageBucket[];
+  usage_by_team: DashboardUsageBucket[];
+  throughput: DashboardTimeBucket[];
+  token_history: DashboardTimeBucket[];
+  health: Array<{
+    name: string;
+    status: string;
+    message: string;
+    last_success_at: string | null;
+    last_failure_at: string | null;
+  }>;
+};
+
+export type HostTelemetry = {
+  cpu_percent: number;
+  memory_used_bytes: number;
+  memory_total_bytes: number;
+  memory_percent: number;
+  disk_used_bytes: number;
+  disk_total_bytes: number;
+  disk_percent: number;
+  load_average: [number, number, number] | null;
+  uptime_seconds: number;
+};
+
 export type TaskEvent = {
   id: number;
   task_id: string;

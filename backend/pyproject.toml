@@ -17,6 +17,7 @@ dependencies = [
   "sqlalchemy>=2.0.36,<3",
   "structlog>=24.4,<26",
   "uvicorn[standard]>=0.34,<1",
+  "psutil>=6,<8",
 ]
 
 [project.optional-dependencies]
@@ -53,3 +54,8 @@ exclude = ["migrations/"]
 [[tool.mypy.overrides]]
 module = "structlog.*"
 ignore_missing_imports = true
+
+[dependency-groups]
+dev = [
+    "types-psutil>=7,<8",
+]

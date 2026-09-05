@@ -10,21 +10,27 @@ WORKDIR /app
 
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --all-extras --no-install-project
-COPY . .
-RUN uv sync --frozen --all-extras
 
-FROM base AS api
+FROM base AS api-system
 RUN apt-get update \
     && apt-get install -y --no-install-recommends git vim-tiny \
     && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
+
+FROM api-system AS api
+COPY . .
+RUN uv sync --frozen --all-extras
 EXPOSE 8000
 CMD ["sh", "-c", ".venv/bin/alembic upgrade head && exec .venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000"]
 
 FROM node:22-slim AS node-runtime
 
-FROM base AS worker
+FROM base AS worker-system
 COPY --from=node-runtime /usr/local/ /usr/local/
 RUN apt-get update \
     && apt-get install -y --no-install-recommends git \
     && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
+
+FROM worker-system AS worker
+COPY . .
+RUN uv sync --frozen --all-extras
 CMD [".venv/bin/python", "-m", "app.scheduler_runner"]

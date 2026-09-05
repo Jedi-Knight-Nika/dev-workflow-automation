@@ -807,3 +807,16 @@ This is the durable implementation ledger for the project. Update it whenever a 
 - Added Roles to desktop/mobile navigation and English/Georgian navigation labels.
 - Verified migration `0030 -> 0031` against the live Docker PostgreSQL database; the Role API and `/roles` page both return successfully.
 - Validation: backend Ruff and mypy pass; backend test suite has 203 passing tests. Frontend lint, Prettier, Svelte typecheck, 23 unit tests, and production build pass.
+
+## 2026-09-06 — Live engineering control-center dashboard
+
+- Replaced the placeholder home screen with a responsive cockpit-style operations dashboard backed exclusively by persisted or measured state.
+- Added global system health, active-task, full queue, merge-ready, AI-token, estimated-cost, autonomy, and human-attention metrics with Today/7-day/30-day ranges.
+- Added current-worker identity and runtime, team activity cards, the single-lane scheduler queue, recent task activity, task-throughput history, and AI usage grouped by Role.
+- Added explicit dependency health for PostgreSQL, configured GitHub/Linear/AI providers, repository RAG freshness, and worker heartbeat state. Unconfigured services remain visibly distinct and do not falsely degrade system health.
+- Added live host CPU, RAM, disk, load-average, and uptime telemetry through a replaceable application port and a `psutil` infrastructure adapter; high-frequency samples are not written to PostgreSQL.
+- Dashboard queries live behind a clean application protocol/use case and a SQLAlchemy read adapter. The HTTP layer contains no persistence imports.
+- The dashboard hydrates through REST, subscribes to the existing SSE event stream, refreshes relevant aggregates after events/reconnection, and polls only ephemeral host telemetry.
+- Corrected queue reporting so the headline total is not truncated by the 25-row display limit, and added deterministic Team states for working, waiting externally, paused, failed, human-needed, and idle conditions.
+- Reordered backend Docker system-package layers so source-only rebuilds retain the expensive `apt` cache.
+- Validation: backend Ruff and strict mypy pass; all 203 backend tests pass. Frontend ESLint, Prettier, Svelte/TypeScript checking, all 23 unit tests, and production build pass.
