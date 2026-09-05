@@ -350,25 +350,37 @@ async def run(job_id: uuid.UUID) -> WorkerResult:
         configured_repairs = config.configuration.get("structured_output_retries", 2)
         max_repairs = int(configured_repairs) if isinstance(configured_repairs, (int, str)) else 2
         try:
-            data, attempts = await run_with_structured_repair(
-                provider,
-                ProviderRequest(
-                    model=config.model,
-                    system=config.system_prompt,
-                    prompt=prompt,
-                    max_output_tokens=int(config.configuration.get("max_output_tokens") or 4096),
-                    temperature=config.configuration.get("temperature"),
-                    reasoning_effort=str(config.configuration.get("reasoning_effort", "default")),
-                    timeout_seconds=int(config.configuration.get("timeout_minutes", 60)) * 60,
-                ),
-                job.role,
-                max_repairs,
-            )
-        except StructuredOutputError as exc:
-            await persist_attempts(
-                session, job, config.provider, config.model, exc.attempts, config.configuration
-            )
-            raise
+            try:
+                data, attempts = await run_with_structured_repair(
+                    provider,
+                    ProviderRequest(
+                        model=config.model,
+                        system=config.system_prompt,
+                        prompt=prompt,
+                        max_output_tokens=int(
+                            config.configuration.get("max_output_tokens") or 4096
+                        ),
+                        temperature=config.configuration.get("temperature"),
+                        reasoning_effort=str(
+                            config.configuration.get("reasoning_effort", "default")
+                        ),
+                        timeout_seconds=int(config.configuration.get("timeout_minutes", 60)) * 60,
+                    ),
+                    job.role,
+                    max_repairs,
+                )
+            except StructuredOutputError as exc:
+                await persist_attempts(
+                    session,
+                    job,
+                    config.provider,
+                    config.model,
+                    exc.attempts,
+                    config.configuration,
+                )
+                raise
+        finally:
+            await provider.aclose()
         await persist_attempts(
             session, job, config.provider, config.model, attempts, config.configuration
         )

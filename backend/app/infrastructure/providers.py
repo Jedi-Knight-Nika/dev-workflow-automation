@@ -30,7 +30,10 @@ class EncryptedProviderCatalogWorkflow:
             )
         except ValueError as exc:
             raise ProviderNotSupported(str(exc)) from exc
-        models = await provider.list_models()
+        try:
+            models = await provider.list_models()
+        finally:
+            await provider.aclose()
         return ProviderCatalogView(
             provider_name,
             provider.capabilities(),

@@ -68,8 +68,12 @@ class ToolGateway:
 
     async def write_file(self, relative: str, content: str) -> None:
         path = resolve_workspace_path(self._context.workspace, relative)
-        permission = "CREATE_FILES" if not path.exists() else "WRITE_REPOSITORY"
-        await self._authorize("filesystem", "write", permission, {"path": relative})
+        existed = path.exists()
+        # Creating a path is still a repository mutation. Requiring WRITE_REPOSITORY for every
+        # write prevents an existence race from turning CREATE_FILES into overwrite authority.
+        await self._authorize("filesystem", "write", "WRITE_REPOSITORY", {"path": relative})
+        if not existed:
+            await self._authorize("filesystem", "create", "CREATE_FILES", {"path": relative})
         path.parent.mkdir(parents=True, exist_ok=True)
         path = resolve_workspace_path(self._context.workspace, relative)
         if path.is_symlink():
@@ -130,7 +134,16 @@ class ToolGateway:
         except TimeoutError:
             timed_out = True
             await self._terminate_tree(process.pid)
-            stdout, stderr = await process.communicate()
+            try:
+                stdout, stderr = await asyncio.wait_for(process.communicate(), 5)
+            except TimeoutError:
+                # A re-parented descendant may still own the inherited pipes. Never let that
+                # wedge the worker after the requested process tree has been terminated.
+                if process.stdout is not None:
+                    process.stdout.feed_eof()
+                if process.stderr is not None:
+                    process.stderr.feed_eof()
+                stdout, stderr = b"", b"Process output pipes remained open after termination"
         limit = self._policy.max_output_bytes
         truncated = len(stdout) > limit or len(stderr) > limit
         clean_out = self._sanitize(stdout[-limit:].decode(errors="replace"), environment or {})

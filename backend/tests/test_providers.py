@@ -1,3 +1,4 @@
+import json
 from typing import Any
 
 import httpx
@@ -17,9 +18,11 @@ class SequenceProvider(AIProvider):
         super().__init__("test")
         self.responses = responses
         self.prompts: list[str] = []
+        self.cacheable_prefixes: list[str | None] = []
 
     async def run(self, request: ProviderRequest) -> ProviderResponse:
         self.prompts.append(request.prompt)
+        self.cacheable_prefixes.append(request.cacheable_prompt_prefix)
         return ProviderResponse(text=self.responses.pop(0), request_id=str(len(self.prompts)))
 
     async def list_models(self) -> list[ProviderModel]:
@@ -88,6 +91,62 @@ async def test_provider_model_catalogs_are_normalized(
 
 
 @pytest.mark.asyncio
+async def test_transient_provider_failures_are_retried(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    attempts = 0
+
+    async def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        if attempts < 3:
+            return httpx.Response(503, json={"error": "temporarily unavailable"})
+        return httpx.Response(200, json={"data": []})
+
+    async def no_sleep(_delay: float) -> None:
+        return None
+
+    transport = httpx.MockTransport(handler)
+    provider = OpenAIProvider("secret")
+    provider._client = httpx.AsyncClient(transport=transport)
+    monkeypatch.setattr("app.providers.base.asyncio.sleep", no_sleep)
+    try:
+        assert await provider.list_models() == []
+    finally:
+        await provider.aclose()
+    assert attempts == 3
+
+
+@pytest.mark.asyncio
+async def test_anthropic_marks_static_prompt_sections_cacheable() -> None:
+    captured: dict[str, Any] = {}
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        captured.update(json.loads(request.content))
+        return httpx.Response(
+            200,
+            json={"id": "msg-1", "content": [{"type": "text", "text": "ok"}]},
+        )
+
+    provider = AnthropicProvider("secret")
+    provider._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    try:
+        await provider.run(
+            ProviderRequest(
+                model="claude-test",
+                system="static system",
+                prompt="repair suffix",
+                cacheable_prompt_prefix="large original context",
+            )
+        )
+    finally:
+        await provider.aclose()
+
+    assert captured["system"][0]["cache_control"] == {"type": "ephemeral"}
+    assert captured["messages"][0]["content"][0]["cache_control"] == {"type": "ephemeral"}
+
+
+@pytest.mark.asyncio
 async def test_invalid_structured_output_is_repaired_once() -> None:
     provider = SequenceProvider(
         [
@@ -105,6 +164,7 @@ async def test_invalid_structured_output_is_repaired_once() -> None:
     assert len(attempts) == 2
     assert provider.prompts[0] == "original context"
     assert "failed schema validation" in provider.prompts[1]
+    assert provider.cacheable_prefixes == [None, "original context"]
 
 
 @pytest.mark.asyncio

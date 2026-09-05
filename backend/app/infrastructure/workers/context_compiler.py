@@ -211,17 +211,38 @@ class ContextCompiler:
         started = time.monotonic()
         context = self._base(task, job)
         context["task_memory"] = await self._persistent_memory(task, JobRole.EXECUTOR)
-        context["previous_role_checkpoint"] = await self._previous_checkpoint(
-            task, JobRole.EXECUTOR
-        )
+        previous_checkpoint = await self._previous_checkpoint(task, JobRole.EXECUTOR)
+        context["previous_role_checkpoint"] = previous_checkpoint
         context["technical_plan"] = await self._plan(task)
         context["retrieved_knowledge"] = await self._knowledge(task, repository, JobRole.EXECUTOR)
         context["open_findings"] = await self._findings(task)
-        context["repository"] = {
+        repository_data: dict[str, Any] = {
             "branch": task.branch_name,
             "revision": task.current_revision,
-            "files": await repository_context(workspace),
         }
+        previous_sha = (
+            previous_checkpoint.get("repository_sha")
+            if isinstance(previous_checkpoint, dict)
+            else None
+        )
+        if isinstance(previous_sha, str) and previous_sha:
+            try:
+                committed_delta = await run_git(
+                    "diff", "--no-ext-diff", previous_sha, "HEAD", cwd=workspace
+                )
+                working_delta = await run_git("diff", "--no-ext-diff", cwd=workspace)
+                repository_data["delta_from_previous_executor"] = {
+                    "from_revision": previous_sha,
+                    "content": "\n".join(filter(None, (committed_delta, working_delta))),
+                }
+                repository_data["context_mode"] = "delta"
+            except RuntimeError:
+                repository_data["files"] = await repository_context(workspace)
+                repository_data["context_mode"] = "full_fallback"
+        else:
+            repository_data["files"] = await repository_context(workspace)
+            repository_data["context_mode"] = "full"
+        context["repository"] = repository_data
         return await self._finish(task, job, context, started)
 
     async def compile_for_reviewer(

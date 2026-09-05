@@ -10,7 +10,7 @@ from app.application.ports.reviewer_completion import (
     ReviewerCompletionCommand,
     ReviewerCompletionContext,
 )
-from app.db.models import Job, JobRole, JobState, Repository, Task, TaskState
+from app.db.models import Job, JobRole, JobState, Repository, Task, TaskState, WorkflowNode
 from app.domain.jobs import CompletionDirective
 from app.infrastructure.linear_sync import sync_current_task_state_to_linear
 from app.infrastructure.persistence.job_operations import (
@@ -128,9 +128,11 @@ class SqlAlchemyReviewerCompletionUnitOfWork:
             )
             await record_event(session, task.id, event_type, details)
         elif directive == CompletionDirective.REVIEW_REPAIR:
-            await self._enqueue_repair(task, context)
+            if not await self._review_cycle_limit_reached(task, context):
+                await self._enqueue_repair(task, context)
         elif directive == CompletionDirective.REVIEW_REPLAN:
-            await self._enqueue_replan(task, context)
+            if not await self._review_cycle_limit_reached(task, context):
+                await self._enqueue_replan(task, context)
         await record_event(
             session,
             task.id,
@@ -138,6 +140,44 @@ class SqlAlchemyReviewerCompletionUnitOfWork:
             {"job_id": str(context.job_id), "result": context.outcome},
         )
         return should_publish
+
+    async def _review_cycle_limit_reached(
+        self, task: Task, context: ReviewerCompletionContext
+    ) -> bool:
+        """Apply the configured workflow-node circuit breaker before another repair loop."""
+        session = self._active()
+        job = await session.get(Job, context.job_id)
+        node = (
+            await session.get(WorkflowNode, job.workflow_node_id)
+            if job is not None and job.workflow_node_id is not None
+            else None
+        )
+        if node is None:
+            return False
+        completed_cycles = await session.scalar(
+            select(func.count(Job.id)).where(
+                Job.task_id == task.id,
+                Job.workflow_node_id == node.id,
+                Job.role == JobRole.REVIEWER,
+                Job.state == JobState.SUCCEEDED,
+                Job.result.is_not(None),
+            )
+        )
+        if (completed_cycles or 0) < node.max_review_cycles:
+            return False
+        task.state = TaskState.NEEDS_HUMAN
+        await record_event(
+            session,
+            task.id,
+            "REVIEW_CYCLE_LIMIT_REACHED",
+            {
+                "job_id": str(context.job_id),
+                "workflow_node_id": str(node.id),
+                "cycles": completed_cycles or 0,
+                "limit": node.max_review_cycles,
+            },
+        )
+        return True
 
     async def _enqueue_repair(self, task: Task, context: ReviewerCompletionContext) -> None:
         session = self._active()

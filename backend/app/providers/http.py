@@ -1,19 +1,16 @@
 from typing import Any
 
-import httpx
-
 from app.providers.base import AIProvider, ProviderModel, ProviderRequest, ProviderResponse
 
 
 class OpenAIProvider(AIProvider):
     async def list_models(self) -> list[ProviderModel]:
-        async with httpx.AsyncClient(timeout=30) as client:
-            response = await client.get(
-                "https://api.openai.com/v1/models",
-                headers={"authorization": f"Bearer {self.api_key}"},
-            )
-            response.raise_for_status()
-            data: dict[str, Any] = response.json()
+        response = await self.request(
+            "GET",
+            "https://api.openai.com/v1/models",
+            headers={"authorization": f"Bearer {self.api_key}"},
+        )
+        data: dict[str, Any] = response.json()
         model_ids = [
             str(item["id"])
             for item in data["data"]
@@ -25,10 +22,11 @@ class OpenAIProvider(AIProvider):
         )
 
     async def run(self, request: ProviderRequest) -> ProviderResponse:
+        prompt = (request.cacheable_prompt_prefix or "") + request.prompt
         payload: dict[str, Any] = {
             "model": request.model,
             "instructions": request.system,
-            "input": request.prompt,
+            "input": prompt,
             "max_output_tokens": request.max_output_tokens,
             "store": False,
         }
@@ -36,14 +34,14 @@ class OpenAIProvider(AIProvider):
             payload["temperature"] = request.temperature
         if request.reasoning_effort != "default":
             payload["reasoning"] = {"effort": request.reasoning_effort}
-        async with httpx.AsyncClient(timeout=request.timeout_seconds) as client:
-            response = await client.post(
-                "https://api.openai.com/v1/responses",
-                headers={"authorization": f"Bearer {self.api_key}"},
-                json=payload,
-            )
-            response.raise_for_status()
-            data: dict[str, Any] = response.json()
+        response = await self.request(
+            "POST",
+            "https://api.openai.com/v1/responses",
+            timeout_seconds=request.timeout_seconds,
+            headers={"authorization": f"Bearer {self.api_key}"},
+            json=payload,
+        )
+        data: dict[str, Any] = response.json()
         text = "".join(
             part.get("text", "")
             for item in data.get("output", [])
@@ -61,13 +59,12 @@ class OpenAIProvider(AIProvider):
 
 class AnthropicProvider(AIProvider):
     async def list_models(self) -> list[ProviderModel]:
-        async with httpx.AsyncClient(timeout=30) as client:
-            response = await client.get(
-                "https://api.anthropic.com/v1/models?limit=1000",
-                headers={"x-api-key": self.api_key, "anthropic-version": "2023-06-01"},
-            )
-            response.raise_for_status()
-            data: dict[str, Any] = response.json()
+        response = await self.request(
+            "GET",
+            "https://api.anthropic.com/v1/models?limit=1000",
+            headers={"x-api-key": self.api_key, "anthropic-version": "2023-06-01"},
+        )
+        data: dict[str, Any] = response.json()
         return sorted(
             [
                 ProviderModel(
@@ -79,25 +76,41 @@ class AnthropicProvider(AIProvider):
         )
 
     async def run(self, request: ProviderRequest) -> ProviderResponse:
+        content: str | list[dict[str, Any]] = request.prompt
+        if request.cacheable_prompt_prefix:
+            content = [
+                {
+                    "type": "text",
+                    "text": request.cacheable_prompt_prefix,
+                    "cache_control": {"type": "ephemeral"},
+                },
+                {"type": "text", "text": request.prompt},
+            ]
         payload: dict[str, Any] = {
             "model": request.model,
-            "system": request.system,
-            "messages": [{"role": "user", "content": request.prompt}],
+            "system": [
+                {
+                    "type": "text",
+                    "text": request.system,
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ],
+            "messages": [{"role": "user", "content": content}],
             "max_tokens": request.max_output_tokens,
         }
         if request.temperature is not None:
             payload["temperature"] = request.temperature
-        async with httpx.AsyncClient(timeout=request.timeout_seconds) as client:
-            response = await client.post(
-                "https://api.anthropic.com/v1/messages",
-                headers={
-                    "x-api-key": self.api_key,
-                    "anthropic-version": "2023-06-01",
-                },
-                json=payload,
-            )
-            response.raise_for_status()
-            data: dict[str, Any] = response.json()
+        response = await self.request(
+            "POST",
+            "https://api.anthropic.com/v1/messages",
+            timeout_seconds=request.timeout_seconds,
+            headers={
+                "x-api-key": self.api_key,
+                "anthropic-version": "2023-06-01",
+            },
+            json=payload,
+        )
+        data: dict[str, Any] = response.json()
         text = "".join(
             block.get("text", "")
             for block in data.get("content", [])
@@ -114,13 +127,12 @@ class AnthropicProvider(AIProvider):
 
 class GoogleProvider(AIProvider):
     async def list_models(self) -> list[ProviderModel]:
-        async with httpx.AsyncClient(timeout=30) as client:
-            response = await client.get(
-                "https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000",
-                headers={"x-goog-api-key": self.api_key},
-            )
-            response.raise_for_status()
-            data: dict[str, Any] = response.json()
+        response = await self.request(
+            "GET",
+            "https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000",
+            headers={"x-goog-api-key": self.api_key},
+        )
+        data: dict[str, Any] = response.json()
         models = []
         for item in data.get("models", []):
             actions = item.get("supportedGenerationMethods", [])
@@ -133,22 +145,23 @@ class GoogleProvider(AIProvider):
         return sorted(models, key=lambda item: item.id)
 
     async def run(self, request: ProviderRequest) -> ProviderResponse:
+        prompt = (request.cacheable_prompt_prefix or "") + request.prompt
         generation_config: dict[str, Any] = {"max_output_tokens": request.max_output_tokens}
         if request.temperature is not None:
             generation_config["temperature"] = request.temperature
-        async with httpx.AsyncClient(timeout=request.timeout_seconds) as client:
-            response = await client.post(
-                "https://generativelanguage.googleapis.com/v1beta/interactions",
-                headers={"x-goog-api-key": self.api_key},
-                json={
-                    "model": request.model,
-                    "system_instruction": request.system,
-                    "input": request.prompt,
-                    "generation_config": generation_config,
-                },
-            )
-            response.raise_for_status()
-            data: dict[str, Any] = response.json()
+        response = await self.request(
+            "POST",
+            "https://generativelanguage.googleapis.com/v1beta/interactions",
+            timeout_seconds=request.timeout_seconds,
+            headers={"x-goog-api-key": self.api_key},
+            json={
+                "model": request.model,
+                "system_instruction": request.system,
+                "input": prompt,
+                "generation_config": generation_config,
+            },
+        )
+        data: dict[str, Any] = response.json()
         usage = data.get("usage") or data.get("usageMetadata") or {}
         return ProviderResponse(
             text=data.get("output_text", ""),

@@ -2,7 +2,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
-from sqlalchemy import CursorResult, func, or_, select, update
+from sqlalchemy import CursorResult, func, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
@@ -112,7 +112,12 @@ async def _pin_job_to_workflow(session: AsyncSession, task: Task, job: Job) -> N
 
 
 async def claim_next_job(session: AsyncSession, worker_id: str, lease_seconds: int) -> Job | None:
-    # PostgreSQL row locking makes claims safe across scheduler processes.
+    # Serialize the short count-and-claim transaction across scheduler processes. Locking only
+    # the candidate Job is insufficient because two jobs for one Team can independently pass
+    # the concurrency-count predicate. The transaction-scoped lock releases on commit/rollback.
+    bind = session.get_bind()
+    if bind.dialect.name == "postgresql":
+        await session.execute(text("SELECT pg_advisory_xact_lock(741963205)"))
     active_job = aliased(Job)
     active_task = aliased(Task)
     active_team_tasks = (

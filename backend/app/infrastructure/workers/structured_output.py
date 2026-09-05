@@ -101,6 +101,7 @@ async def run_with_structured_repair(
 ) -> tuple[dict[str, Any], list[ProviderAttempt]]:
     attempts: list[ProviderAttempt] = []
     prompt = request.prompt
+    cacheable_prefix: str | None = None
     last_error: ValidationError | None = None
     for attempt_number in range(max(0, min(max_repairs, 10)) + 1):
         started = time.monotonic()
@@ -113,6 +114,7 @@ async def run_with_structured_repair(
                 temperature=request.temperature,
                 reasoning_effort=request.reasoning_effort,
                 timeout_seconds=request.timeout_seconds,
+                cacheable_prompt_prefix=cacheable_prefix,
             )
         )
         attempts.append(ProviderAttempt(response, round((time.monotonic() - started) * 1000)))
@@ -122,9 +124,9 @@ async def run_with_structured_repair(
             last_error = exc
             if attempt_number >= max_repairs:
                 break
+            cacheable_prefix = request.prompt
             prompt = (
-                request.prompt
-                + "\n\nYour previous response failed schema validation. Return corrected JSON only. "
+                "\n\nYour previous response failed schema validation. Return corrected JSON only. "
                 + f"Validation errors: {exc.errors(include_url=False)}. "
                 + f"Previous response: {response.text[:8000]}"
             )
