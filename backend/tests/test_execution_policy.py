@@ -1,4 +1,6 @@
+import asyncio
 import sys
+import time
 import uuid
 from pathlib import Path
 from typing import Any, cast
@@ -12,7 +14,7 @@ from app.domain.security.paths import (
     windows_path_is_within,
 )
 from app.domain.security.policy import evaluate
-from app.infrastructure.tools.gateway import GatewayContext, ToolGateway
+from app.infrastructure.tools.gateway import GatewayContext, ToolDenied, ToolGateway
 
 
 class RecordingSession:
@@ -154,3 +156,80 @@ async def test_gateway_preserves_protected_environment(tmp_path: Path) -> None:
     assert "present" in result.stdout
     assert (tmp_path / ".worker-home").is_dir()
     assert session.records
+
+
+@pytest.mark.asyncio
+async def test_gateway_command_timeout_cleans_up_without_hanging(tmp_path: Path) -> None:
+    session = RecordingSession()
+    gateway = ToolGateway(
+        cast(Any, session),
+        GatewayContext(
+            uuid.uuid4(),
+            uuid.uuid4(),
+            uuid.uuid4(),
+            None,
+            None,
+            tmp_path,
+            "agent/task-1",
+            frozenset({"RUN_COMMANDS"}),
+        ),
+        TeamExecutionPolicy(max_command_timeout_seconds=10),
+    )
+
+    started = time.monotonic()
+    result = await asyncio.wait_for(
+        gateway.run_command(
+            [sys.executable, "-c", "import time; time.sleep(30)"], timeout_seconds=1
+        ),
+        timeout=7,
+    )
+
+    assert result.timed_out
+    assert result.exit_code != 0
+    assert time.monotonic() - started < 7
+
+
+@pytest.mark.asyncio
+async def test_gateway_caps_large_command_output(tmp_path: Path) -> None:
+    session = RecordingSession()
+    gateway = ToolGateway(
+        cast(Any, session),
+        GatewayContext(
+            uuid.uuid4(),
+            uuid.uuid4(),
+            uuid.uuid4(),
+            None,
+            None,
+            tmp_path,
+            "agent/task-1",
+            frozenset({"RUN_COMMANDS"}),
+        ),
+        TeamExecutionPolicy(max_output_bytes=1024),
+    )
+
+    result = await gateway.run_command([sys.executable, "-c", "print('x' * 4096)"])
+
+    assert result.truncated
+    assert len(result.stdout.encode()) <= 1024
+
+
+@pytest.mark.asyncio
+async def test_gateway_cannot_create_with_create_permission_alone(tmp_path: Path) -> None:
+    gateway = ToolGateway(
+        cast(Any, RecordingSession()),
+        GatewayContext(
+            uuid.uuid4(),
+            uuid.uuid4(),
+            uuid.uuid4(),
+            None,
+            None,
+            tmp_path,
+            "agent/task-1",
+            frozenset({"CREATE_FILES"}),
+        ),
+        TeamExecutionPolicy(),
+    )
+
+    with pytest.raises(ToolDenied):
+        await gateway.write_file("new.txt", "not authorized")
+    assert not (tmp_path / "new.txt").exists()
