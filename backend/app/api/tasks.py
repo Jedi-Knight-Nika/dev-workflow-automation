@@ -5,7 +5,13 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
-from app.application.ports.job_enqueueing import JobEnqueueWorkflow
+from app.application.jobs import EnqueueTaskJob
+from app.application.ports.job_enqueueing import (
+    EnqueueJobCommand,
+    EnqueueTaskConflict,
+    EnqueueTaskNotFound,
+    JobEnqueueWorkflow,
+)
 from app.application.ports.merge_workflow import MergeWorkflow
 from app.application.ports.pull_request_publication import (
     PublishConflict,
@@ -343,11 +349,3 @@ async def _change_lifecycle(
     except WorkspaceRefreshUnavailable as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return TaskRead.model_validate(task)
-
-
-from app.application.jobs import EnqueueTaskJob
-from app.application.ports.job_enqueueing import (
-    EnqueueJobCommand,
-    EnqueueTaskConflict,
-    EnqueueTaskNotFound,
-)

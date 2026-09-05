@@ -115,7 +115,9 @@ async def _run_docker(settings: Settings, job_id: uuid.UUID) -> WorkerExecution:
     transport = httpx.AsyncHTTPTransport(uds=str(settings.docker_socket))
     container_id: str | None = None
     async with httpx.AsyncClient(
-        transport=transport, base_url="http://docker", timeout=None
+        transport=transport,
+        base_url="http://docker",
+        timeout=httpx.Timeout(settings.docker_api_timeout_seconds),
     ) as client:
         response = await client.post(
             "/containers/create",
@@ -129,7 +131,7 @@ async def _run_docker(settings: Settings, job_id: uuid.UUID) -> WorkerExecution:
             start.raise_for_status()
             try:
                 wait = await asyncio.wait_for(
-                    client.post(f"/containers/{container_id}/wait"),
+                    client.post(f"/containers/{container_id}/wait", timeout=None),
                     timeout=settings.worker_timeout_seconds,
                 )
             except TimeoutError:
@@ -146,7 +148,11 @@ async def _run_docker(settings: Settings, job_id: uuid.UUID) -> WorkerExecution:
             return WorkerExecution(int(wait.json()["StatusCode"]), stdout[-limit:], stderr[-limit:])
         finally:
             if container_id:
-                await client.delete(f"/containers/{container_id}", params={"force": True})
+                try:
+                    await client.delete(f"/containers/{container_id}", params={"force": True})
+                except httpx.HTTPError:
+                    # Cleanup is best-effort; the scheduler must recover even when Docker is degraded.
+                    pass
 
 
 async def run_worker(settings: Settings, job_id: uuid.UUID) -> WorkerExecution:

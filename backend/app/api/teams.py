@@ -1,8 +1,8 @@
 import uuid
-from dataclasses import asdict
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
+from app.api.workflow_mapping import workflow_graph_data, workflow_graph_response
 from app.application.design_workflow import DesignWorkflow
 from app.application.manage_teams import ManageTeams
 from app.application.ports.model_validation import ModelValidationGateway, NodeModelValidationStore
@@ -20,7 +20,7 @@ from app.bootstrap.dependencies import (
     get_team_management_workflow,
     get_team_workflow_designer,
 )
-from app.domain.workflows import WorkflowEdgeData, WorkflowGraphData, WorkflowNodeData
+from app.domain.workflows import WorkflowGraphData
 from app.schemas import (
     TaskAssignmentCreate,
     TaskAssignmentRead,
@@ -44,75 +44,11 @@ def _team_command(body: TeamWrite) -> SaveTeamCommand:
 
 
 def _graph_response(graph: WorkflowGraphData) -> WorkflowGraphRead:
-    return WorkflowGraphRead.model_validate(
-        {
-            "version": graph.version,
-            "nodes": [asdict(node) for node in graph.nodes],
-            "edges": [asdict(edge) for edge in graph.edges],
-        }
-    )
+    return workflow_graph_response(graph)
 
 
 def _graph_data(body: WorkflowGraphRead) -> WorkflowGraphData:
-    return WorkflowGraphData(
-        body.version,
-        tuple(
-            WorkflowNodeData(
-                str(node.id),
-                node.role,
-                node.label,
-                node.position_x,
-                node.position_y,
-                node.enabled,
-                node.activation_policy,
-                node.batch_window_seconds,
-                tuple(str(item) for item in node.integration_ids),
-                tuple(str(item) for item in node.repository_ids),
-                node.provider,
-                node.model,
-                node.system_prompt,
-                node.model_validation_status,
-                node.model_validation_message,
-                node.model_validated_at,
-                node.integration_mode,
-                node.poll_interval_seconds,
-                node.filter_assignee_id,
-                tuple(node.filter_state_ids),
-                node.integration_sync_status,
-                node.integration_sync_error,
-                node.integration_last_synced_at,
-                node.reasoning_effort,
-                node.max_output_tokens,
-                node.temperature,
-                node.timeout_minutes,
-                node.max_retries,
-                node.max_review_cycles,
-                node.context_depth,
-                node.rag_retrieval_depth,
-                node.fallback_provider,
-                node.fallback_model,
-                str(node.agent_id) if node.agent_id else None,
-                node.node_type,
-                node.system_node_type,
-            )
-            for node in body.nodes
-        ),
-        tuple(
-            WorkflowEdgeData(
-                str(edge.id),
-                str(edge.source_node_id),
-                str(edge.target_node_id),
-                edge.outcome,
-                edge.required,
-                edge.job_type,
-                edge.internal_task_state,
-                edge.external_status_key,
-                edge.priority_override,
-                edge.configuration,
-            )
-            for edge in body.edges
-        ),
-    )
+    return workflow_graph_data(body)
 
 
 @router.get("", response_model=list[TeamRead])

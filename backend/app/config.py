@@ -18,11 +18,16 @@ class Settings(BaseSettings):
     database_url_sync: str = (
         "postgresql+psycopg://engineering_worker:change-me@localhost:5432/engineering_worker"
     )
+    database_pool_size: int = Field(default=10, ge=1, le=100)
+    database_max_overflow: int = Field(default=20, ge=0, le=200)
+    database_pool_recycle_seconds: int = Field(default=1800, ge=60, le=86_400)
+    database_pool_timeout_seconds: int = Field(default=30, ge=1, le=300)
     app_secret_key: str = Field(default="development-only-secret-change-me", min_length=16)
     workspace_root: Path = Path("./workspaces")
     scheduler_enabled: bool = True
     scheduler_poll_seconds: float = 1.0
     worker_timeout_seconds: int = 300
+    docker_api_timeout_seconds: int = Field(default=30, ge=1, le=300)
     worker_lease_seconds: int = 330
     worker_heartbeat_seconds: float = 5.0
     max_executor_jobs_per_task: int = 5

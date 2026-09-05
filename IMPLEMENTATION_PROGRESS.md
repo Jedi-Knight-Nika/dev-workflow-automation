@@ -913,3 +913,24 @@ This is the durable implementation ledger for the project. Update it whenever a 
   PostgreSQL container and confirmed backend readiness at Alembic head `0036`.
 - Validation: backend formatting, Ruff, strict mypy, all 229 backend tests, frontend Svelte/TypeScript
   checks, and Docker backend/worker builds pass.
+
+## 2026-09-06 — Critical scalability and runtime hardening
+
+- Removed the Dashboard Team-summary N+1 pattern. Team activity now loads active work, queue
+  counts, task metrics, token totals, and latest states with a fixed number of grouped queries
+  instead of seven sequential database round trips per Team.
+- Added migration `0037_query_path_indexes` with targeted indexes for scheduler, dashboard,
+  workflow, worker-run, notification/incident, approval, audit, and cascade-delete foreign-key
+  paths. Existing composite indexes were reused instead of adding redundant single-column indexes.
+- Added explicit, configurable async SQLAlchemy pool size, overflow, checkout timeout, connection
+  recycling, and pre-ping behavior for long-running and proxied deployments.
+- Bounded Docker create/start/log/kill/delete calls with an API timeout while retaining the Job
+  timeout around container wait. Failed cleanup no longer masks the original Worker result.
+- Replaced duplicate Workflow API/domain conversion blocks with one keyword-based mapper and moved
+  late imports back to normal module boundaries; no circular dependency was present.
+- Confirmed repository and Agent knowledge already use PostgreSQL `vector(1536)` distance queries
+  and IVFFlat ANN indexes. The ORM `Text` annotation is only a compatibility facade for raw SQL;
+  the reported Python similarity scan does not exist.
+- Validation: backend formatting, Ruff, strict mypy, and all 229 tests pass. Migration `0037` was
+  applied against PostgreSQL, backend readiness passes, and the optimized dashboard endpoint returns
+  successfully.

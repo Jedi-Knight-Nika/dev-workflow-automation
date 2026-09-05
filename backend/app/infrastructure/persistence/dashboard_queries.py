@@ -1,3 +1,4 @@
+import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -200,88 +201,92 @@ class SqlAlchemyDashboardQueries:
                 )
             ).all()
         )
+        active_rows = (
+            await self._session.execute(
+                select(Job, Task, AIAgent)
+                .join(Task, Task.id == Job.task_id)
+                .outerjoin(AIAgent, AIAgent.id == Job.agent_id)
+                .where(Job.state.in_(ACTIVE_JOB_STATES), Task.team_id.is_not(None))
+                .order_by(Task.team_id, Job.started_at)
+            )
+        ).all()
+        active_by_team: dict[uuid.UUID, tuple[Job, Task, AIAgent | None]] = {}
+        for job, task, agent in active_rows:
+            if task.team_id is not None:
+                active_by_team.setdefault(task.team_id, (job, task, agent))
+
+        queued_rows = (
+            await self._session.execute(
+                select(Task.team_id, func.count(Job.id))
+                .join(Job, Job.task_id == Task.id)
+                .where(Task.team_id.is_not(None), Job.state.in_(QUEUED_JOB_STATES))
+                .group_by(Task.team_id)
+            )
+        ).all()
+        queued_by_team: dict[uuid.UUID, int] = {
+            team_id: int(count) for team_id, count in queued_rows if team_id is not None
+        }
+        task_metrics = {
+            team_id: (int(open_prs), int(ready), int(attention))
+            for team_id, open_prs, ready, attention in (
+                await self._session.execute(
+                    select(
+                        Task.team_id,
+                        func.count(Task.id).filter(
+                            Task.pull_request_number.is_not(None), Task.state != TaskState.MERGED
+                        ),
+                        func.count(Task.id).filter(Task.state == TaskState.READY_TO_MERGE),
+                        func.count(Task.id).filter(
+                            Task.state.in_((TaskState.NEEDS_HUMAN, TaskState.CONTEXT_PENDING))
+                        ),
+                    )
+                    .where(Task.team_id.is_not(None))
+                    .group_by(Task.team_id)
+                )
+            ).all()
+        }
+        token_rows = (
+            await self._session.execute(
+                select(
+                    Task.team_id,
+                    func.coalesce(
+                        func.sum(
+                            func.coalesce(WorkerRun.input_tokens, 0)
+                            + func.coalesce(WorkerRun.output_tokens, 0)
+                        ),
+                        0,
+                    ),
+                )
+                .join(Job, Job.id == WorkerRun.job_id)
+                .join(Task, Task.id == Job.task_id)
+                .where(Task.team_id.is_not(None), WorkerRun.created_at >= start)
+                .group_by(Task.team_id)
+            )
+        ).all()
+        tokens_by_team: dict[uuid.UUID, int] = {
+            team_id: int(tokens) for team_id, tokens in token_rows if team_id is not None
+        }
+        latest_state_rows = (
+            await self._session.execute(
+                select(Task.team_id, Task.state)
+                .where(Task.team_id.is_not(None))
+                .distinct(Task.team_id)
+                .order_by(Task.team_id, Task.updated_at.desc())
+            )
+        ).all()
+        latest_states: dict[uuid.UUID, TaskState] = {
+            team_id: state for team_id, state in latest_state_rows if team_id is not None
+        }
+
         result: list[TeamActivityView] = []
         for team in teams:
-            active = await self._session.scalar(
-                select(Job)
-                .join(Task)
-                .where(Task.team_id == team.id, Job.state.in_(ACTIVE_JOB_STATES))
-                .order_by(Job.started_at)
-                .limit(1)
-            )
-            task = await self._session.get(Task, active.task_id) if active else None
-            agent = (
-                await self._session.scalar(
-                    select(AIAgent)
-                    .join(WorkflowNode, WorkflowNode.agent_id == AIAgent.id)
-                    .join(WorkflowDefinition, WorkflowDefinition.id == WorkflowNode.workflow_id)
-                    .where(
-                        WorkflowDefinition.team_id == team.id,
-                        WorkflowNode.role == active.role.value,
-                    )
-                    .limit(1)
-                )
-                if active
-                else None
-            )
-            queued = int(
-                await self._session.scalar(
-                    select(func.count(Job.id))
-                    .join(Task)
-                    .where(Task.team_id == team.id, Job.state.in_(QUEUED_JOB_STATES))
-                )
-                or 0
-            )
-            open_prs = int(
-                await self._session.scalar(
-                    select(func.count(Task.id)).where(
-                        Task.team_id == team.id,
-                        Task.pull_request_number.is_not(None),
-                        Task.state != TaskState.MERGED,
-                    )
-                )
-                or 0
-            )
-            ready = int(
-                await self._session.scalar(
-                    select(func.count(Task.id)).where(
-                        Task.team_id == team.id, Task.state == TaskState.READY_TO_MERGE
-                    )
-                )
-                or 0
-            )
-            tokens = int(
-                await self._session.scalar(
-                    select(
-                        func.coalesce(
-                            func.sum(
-                                func.coalesce(WorkerRun.input_tokens, 0)
-                                + func.coalesce(WorkerRun.output_tokens, 0)
-                            ),
-                            0,
-                        )
-                    )
-                    .join(Job)
-                    .join(Task)
-                    .where(Task.team_id == team.id, WorkerRun.created_at >= start)
-                )
-                or 0
-            )
-            attention = await self._session.scalar(
-                select(func.count(Task.id)).where(
-                    Task.team_id == team.id,
-                    Task.state.in_((TaskState.NEEDS_HUMAN, TaskState.CONTEXT_PENDING)),
-                )
-            )
-            latest_task_state = await self._session.scalar(
-                select(Task.state)
-                .where(Task.team_id == team.id)
-                .order_by(Task.updated_at.desc())
-                .limit(1)
-            )
-            status = self._team_status(
-                active is not None, bool(attention), queued, latest_task_state
-            )
+            current = active_by_team.get(team.id)
+            active, task, agent = current if current else (None, None, None)
+            queued = int(queued_by_team.get(team.id, 0))
+            open_prs, ready, attention = task_metrics.get(team.id, (0, 0, 0))
+            tokens = int(tokens_by_team.get(team.id, 0))
+            latest_task_state = latest_states.get(team.id)
+            status = self._team_status(active is not None, attention > 0, queued, latest_task_state)
             result.append(
                 TeamActivityView(
                     str(team.id),
