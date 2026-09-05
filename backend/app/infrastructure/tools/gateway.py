@@ -21,6 +21,7 @@ from app.domain.security.paths import resolve_workspace_path
 from app.domain.security.policy import evaluate
 
 SECRET = re.compile(r"(?i)(token|secret|password|api[_-]?key)(\s*[=:]\s*)([^\s]+)")
+PROTECTED_ENVIRONMENT_KEYS = frozenset({"HOME", "PATH", "USERPROFILE"})
 
 
 class ToolDenied(PermissionError):
@@ -97,12 +98,20 @@ class ToolGateway:
             {"command": command, "timeout_seconds": timeout},
             tuple(command),
         )
+        worker_home = self._context.workspace / ".worker-home"
+        worker_home.mkdir(mode=0o700, exist_ok=True)
         env = {
             "PATH": os.environ.get("PATH", ""),
             "CI": "true",
-            "HOME": str(self._context.workspace / ".worker-home"),
+            "HOME": str(worker_home),
         }
-        env.update(environment or {})
+        env.update(
+            {
+                key: value
+                for key, value in (environment or {}).items()
+                if key.upper() not in PROTECTED_ENVIRONMENT_KEYS
+            }
+        )
         started = time.monotonic()
         process = await asyncio.create_subprocess_exec(
             *command,

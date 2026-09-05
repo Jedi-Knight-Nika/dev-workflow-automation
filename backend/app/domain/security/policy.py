@@ -83,6 +83,15 @@ class TeamExecutionPolicy:
     max_command_timeout_seconds: int = 1200
     max_output_bytes: int = 1_000_000
 
+    def __post_init__(self) -> None:
+        unknown = set(self.settings) - CAPABILITY_CATALOG
+        if unknown:
+            raise ValueError(f"Unknown capabilities: {', '.join(sorted(unknown))}")
+        if not 10 <= self.max_command_timeout_seconds <= 7200:
+            raise ValueError("Command timeout must be between 10 and 7200 seconds")
+        if not 1024 <= self.max_output_bytes <= 5_000_000:
+            raise ValueError("Maximum output must be between 1024 and 5000000 bytes")
+
     def outcome(self, capability: str) -> Decision:
         if capability == "MERGE_PR":
             return Decision.REQUIRE_HUMAN

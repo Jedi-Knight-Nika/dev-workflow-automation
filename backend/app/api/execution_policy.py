@@ -48,9 +48,6 @@ async def save_policy(
     runtime_settings: Settings = Depends(get_settings),
 ) -> ExecutionPolicyRead:
     try:
-        unknown = set(body.settings) - CAPABILITY_CATALOG
-        if unknown:
-            raise ValueError(f"Unknown capabilities: {', '.join(sorted(unknown))}")
         settings = {key: Decision(value) for key, value in body.settings.items()}
         policy = TeamExecutionPolicy(
             ExecutionMode(body.mode),

@@ -1,4 +1,7 @@
+import sys
+import uuid
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 
@@ -9,6 +12,18 @@ from app.domain.security.paths import (
     windows_path_is_within,
 )
 from app.domain.security.policy import evaluate
+from app.infrastructure.tools.gateway import GatewayContext, ToolGateway
+
+
+class RecordingSession:
+    def __init__(self) -> None:
+        self.records: list[object] = []
+
+    def add(self, record: object) -> None:
+        self.records.append(record)
+
+    async def commit(self) -> None:
+        return None
 
 
 def request(
@@ -50,6 +65,23 @@ def test_missing_role_permission_is_denied() -> None:
     assert evaluate(TeamExecutionPolicy(), action).decision == Decision.DENY
 
 
+def test_policy_rejects_unknown_capabilities() -> None:
+    with pytest.raises(ValueError, match="Unknown capabilities"):
+        TeamExecutionPolicy(settings={"MADE_UP_PERMISSION": Decision.ALLOW})
+
+
+@pytest.mark.parametrize(
+    ("timeout", "output"),
+    [(9, 1_000_000), (7201, 1_000_000), (1200, 1023), (1200, 5_000_001)],
+)
+def test_policy_rejects_unsafe_runtime_limits(timeout: int, output: int) -> None:
+    with pytest.raises(ValueError):
+        TeamExecutionPolicy(
+            max_command_timeout_seconds=timeout,
+            max_output_bytes=output,
+        )
+
+
 def test_only_task_branch_can_be_pushed() -> None:
     assert (
         evaluate(TeamExecutionPolicy(), request("PUSH_TASK_BRANCH", branch="main")).decision
@@ -83,3 +115,42 @@ def test_windows_ancestry_is_case_insensitive_and_not_prefix_based() -> None:
     assert windows_path_is_within(r"C:\work\task-1", r"SRC\file.py")
     assert not windows_path_is_within(r"C:\work\task-1", r"..\task-10\secret")
     assert not windows_path_is_within(r"C:\work\task-1", r"D:\secret")
+
+
+@pytest.mark.asyncio
+async def test_gateway_preserves_protected_environment(tmp_path: Path) -> None:
+    session = RecordingSession()
+    gateway = ToolGateway(
+        cast(Any, session),
+        GatewayContext(
+            uuid.uuid4(),
+            uuid.uuid4(),
+            uuid.uuid4(),
+            None,
+            None,
+            tmp_path,
+            "agent/task-1",
+            frozenset({"RUN_COMMANDS"}),
+        ),
+        TeamExecutionPolicy(),
+    )
+
+    result = await gateway.run_command(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import os; print(os.environ['HOME']); print(os.environ['PATH']); "
+                "print(os.environ['SAFE_VALUE'])"
+            ),
+        ],
+        environment={"HOME": "/host/home", "PATH": "/untrusted", "SAFE_VALUE": "present"},
+    )
+
+    assert result.exit_code == 0
+    assert str(tmp_path / ".worker-home") in result.stdout
+    assert "/host/home" not in result.stdout
+    assert "/untrusted" not in result.stdout
+    assert "present" in result.stdout
+    assert (tmp_path / ".worker-home").is_dir()
+    assert session.records

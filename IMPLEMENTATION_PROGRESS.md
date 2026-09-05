@@ -846,3 +846,15 @@ This is the durable implementation ledger for the project. Update it whenever a 
 - Added policy, approval, and task/job audit APIs; Team configuration now exposes execution modes/capability decisions, while the dashboard exposes pending approvals with Allow Once and Deny actions.
 - Strengthened platform agent instructions around untrusted external content, non-escalation, non-self-modification, routine autonomy, and deterministic runtime authority.
 - Validation: strict backend formatting/lint/typing passes with 213 tests; frontend lint, formatting, Svelte/TypeScript checks, 23 tests, and production build pass.
+
+## 2026-09-06 — Backend safety and duplication audit
+
+- Audited backend modules, imports, subprocess entry points, filesystem mutations, and legacy
+  adapters. No module was deleted without reliable proof that runtime entry points do not use it.
+- Centralized execution-policy invariant validation in the domain object so API, worker, and
+  persistence callers share the same capability and runtime-limit rules.
+- Prevented command-specific environments from replacing the Tool Gateway's protected `HOME`,
+  `PATH`, or Windows `USERPROFILE`, and create a private worker home before execution.
+- Added regression coverage for invalid capabilities, invalid limits, and protected worker
+  environments.
+- Validation: backend formatting, Ruff, strict mypy, and all 219 tests pass.
