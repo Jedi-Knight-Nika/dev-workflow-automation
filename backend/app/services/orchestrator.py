@@ -2,10 +2,18 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
-from sqlalchemy import CursorResult, select, update
+from sqlalchemy import CursorResult, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import Job, JobRole, JobState, Task, TaskEvent, TaskState
+from app.db.models import (
+    Job,
+    JobRole,
+    JobState,
+    Task,
+    TaskEvent,
+    TaskState,
+    WorkspaceLease,
+)
 
 ROLE_TASK_STATE = {
     JobRole.INTAKE: TaskState.NEW,
@@ -59,7 +67,10 @@ async def claim_next_job(session: AsyncSession, worker_id: str, lease_seconds: i
         select(Job)
         .join(Task)
         .where(
-            Job.state == JobState.QUEUED, Task.state.notin_([TaskState.PAUSED, TaskState.CANCELLED])
+            Job.state.in_([JobState.QUEUED, JobState.RETRY_WAIT]),
+            or_(Job.retry_not_before.is_(None), Job.retry_not_before <= datetime.now(UTC)),
+            Task.manual_takeover.is_(False),
+            Task.state.notin_([TaskState.PAUSED, TaskState.CANCELLED]),
         )
         .order_by(Job.priority.asc(), Job.created_at.asc())
         .with_for_update(skip_locked=True)
@@ -73,6 +84,8 @@ async def claim_next_job(session: AsyncSession, worker_id: str, lease_seconds: i
     job.worker_id = worker_id
     job.lease_token = uuid.uuid4()
     job.lease_expires_at = now + timedelta(seconds=lease_seconds)
+    job.retry_not_before = None
+    job.finished_at = None
     job.attempt += 1
     job.started_at = now
     await record_event(
@@ -100,3 +113,24 @@ async def recover_expired_jobs(session: AsyncSession) -> int:
     )
     await session.commit()
     return result.rowcount or 0
+
+
+async def acquire_workspace_lease(session: AsyncSession, job: Job, lease_seconds: int) -> bool:
+    now = datetime.now(UTC)
+    lease = await session.get(WorkspaceLease, job.task_id, with_for_update=True)
+    if lease and lease.expires_at >= now and lease.job_id != job.id:
+        return False
+    if lease is None:
+        lease = WorkspaceLease(task_id=job.task_id, job_id=job.id)
+        session.add(lease)
+    lease.job_id = job.id
+    lease.token = uuid.uuid4()
+    lease.expires_at = now + timedelta(seconds=lease_seconds)
+    await session.commit()
+    return True
+
+
+async def release_workspace_lease(session: AsyncSession, job: Job) -> None:
+    lease = await session.get(WorkspaceLease, job.task_id, with_for_update=True)
+    if lease and lease.job_id == job.id:
+        await session.delete(lease)

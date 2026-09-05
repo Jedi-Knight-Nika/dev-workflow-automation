@@ -1,16 +1,27 @@
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from time import perf_counter
+from uuid import uuid4
 
+import structlog
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.base import RequestResponseEndpoint
+from starlette.requests import Request
+from starlette.responses import Response
 
+from app.api.control_plane import router as control_plane_router
 from app.api.events import router as events_router
 from app.api.health import router as health_router
 from app.api.tasks import router as tasks_router
+from app.api.webhooks import router as webhooks_router
 from app.config import get_settings
+from app.logging import configure_logging
 from app.services.scheduler import Scheduler
 
 settings = get_settings()
+configure_logging(settings.log_level)
+log = structlog.get_logger()
 scheduler = Scheduler(settings)
 
 
@@ -33,7 +44,36 @@ app.add_middleware(
 )
 app.include_router(health_router)
 app.include_router(tasks_router, prefix="/api/v1")
+app.include_router(control_plane_router, prefix="/api/v1")
 app.include_router(events_router, prefix="/api/v1")
+app.include_router(webhooks_router)
+
+
+@app.middleware("http")
+async def request_log(request: Request, call_next: RequestResponseEndpoint) -> Response:
+    request_id = request.headers.get("x-request-id") or uuid4().hex
+    started = perf_counter()
+    try:
+        response = await call_next(request)
+    except Exception:
+        log.exception(
+            "http_request_failed",
+            request_id=request_id,
+            method=request.method,
+            path=request.url.path,
+            duration_ms=round((perf_counter() - started) * 1000),
+        )
+        raise
+    response.headers["x-request-id"] = request_id
+    log.info(
+        "http_request_completed",
+        request_id=request_id,
+        method=request.method,
+        path=request.url.path,
+        status_code=response.status_code,
+        duration_ms=round((perf_counter() - started) * 1000),
+    )
+    return response
 
 
 @app.get("/")

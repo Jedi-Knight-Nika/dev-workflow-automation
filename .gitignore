@@ -8,6 +8,8 @@ __pycache__/
 frontend/node_modules/
 frontend/.svelte-kit/
 frontend/build/
+frontend/playwright-report/
+frontend/test-results/
 postgres_data/
 workspaces/
-
+deploy/backups/

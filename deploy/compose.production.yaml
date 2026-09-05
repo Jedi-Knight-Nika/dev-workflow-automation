@@ -1,0 +1,196 @@
+name: autonomous-engineering-worker
+
+services:
+  proxy:
+    image: caddy:2.10-alpine
+    environment:
+      DOMAIN: ${DOMAIN:?Set DOMAIN to the public hostname}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      backend:
+        condition: service_healthy
+      frontend:
+        condition: service_started
+    restart: unless-stopped
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-engineering_worker}
+      POSTGRES_USER: ${POSTGRES_USER:-engineering_worker}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: ../backend
+      target: api
+    environment: &backend-environment
+      ENVIRONMENT: production
+      DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL with URL-encoded credentials}
+      DATABASE_URL_SYNC: ${DATABASE_URL_SYNC:?Set DATABASE_URL_SYNC with URL-encoded credentials}
+      APP_SECRET_KEY: ${APP_SECRET_KEY:?Set APP_SECRET_KEY}
+      GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:?Set GITHUB_WEBHOOK_SECRET}
+      GITHUB_APP_RETURN_URL: ${GITHUB_APP_RETURN_URL:?Set GITHUB_APP_RETURN_URL}
+      LINEAR_WEBHOOK_SECRET: ${LINEAR_WEBHOOK_SECRET:?Set LINEAR_WEBHOOK_SECRET}
+      WORKSPACE_ROOT: /data/workspaces
+      SCHEDULER_ENABLED: "false"
+      SCHEDULER_POLL_SECONDS: ${SCHEDULER_POLL_SECONDS:-1.0}
+      WORKER_TIMEOUT_SECONDS: ${WORKER_TIMEOUT_SECONDS:-300}
+      WORKER_LEASE_SECONDS: ${WORKER_LEASE_SECONDS:-330}
+      WORKER_HEARTBEAT_SECONDS: ${WORKER_HEARTBEAT_SECONDS:-5}
+      MAX_EXECUTOR_JOBS_PER_TASK: ${MAX_EXECUTOR_JOBS_PER_TASK:-5}
+      MAX_THINKER_JOBS_PER_TASK: ${MAX_THINKER_JOBS_PER_TASK:-3}
+      MAX_SAME_FINDING_REPEATS: ${MAX_SAME_FINDING_REPEATS:-2}
+      MAX_CI_REPAIRS_PER_TASK: ${MAX_CI_REPAIRS_PER_TASK:-3}
+      MAX_EXTERNAL_REVIEW_REPAIRS_PER_TASK: ${MAX_EXTERNAL_REVIEW_REPAIRS_PER_TASK:-3}
+      MAX_JOB_ATTEMPTS: ${MAX_JOB_ATTEMPTS:-3}
+      JOB_RETRY_BASE_SECONDS: ${JOB_RETRY_BASE_SECONDS:-5}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - workspaces:/data/workspaces
+    expose:
+      - "8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/ready')"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: ../backend
+      target: worker
+    image: autonomous-engineering-worker-runtime:latest
+    environment:
+      <<: *backend-environment
+      SCHEDULER_ENABLED: "true"
+      WORKER_TRANSPORT: docker
+      DOCKER_SOCKET: /var/run/docker.sock
+      WORKER_CONTAINER_IMAGE: autonomous-engineering-worker-runtime:latest
+      WORKER_CONTAINER_NETWORK: autonomous-engineering-worker_default
+      WORKER_WORKSPACE_VOLUME: autonomous-engineering-worker_workspaces
+      WORKER_CONTAINER_MEMORY_MB: ${WORKER_CONTAINER_MEMORY_MB:-1536}
+      WORKER_CONTAINER_CPUS: ${WORKER_CONTAINER_CPUS:-1.5}
+      WORKER_DATABASE_URL: ${WORKER_DATABASE_URL:?Set a least-privilege worker database URL}
+      WORKER_EGRESS_PROXY: ${WORKER_EGRESS_PROXY:-}
+      WORKER_NO_PROXY: ${WORKER_NO_PROXY:-postgres}
+    depends_on:
+      backend:
+        condition: service_healthy
+    volumes:
+      - workspaces:/data/workspaces
+      - /var/run/docker.sock:/var/run/docker.sock
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp
+    pids_limit: 256
+    mem_limit: 2g
+    cpus: 2.0
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ../frontend
+    environment:
+      API_URL: http://backend:8000
+    depends_on:
+      backend:
+        condition: service_healthy
+    expose:
+      - "3000"
+    restart: unless-stopped
+
+  backup:
+    image: postgres:16-alpine
+    profiles: ["tools"]
+    environment:
+      PGHOST: postgres
+      PGDATABASE: ${POSTGRES_DB:-engineering_worker}
+      PGUSER: ${POSTGRES_USER:-engineering_worker}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-14}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - workspaces:/workspaces:ro
+      - ${BACKUP_DIR:-./backups}:/backups
+      - ./backup.sh:/usr/local/bin/backup:ro
+    entrypoint: ["/bin/sh", "/usr/local/bin/backup"]
+
+  restore:
+    image: postgres:16-alpine
+    profiles: ["tools"]
+    environment:
+      PGHOST: postgres
+      PGUSER: ${POSTGRES_USER:-engineering_worker}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+      RESTORE_DATABASE: ${POSTGRES_DB:-engineering_worker}
+      BACKUP_SET: ${BACKUP_SET:-}
+      CONFIRM_RESTORE: ${CONFIRM_RESTORE:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - workspaces:/workspaces
+      - ${BACKUP_DIR:-./backups}:/backups:ro
+      - ./restore.sh:/usr/local/bin/restore:ro
+    entrypoint: ["/bin/sh", "/usr/local/bin/restore"]
+
+  provision-worker-db:
+    image: postgres:16-alpine
+    profiles: ["tools"]
+    environment:
+      PGHOST: postgres
+      PGDATABASE: ${POSTGRES_DB:-engineering_worker}
+      PGUSER: ${POSTGRES_USER:-engineering_worker}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+      WORKER_DB_USER: ${WORKER_DB_USER:?Set WORKER_DB_USER}
+      WORKER_DB_PASSWORD: ${WORKER_DB_PASSWORD:?Set WORKER_DB_PASSWORD}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./provision-worker-db.sh:/usr/local/bin/provision-worker-db:ro
+    entrypoint: ["/bin/sh", "/usr/local/bin/provision-worker-db"]
+
+  rotate-credentials:
+    build:
+      context: ../backend
+      target: api
+    profiles: ["tools"]
+    environment:
+      DATABASE_URL_SYNC: ${DATABASE_URL_SYNC:?Set DATABASE_URL_SYNC}
+      APP_SECRET_KEY: ${APP_SECRET_KEY:?Set current APP_SECRET_KEY}
+      NEW_APP_SECRET_KEY: ${NEW_APP_SECRET_KEY:-}
+      CONFIRM_CREDENTIAL_ROTATION: ${CONFIRM_CREDENTIAL_ROTATION:-}
+      SCHEDULER_ENABLED: "false"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    entrypoint: [".venv/bin/python", "-m", "app.services.credential_rotation"]
+
+volumes:
+  postgres_data:
+  workspaces:
+  caddy_data:
+  caddy_config:

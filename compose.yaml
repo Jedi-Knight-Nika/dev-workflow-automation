@@ -18,13 +18,28 @@ services:
   backend:
     build:
       context: ./backend
-      target: runtime
+      target: api
     environment:
       DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://engineering_worker:change-me@postgres:5432/engineering_worker}
       DATABASE_URL_SYNC: ${DATABASE_URL_SYNC:-postgresql+psycopg://engineering_worker:change-me@postgres:5432/engineering_worker}
       APP_SECRET_KEY: ${APP_SECRET_KEY:-development-only-secret-change-me}
+      GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-}
+      GITHUB_APP_RETURN_URL: ${GITHUB_APP_RETURN_URL:-http://localhost:3000/integrations}
+      LINEAR_WEBHOOK_SECRET: ${LINEAR_WEBHOOK_SECRET:-}
       WORKSPACE_ROOT: /data/workspaces
-      SCHEDULER_ENABLED: "true"
+      SCHEDULER_ENABLED: "false"
+      SCHEDULER_POLL_SECONDS: ${SCHEDULER_POLL_SECONDS:-1.0}
+      WORKER_TIMEOUT_SECONDS: ${WORKER_TIMEOUT_SECONDS:-300}
+      WORKER_LEASE_SECONDS: ${WORKER_LEASE_SECONDS:-330}
+      WORKER_HEARTBEAT_SECONDS: ${WORKER_HEARTBEAT_SECONDS:-5}
+      MAX_EXECUTOR_JOBS_PER_TASK: ${MAX_EXECUTOR_JOBS_PER_TASK:-5}
+      MAX_THINKER_JOBS_PER_TASK: ${MAX_THINKER_JOBS_PER_TASK:-3}
+      MAX_SAME_FINDING_REPEATS: ${MAX_SAME_FINDING_REPEATS:-2}
+      MAX_CI_REPAIRS_PER_TASK: ${MAX_CI_REPAIRS_PER_TASK:-3}
+      MAX_EXTERNAL_REVIEW_REPAIRS_PER_TASK: ${MAX_EXTERNAL_REVIEW_REPAIRS_PER_TASK:-3}
+      MAX_JOB_ATTEMPTS: ${MAX_JOB_ATTEMPTS:-3}
+      JOB_RETRY_BASE_SECONDS: ${JOB_RETRY_BASE_SECONDS:-5}
+      WORKER_TRANSPORT: local
     depends_on:
       postgres:
         condition: service_healthy
@@ -37,6 +52,42 @@ services:
       interval: 10s
       timeout: 3s
       retries: 10
+
+  worker:
+    build:
+      context: ./backend
+      target: worker
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://engineering_worker:change-me@postgres:5432/engineering_worker}
+      DATABASE_URL_SYNC: ${DATABASE_URL_SYNC:-postgresql+psycopg://engineering_worker:change-me@postgres:5432/engineering_worker}
+      APP_SECRET_KEY: ${APP_SECRET_KEY:-development-only-secret-change-me}
+      WORKSPACE_ROOT: /data/workspaces
+      SCHEDULER_ENABLED: "true"
+      SCHEDULER_POLL_SECONDS: ${SCHEDULER_POLL_SECONDS:-1.0}
+      WORKER_TIMEOUT_SECONDS: ${WORKER_TIMEOUT_SECONDS:-300}
+      WORKER_LEASE_SECONDS: ${WORKER_LEASE_SECONDS:-330}
+      WORKER_HEARTBEAT_SECONDS: ${WORKER_HEARTBEAT_SECONDS:-5}
+      MAX_EXECUTOR_JOBS_PER_TASK: ${MAX_EXECUTOR_JOBS_PER_TASK:-5}
+      MAX_THINKER_JOBS_PER_TASK: ${MAX_THINKER_JOBS_PER_TASK:-3}
+      MAX_SAME_FINDING_REPEATS: ${MAX_SAME_FINDING_REPEATS:-2}
+      MAX_CI_REPAIRS_PER_TASK: ${MAX_CI_REPAIRS_PER_TASK:-3}
+      MAX_EXTERNAL_REVIEW_REPAIRS_PER_TASK: ${MAX_EXTERNAL_REVIEW_REPAIRS_PER_TASK:-3}
+      MAX_JOB_ATTEMPTS: ${MAX_JOB_ATTEMPTS:-3}
+      JOB_RETRY_BASE_SECONDS: ${JOB_RETRY_BASE_SECONDS:-5}
+      WORKER_TRANSPORT: local
+    depends_on:
+      backend:
+        condition: service_healthy
+    volumes:
+      - workspaces:/data/workspaces
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp
+    pids_limit: 256
+    mem_limit: 2g
+    cpus: 2.0
+    restart: unless-stopped
 
   frontend:
     build:

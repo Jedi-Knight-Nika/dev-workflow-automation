@@ -16,6 +16,20 @@ jobs:
   backend:
     name: Backend
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_DB: engineering_worker
+          POSTGRES_USER: engineering_worker
+          POSTGRES_PASSWORD: ci-password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U engineering_worker -d engineering_worker"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     defaults:
       run:
         working-directory: backend
@@ -28,11 +42,33 @@ jobs:
       - name: Install locked dependencies
         run: uv sync --locked --all-extras
       - name: Lint
-        run: uv run ruff check app tests
+        run: uv run ruff check app migrations tests ../scripts
       - name: Format check
-        run: uv run ruff format --check app tests
+        run: uv run ruff format --check app migrations tests ../scripts
       - name: Type check
-        run: uv run mypy app
+        run: uv run mypy app ../scripts/validate_real_workflow.py ../scripts/rotate_credentials.py
+      - name: Operational script syntax
+        run: sh -n ../deploy/backup.sh ../deploy/restore.sh ../deploy/provision-worker-db.sh && python -m py_compile ../scripts/validate_real_workflow.py ../scripts/rotate_credentials.py
+      - name: Apply database migrations
+        env:
+          DATABASE_URL_SYNC: postgresql+psycopg://engineering_worker:ci-password@localhost:5432/engineering_worker
+        run: uv run alembic upgrade head
+      - name: Verify disposable-worker database grants
+        env:
+          PGHOST: localhost
+          PGDATABASE: engineering_worker
+          PGUSER: engineering_worker
+          PGPASSWORD: ci-password
+          WORKER_DB_USER: engineering_job
+          WORKER_DB_PASSWORD: job-password
+        run: |
+          ../deploy/provision-worker-db.sh
+          ../deploy/provision-worker-db.sh
+          test "$(psql -tAc "SELECT has_table_privilege('engineering_job', 'tasks', 'SELECT')")" = "t"
+          test "$(psql -tAc "SELECT has_table_privilege('engineering_job', 'tasks', 'UPDATE')")" = "t"
+          test "$(psql -tAc "SELECT has_table_privilege('engineering_job', 'worker_runs', 'INSERT')")" = "t"
+          test "$(psql -tAc "SELECT has_table_privilege('engineering_job', 'integrations', 'UPDATE')")" = "f"
+          test "$(psql -tAc "SELECT has_table_privilege('engineering_job', 'worker_runs', 'DELETE')")" = "f"
       - name: Test
         env:
           SCHEDULER_ENABLED: "false"
@@ -62,13 +98,31 @@ jobs:
       - name: Build
         run: npm run build
 
+  browser:
+    name: Browser
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
+
   quality-gate:
     name: Quality gate
     if: always()
-    needs: [backend, frontend]
+    needs: [backend, frontend, browser]
     runs-on: ubuntu-latest
     steps:
       - name: Require all CI jobs
         run: |
           test "${{ needs.backend.result }}" = "success"
           test "${{ needs.frontend.result }}" = "success"
+          test "${{ needs.browser.result }}" = "success"
