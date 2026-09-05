@@ -2,7 +2,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from app.services.indexing import (
+from app.domain.indexing import (
     CHUNK_OVERLAP,
     SourceChunk,
     chunk_metadata,

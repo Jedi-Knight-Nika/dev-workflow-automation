@@ -2,7 +2,11 @@ import json
 
 import pytest
 
-from app.services.context_compiler import MIN_CONTEXT_CHARS, ContextCompiler, fit_context
+from app.infrastructure.workers.context_compiler import (
+    MIN_CONTEXT_CHARS,
+    ContextCompiler,
+    fit_context,
+)
 
 
 def test_context_is_trimmed_without_breaking_structured_json() -> None:

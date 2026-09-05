@@ -3,9 +3,9 @@ import signal
 
 import structlog
 
+from app.bootstrap.scheduler import create_scheduler
 from app.config import get_settings
 from app.logging import configure_logging
-from app.services.scheduler import Scheduler
 
 
 async def run() -> None:
@@ -13,7 +13,7 @@ async def run() -> None:
     configure_logging(settings.log_level)
     log = structlog.get_logger()
     settings.workspace_root.mkdir(parents=True, exist_ok=True)
-    scheduler = Scheduler(settings)
+    scheduler = create_scheduler(settings)
     stopped = asyncio.Event()
     loop = asyncio.get_running_loop()
     for name in (signal.SIGINT, signal.SIGTERM):

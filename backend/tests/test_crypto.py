@@ -1,4 +1,4 @@
-from app.services.crypto import CredentialCipher
+from app.infrastructure.security.crypto import CredentialCipher
 
 
 def test_credentials_are_encrypted_and_recoverable() -> None:

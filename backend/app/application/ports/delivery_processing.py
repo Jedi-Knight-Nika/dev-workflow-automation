@@ -1,0 +1,6 @@
+from typing import Protocol
+
+
+class DeliveryProcessor(Protocol):
+    async def process_linear(self) -> bool: ...
+    async def process_github(self) -> bool: ...

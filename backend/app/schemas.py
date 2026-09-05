@@ -4,7 +4,9 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
-from app.db.models import IndexStatus, IntegrationStatus, JobRole, JobState, TaskState
+from app.domain.agents import AgentRole
+from app.domain.operational_states import IndexStatus, IntegrationStatus, JobRole, JobState
+from app.domain.tasks import TaskState
 
 
 class TaskCreate(BaseModel):
@@ -151,7 +153,7 @@ class AgentConfigUpdate(BaseModel):
 
 class AgentConfigRead(AgentConfigUpdate):
     model_config = ConfigDict(from_attributes=True)
-    role: JobRole
+    role: AgentRole
     updated_at: datetime
     status: str = "READY"
     active_jobs: int = 0

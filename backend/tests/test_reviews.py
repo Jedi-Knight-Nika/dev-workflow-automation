@@ -1,7 +1,7 @@
 import uuid
 
 from app.db.models import Job, JobRole
-from app.services.reviews import finding_fingerprint, reviewer_fingerprint
+from app.infrastructure.persistence.reviews import finding_fingerprint, reviewer_fingerprint
 
 
 def test_reviewer_uses_executor_workspace_fingerprint() -> None:

@@ -15,14 +15,14 @@ from app.api.events import router as events_router
 from app.api.health import router as health_router
 from app.api.tasks import router as tasks_router
 from app.api.webhooks import router as webhooks_router
+from app.bootstrap.scheduler import create_scheduler
 from app.config import get_settings
 from app.logging import configure_logging
-from app.services.scheduler import Scheduler
 
 settings = get_settings()
 configure_logging(settings.log_level)
 log = structlog.get_logger()
-scheduler = Scheduler(settings)
+scheduler = create_scheduler(settings)
 
 
 @asynccontextmanager

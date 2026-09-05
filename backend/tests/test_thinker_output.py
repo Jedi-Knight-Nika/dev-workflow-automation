@@ -2,7 +2,7 @@ import pytest
 from pydantic import ValidationError
 
 from app.db.models import JobRole
-from app.services.structured_output import validate_role_output
+from app.infrastructure.workers.structured_output import validate_role_output
 
 
 def test_intake_requires_the_versioned_terminal_result() -> None:

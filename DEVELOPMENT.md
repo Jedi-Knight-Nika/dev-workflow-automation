@@ -66,6 +66,30 @@ npm run check
 The annotated `.env.example` is the source of truth for local configuration. Never
 commit `.env` or real integration credentials.
 
+## Backend architecture
+
+New backend behavior follows an inward dependency rule:
+
+```text
+API / worker entrypoints -> application use cases -> domain
+                              ^
+                              |
+                  infrastructure implements ports
+```
+
+- `app/domain` contains framework-free entities, value types, and business policies.
+- `app/application` contains use cases and `Protocol` ports; it may depend on the domain
+  but not FastAPI, SQLAlchemy, provider SDKs, Docker, or concrete integrations.
+- `app/infrastructure` contains SQLAlchemy repositories/unit-of-work implementations and
+  replaceable external adapters.
+- `app/api` and workers are delivery adapters that validate transport data, resolve
+  dependencies through `app/bootstrap`, invoke use cases, and translate results.
+
+Prefer composition and constructor injection. Do not introduce generic base repositories,
+service locators, framework imports in the domain, or inheritance solely to share code.
+Legacy behavior is migrated one vertical workflow at a time under existing regression tests;
+new business logic must not be added directly to route handlers.
+
 ### GitHub App installation
 
 Create a GitHub App and set its Setup URL to the public backend callback:

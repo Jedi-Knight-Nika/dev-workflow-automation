@@ -187,7 +187,7 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    entrypoint: [".venv/bin/python", "-m", "app.services.credential_rotation"]
+    entrypoint: [".venv/bin/python", "-m", "app.infrastructure.security.credential_rotation"]
 
 volumes:
   postgres_data:

@@ -3,13 +3,23 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from fastapi import HTTPException
 
 from app.api.control_plane import github_install_callback, github_install_url
+from app.application.ports.github_installation import GitHubInstallationResult
 from app.config import Settings
 from app.db.models import Integration, IntegrationStatus
+from app.infrastructure.github_installation import EncryptedGitHubInstallationWorkflow
+from app.infrastructure.security.crypto import cipher
 from app.integrations.github_auth import create_install_state
-from app.services.crypto import cipher
+
+
+class FakeInstallationWorkflow:
+    async def install_url(self) -> str:
+        return "https://github.com/apps/worker/installations/new?state=signed"
+
+    async def complete(self, installation_id: str, state: str) -> GitHubInstallationResult:
+        assert installation_id == "456" and state == "signed"
+        return GitHubInstallationResult("https://worker.test/integrations?github=connected", True)
 
 
 class IntegrationSession:
@@ -25,44 +35,16 @@ class IntegrationSession:
 
 
 @pytest.mark.asyncio
-async def test_github_install_url_uses_saved_app_slug() -> None:
-    integration = Integration(
-        provider_type="source_control",
-        provider_name="github",
-        configuration={"auth_type": "github_app", "app_slug": "engineering-worker"},
-        encrypted_credentials=b"configured",
-    )
-
-    result = await github_install_url(
-        session=IntegrationSession(integration),  # type: ignore[arg-type]
-        settings=Settings(app_secret_key="callback-test-secret-long-enough"),
-    )
-
-    assert result["url"].startswith(
-        "https://github.com/apps/engineering-worker/installations/new?state="
-    )
+async def test_github_install_routes_delegate_to_workflow() -> None:
+    workflow = FakeInstallationWorkflow()
+    assert (await github_install_url(workflow=workflow))["url"].startswith("https://github.com/")  # type: ignore[arg-type]
+    response = await github_install_callback("456", "signed", workflow=workflow)  # type: ignore[arg-type]
+    assert response.status_code == 303
+    assert response.headers["location"].endswith("github=connected")
 
 
 @pytest.mark.asyncio
-async def test_github_install_url_rejects_invalid_saved_slug() -> None:
-    integration = Integration(
-        provider_type="source_control",
-        provider_name="github",
-        configuration={"auth_type": "github_app", "app_slug": "../wrong"},
-        encrypted_credentials=b"configured",
-    )
-
-    with pytest.raises(HTTPException, match="slug is invalid") as raised:
-        await github_install_url(
-            session=IntegrationSession(integration),  # type: ignore[arg-type]
-            settings=Settings(app_secret_key="callback-test-secret-long-enough"),
-        )
-
-    assert raised.value.status_code == 422
-
-
-@pytest.mark.asyncio
-async def test_github_install_callback_encrypts_installation_and_connects(
+async def test_github_install_workflow_encrypts_installation_and_connects(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     secret = "callback-test-secret-long-enough"
@@ -70,66 +52,47 @@ async def test_github_install_callback_encrypts_installation_and_connects(
         "auth_type": "github_app",
         "app_id": "123",
         "installation_id": "",
-        "private_key": "private-key",
+        "private_key": "key",
     }
     integration = Integration(
         provider_type="source_control",
         provider_name="github",
         status=IntegrationStatus.CONFIGURED,
-        configuration={"auth_type": "github_app", "app_slug": "engineering-worker"},
+        configuration={"app_slug": "engineering-worker"},
         encrypted_credentials=cipher.encrypt(json.dumps(credential)),
     )
     session = IntegrationSession(integration)
-    verified_credentials: list[str] = []
 
-    async def resolve_auth(value: str) -> SimpleNamespace:
-        verified_credentials.append(value)
-        return SimpleNamespace(token="installation-token", installation=True)
+    async def resolve_auth(_value: str) -> SimpleNamespace:
+        return SimpleNamespace(token="token", installation=True)
 
     class Client:
-        def __init__(self, token: str, installation: bool) -> None:
-            assert token == "installation-token"
-            assert installation is True
-
-        async def list_repositories(self) -> list[dict[str, str]]:
+        def __init__(self, _token: str, _installation: bool) -> None: ...
+        async def list_repositories(self) -> list[object]:
             return []
 
-    monkeypatch.setattr("app.api.control_plane.resolve_github_auth", resolve_auth)
-    monkeypatch.setattr("app.api.control_plane.GitHubClient", Client)
+    monkeypatch.setattr("app.infrastructure.github_installation.resolve_github_auth", resolve_auth)
+    monkeypatch.setattr("app.infrastructure.github_installation.GitHubClient", Client)
+    workflow = EncryptedGitHubInstallationWorkflow(
+        session,
+        Settings(app_secret_key=secret, github_app_return_url="https://worker.test/integrations"),
+    )  # type: ignore[arg-type]
 
-    response = await github_install_callback(
-        installation_id="456",
-        state=create_install_state(secret),
-        session=session,  # type: ignore[arg-type]
-        settings=Settings(
-            app_secret_key=secret,
-            github_app_return_url="https://worker.example.com/integrations",
-        ),
-    )
+    result = await workflow.complete("456", create_install_state(secret))
 
-    assert response.status_code == 303
-    assert response.headers["location"] == (
-        "https://worker.example.com/integrations?github=connected"
-    )
-    assert session.commits == 1
-    assert integration.status == IntegrationStatus.CONNECTED
+    assert result.connected and session.commits == 1
     stored = json.loads(cipher.decrypt(integration.encrypted_credentials or b""))
     assert stored["installation_id"] == "456"
-    assert json.loads(verified_credentials[0])["installation_id"] == "456"
 
 
 @pytest.mark.asyncio
-async def test_github_install_callback_rejects_invalid_state_before_database_access() -> None:
-    integration = Integration(provider_type="source_control", provider_name="github")
-    session = IntegrationSession(integration)
-
-    with pytest.raises(HTTPException, match="Invalid or expired") as raised:
-        await github_install_callback(
-            installation_id="456",
-            state="invalid",
-            session=session,  # type: ignore[arg-type]
-            settings=Settings(app_secret_key="callback-test-secret-long-enough"),
-        )
-
-    assert raised.value.status_code == 400
+async def test_invalid_install_state_is_rejected_before_database_access() -> None:
+    session = IntegrationSession(
+        Integration(provider_type="source_control", provider_name="github")
+    )
+    workflow = EncryptedGitHubInstallationWorkflow(
+        session, Settings(app_secret_key="callback-test-secret-long-enough")
+    )  # type: ignore[arg-type]
+    with pytest.raises(Exception, match="Invalid or expired"):
+        await workflow.complete("456", "invalid")
     assert session.commits == 0

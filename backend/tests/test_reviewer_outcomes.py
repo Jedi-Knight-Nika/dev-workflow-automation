@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from app.services.executor import ReviewerProposal
+from app.infrastructure.workers.executor import ReviewerProposal
 
 
 def test_reviewer_pass_rejects_findings() -> None:

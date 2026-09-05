@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from app.services.executor import ExecutorProposal
+from app.infrastructure.workers.executor import ExecutorProposal
 
 
 def test_executor_plan_mismatch_requires_details() -> None:

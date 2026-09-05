@@ -1,0 +1,6 @@
+from typing import Protocol
+
+
+class WorkerPresence(Protocol):
+    async def mark_online(self) -> None: ...
+    async def mark_stopped(self) -> None: ...

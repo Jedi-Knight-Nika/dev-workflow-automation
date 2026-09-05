@@ -4,31 +4,19 @@ from collections.abc import AsyncGenerator
 
 from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
-from sqlalchemy import func, select
 
-from app.db.models import TaskEvent
-from app.db.session import SessionLocal
+from app.application.ports.event_queries import EventView
+from app.bootstrap.dependencies import get_event_queries
 
 router = APIRouter(tags=["events"])
 
 
 async def latest_event_id() -> int:
-    async with SessionLocal() as session:
-        return int(await session.scalar(select(func.max(TaskEvent.id))) or 0)
+    return await get_event_queries().latest_id()
 
 
-async def events_after(event_id: int) -> list[TaskEvent]:
-    async with SessionLocal() as session:
-        return list(
-            (
-                await session.scalars(
-                    select(TaskEvent)
-                    .where(TaskEvent.id > event_id)
-                    .order_by(TaskEvent.id)
-                    .limit(100)
-                )
-            ).all()
-        )
+async def events_after(event_id: int) -> list[EventView]:
+    return await get_event_queries().after(event_id)
 
 
 async def sse_messages(

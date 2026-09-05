@@ -1,4 +1,3 @@
-import enum
 import uuid
 from datetime import UTC, datetime
 from typing import Any
@@ -20,61 +19,14 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
+from app.domain.operational_states import IndexStatus, IntegrationStatus, JobRole, JobState
+from app.domain.tasks import TaskState
+
+__all__ = ["IndexStatus", "IntegrationStatus", "JobRole", "JobState", "TaskState"]
 
 
 def utcnow() -> datetime:
     return datetime.now(UTC)
-
-
-class TaskState(str, enum.Enum):
-    NEW = "NEW"
-    CONTEXT_PENDING = "CONTEXT_PENDING"
-    PLANNING = "PLANNING"
-    PLAN_READY = "PLAN_READY"
-    QUEUED_FOR_EXECUTION = "QUEUED_FOR_EXECUTION"
-    IMPLEMENTING = "IMPLEMENTING"
-    LOCAL_VALIDATION = "LOCAL_VALIDATION"
-    INTERNAL_REVIEW = "INTERNAL_REVIEW"
-    WAITING_GITHUB = "WAITING_GITHUB"
-    READY_TO_MERGE = "READY_TO_MERGE"
-    NEEDS_HUMAN = "NEEDS_HUMAN"
-    PAUSED = "PAUSED"
-    CANCELLED = "CANCELLED"
-    FAILED = "FAILED"
-    MERGED = "MERGED"
-
-
-class JobState(str, enum.Enum):
-    QUEUED = "QUEUED"
-    CLAIMED = "CLAIMED"
-    RUNNING = "RUNNING"
-    SUCCEEDED = "SUCCEEDED"
-    FAILED = "FAILED"
-    CANCELLED = "CANCELLED"
-    TIMED_OUT = "TIMED_OUT"
-    RETRY_WAIT = "RETRY_WAIT"
-
-
-class JobRole(str, enum.Enum):
-    INTAKE = "INTAKE"
-    THINKER = "THINKER"
-    EXECUTOR = "EXECUTOR"
-    REVIEWER = "REVIEWER"
-
-
-class IntegrationStatus(str, enum.Enum):
-    DISCONNECTED = "DISCONNECTED"
-    CONFIGURED = "CONFIGURED"
-    CONNECTED = "CONNECTED"
-    ERROR = "ERROR"
-
-
-class IndexStatus(str, enum.Enum):
-    NOT_INDEXED = "NOT_INDEXED"
-    QUEUED = "QUEUED"
-    INDEXING = "INDEXING"
-    READY = "READY"
-    FAILED = "FAILED"
 
 
 class Task(Base):

@@ -144,7 +144,7 @@ This is the durable implementation ledger for the project. Update it whenever a 
 
 - **DONE** Python source compiles successfully with Python 3.14 (the container targets the specified Python 3.12).
 - **DONE** Backend Ruff lint passes.
-- **DONE** Backend focused test suite passes: 110 tests covering production configuration safety, providers, encryption and atomic credential rotation, GitHub and Linear signatures/events/API calls including configurable lifecycle mapping, GitHub App installation URL/state/callback persistence, inline review comments, authenticated Actions-log enrichment and bounded CI diagnostics, repository indexing/ignore/metadata/incremental-reuse boundaries, PR calls and authoritative restart evidence reconciliation, durable SSE replay/heartbeats, strict Thinker/Executor/Reviewer outcomes, Executor filesystem/dependency and registry-credential boundaries, normalized review fingerprints, retry backoff, hardened Docker worker specifications/log transport, real-workflow evidence validation, and application health.
+- **DONE** Backend focused test suite passes: 180 tests covering enforced Clean Architecture boundaries/all task and control-plane endpoints/webhook ingestion/SSE event queries/readiness/scheduler delivery/index/startup/presence/job-dispatch ports/merge and every job-completion use case/policy, production configuration safety, providers, encryption and atomic credential rotation, GitHub and Linear signatures/events/API calls including configurable lifecycle mapping, GitHub App installation URL/state/callback persistence, inline review comments, authenticated Actions-log enrichment and bounded CI diagnostics, repository indexing/ignore/metadata/incremental-reuse boundaries, PR calls and authoritative restart evidence reconciliation, durable SSE replay/heartbeats, strict worker outcomes, Executor filesystem/dependency and registry-credential boundaries, normalized review fingerprints, retry backoff, hardened Docker worker specifications/log transport, real-workflow evidence validation, and application health.
 - **DONE** Svelte type checking passes with zero errors and zero warnings.
 - **DONE** SvelteKit adapter-node production build succeeds.
 - **DONE** Docker Compose configuration validates successfully.
@@ -351,3 +351,309 @@ This is the durable implementation ledger for the project. Update it whenever a 
 - Chunk metadata now persists language, symbol, semantic chunk type, exact UTC indexing time, and authority level alongside the existing repository/branch/revision/path/hash columns.
 - Incremental indexing loads existing vectors before replacing changed-file rows and reuses them by `(file_path, content_hash)`; only genuinely new chunk content is sent to the embedding provider, and a completely unchanged content set can finish without an embedding API call.
 - Reclassified the remaining ledger accurately: Linear's optional OAuth polish, host firewall policy, DNS/host provisioning, and off-host backup transfer are external operations rather than unfinished MVP application code.
+
+## 2026-09-05 — Clean Architecture migration: task creation
+
+- Established explicit `domain`, `application`, `infrastructure`, and `bootstrap` packages with documented inward-only dependency rules and manual constructor injection.
+- Added a framework-free Task aggregate that owns creation invariants and stable domain state vocabulary without importing FastAPI, Pydantic, SQLAlchemy, HTTP clients, or infrastructure.
+- Added application-level task/job/event repository ports, a unit-of-work port, and a `CreateTask` command handler whose transaction commits all task, audit-event, and Intake-job changes or rolls them back together.
+- Added concrete SQLAlchemy repository and unit-of-work adapters plus a FastAPI composition dependency; the task-creation route is now a thin transport adapter invoking the use case.
+- Added pure use-case commit/rollback tests with in-memory fakes and an automated import-boundary test preventing framework/infrastructure dependencies from entering the domain.
+- This is the first behavior-preserving vertical migration. Remaining legacy scheduler, webhook, pull-request, integration, indexing, and worker workflows will move through the same ports incrementally rather than through a high-risk rewrite.
+
+## 2026-09-05 — Clean Architecture migration: guarded merge
+
+- Removed the complete merge gate, head revalidation, GitHub merge, task completion, repository re-index queueing, audit event, and Linear synchronization workflow from the FastAPI route.
+- Added a framework-free merge policy with typed validation evidence, latest-evidence reduction, mandatory CI evidence, and explicit blocking statuses.
+- Added a `MergeTask` application use case and replaceable merge-workflow port; stale heads are durably recorded before a conflict is returned, successful merges commit before best-effort tracker synchronization, and infrastructure failures roll back and become typed application errors.
+- Added the SQLAlchemy/GitHub/Linear adapter and bootstrap wiring; the API endpoint now only invokes the use case and maps typed failures into 404/409/502 responses.
+- Added isolated tests for missing CI, blocking reviews, successful merge ordering, stale-head rejection, and missing tasks. The next high-value migration remains the scheduler job-completion state machine.
+
+## 2026-09-05 — Clean Architecture migration: job-completion policies
+
+- Extracted the scheduler's role/outcome decision table into a framework-free domain policy returning typed completion directives for Intake, Thinker, Executor, and Reviewer results.
+- Intake informational/fix/re-plan routing, Thinker context/execution decisions, Executor test/re-plan/review routing, Reviewer publish/repair/re-plan/escalation decisions, and repeated-finding cutoffs no longer derive their business meaning from nested scheduler conditionals.
+- Extracted retry eligibility and exponential delay into an immutable domain `RetryPolicy`; scheduler persistence now executes that policy instead of owning retry arithmetic and exhaustion rules.
+- Added a decision-table test matrix plus repeat-limit, unsupported-role, retry-delay, and retry-exhaustion coverage. Persistence effects remain in the scheduler temporarily and are the next extraction into an application completion handler/port.
+
+## 2026-09-05 — Scheduler dependency inversion
+
+- Removed direct scheduler use of the global SQLAlchemy session factory and worker-launch function; database session creation and worker execution are explicit constructor dependencies.
+- Added an application-layer `WorkerRunner` port and transport-neutral execution result, with a configured infrastructure adapter selecting local subprocess or isolated Docker transport from settings.
+- Added a dedicated scheduler composition root used consistently by the FastAPI lifespan and standalone worker service, keeping infrastructure construction out of runtime orchestration.
+- The scheduler still operates legacy SQLAlchemy sessions internally, but it can now be tested with injected sessions/worker results and can migrate completion persistence to a unit-of-work adapter without changing process entrypoints.
+
+## 2026-09-05 — Clean Architecture migration: failed job completion
+
+- Added a `CompleteFailedJob` application use case with a dedicated unit-of-work port and command/context DTOs independent of SQLAlchemy and transport implementations.
+- Failed and timed-out completion now lease-fences the worker result, records terminal diagnostics, releases workspace ownership, applies the domain retry policy, persists retry timing/audit events or escalates the task, commits atomically, and synchronizes Linear behind an infrastructure adapter.
+- Jobs finishing during manual takeover preserve operator control and emit the existing takeover audit event instead of entering retry or escalation paths.
+- Scheduler `_finish` now delegates non-successful completion immediately; it no longer contains failure retry arithmetic, mutation, exhaustion, or tracker-sync logic.
+- Added isolated use-case coverage for retry scheduling, exhaustion, manual takeover, and stale worker results. Successful role completion remains the next application-handler extraction.
+
+## 2026-09-05 — Clean Architecture migration: Intake completion
+
+- Added a `CompleteIntakeJob` application handler and Intake-specific completion unit-of-work port; successful Intake jobs now leave the scheduler before it opens a legacy completion transaction.
+- The SQLAlchemy adapter lease-fences and records the result, releases workspace ownership, applies typed domain directives, restores informational-comment state, queues bounded external-feedback repair or re-planning, queues initial planning, persists audit events, commits, and synchronizes Linear.
+- Manual takeover and stale-result behavior remain preserved, while repair/re-plan job ceilings stay configuration-driven at the infrastructure boundary.
+- Removed every Intake outcome/state/event branch from `Scheduler._finish()` and added isolated handler tests for domain-directive application and manual-takeover preservation. Thinker completion is the next role migration.
+
+## 2026-09-05 — Clean Architecture migration: Thinker completion
+
+- Added a `CompleteThinkerJob` application handler and a Thinker-specific unit-of-work port that contain no SQLAlchemy, FastAPI, or transport dependencies.
+- Successful Thinker completion now exits the scheduler through an explicit command, uses the framework-free completion policy, and delegates lease fencing, result persistence, workspace release, task transitions, Executor enqueueing, audit events, atomic commit, and Linear synchronization to the SQLAlchemy adapter.
+- Preserved stale-result rejection and manual-takeover behavior while removing every Thinker outcome/state/event branch from the legacy scheduler transaction.
+- Added isolated handler coverage for plan-ready execution and manual-takeover preservation. Executor completion is the next role migration.
+
+## 2026-09-05 — Clean Architecture migration: Executor completion
+
+- Added a framework-independent `CompleteExecutorJob` application handler and an Executor completion port with explicit command and transaction-context DTOs.
+- Moved successful Executor result persistence, lease fencing/release, local-validation transition, Reviewer enqueueing, bounded repair, bounded re-planning, escalation events, atomic commit, and Linear synchronization into the SQLAlchemy infrastructure adapter.
+- Scheduler completion now dispatches successful Executor results and returns without executing Executor business or persistence branches; stale leases and manual takeover retain their existing safeguards.
+- Added isolated handler tests for implemented-result routing and takeover preservation. Reviewer completion remains the final successful-role branch in the legacy scheduler transaction.
+
+## 2026-09-05 — Clean Architecture migration: Reviewer completion
+
+- Added a `CompleteReviewerJob` application handler and Reviewer-specific unit-of-work port covering typed outcome selection, repeated-finding escalation, and post-commit publication orchestration.
+- Moved review-result persistence, repair/replan ceilings, task transitions, audit events, tracker synchronization, PR publication, and recoverable publication-failure escalation into the SQLAlchemy infrastructure adapter.
+- Removed the final successful-role transaction and its publication/repair/replan helper methods from `Scheduler`; completion now dispatches all four worker roles through application handlers and rejects unsupported successful results explicitly.
+- Added isolated coverage for publication routing, repeated-finding limits, and manual takeover. The scheduler completion state machine migration is now complete; task lifecycle routes are the next backend boundary.
+
+## 2026-09-05 — Clean Architecture migration: task lifecycle controls
+
+- Added a framework-free task lifecycle policy defining pause, cancellation, takeover, and resume transitions, including terminal-task and manual-control invariants.
+- Added a `ChangeTaskLifecycle` application use case and persistence port; FastAPI routes now translate HTTP input/errors only and return domain task snapshots rather than mutating ORM records.
+- Added a SQLAlchemy lifecycle unit of work that locks the task, cancels queued work atomically where required, refreshes Git revision/fingerprint on resume, records the correct user audit event, and commits the transition.
+- Added isolated policy/use-case coverage for all four controls, queued-job directives, PR-aware resume state, workspace refresh, missing tasks, and rejected terminal takeover. Workspace creation, manual job enqueueing, PR publication, Linear retry, and task queries remain in the task API migration backlog.
+
+## 2026-09-05 — Clean Architecture migration: workspace preparation
+
+- Added a `PrepareTaskWorkspace` application use case and replaceable workspace workflow port with typed not-found, conflict, and unavailable failures.
+- Moved task/repository locking and validation, Git workspace preparation, ready-event persistence, commit/rollback behavior, and ORM-to-domain mapping into a SQLAlchemy/Git infrastructure adapter.
+- Reduced the workspace FastAPI endpoint to use-case invocation and HTTP error/result translation; it no longer performs database mutations or Git orchestration.
+- Centralized ORM-to-domain Task mapping for reuse by lifecycle and workspace adapters and added isolated application-port delegation coverage. Manual job enqueueing and PR publication are the next task command boundaries.
+
+## 2026-09-05 — Clean Architecture migration: manual job enqueueing
+
+- Added an `EnqueueTaskJob` application handler, typed enqueue command/result DTOs, and a replaceable job-enqueue workflow port independent of FastAPI and SQLAlchemy.
+- Moved task locking, paused/cancelled guards, role conversion, durable job/event creation, commit, refresh, and ORM-result mapping into the SQLAlchemy adapter.
+- Reduced the manual-job endpoint to request translation, use-case invocation, typed 404/409 mapping, and response serialization.
+- Added isolated application-port delegation coverage. Manual PR publication, Linear retry, and read/query endpoints remain in the task API migration backlog.
+
+## 2026-09-05 — Clean Architecture migration: PR publication and tracker retry
+
+- Added separate application handlers and replaceable ports for manually publishing a task pull request and retrying merged-task tracker synchronization.
+- PR publication now performs task/repository locking and validation, Git/GitHub publication, rollback, typed error conversion, and transport-neutral result mapping inside the infrastructure adapter.
+- Tracker retry now performs task lookup, merged-state enforcement, and Linear synchronization behind its infrastructure adapter; both FastAPI routes only translate requests, typed failures, and responses.
+- Added isolated delegation tests for both use cases. The remaining task API work is read/query extraction plus removal of the workspace-refresh infrastructure exception leak.
+
+## 2026-09-05 — Clean Architecture migration: task queries and resume error boundary
+
+- Added `ListTasks` and `GetTask` application query handlers with a replaceable read port returning domain Task snapshots instead of ORM entities.
+- Added the SQLAlchemy query adapter with centralized ORM-to-domain mapping; the list/get FastAPI routes now perform only query invocation, typed not-found translation, and response serialization.
+- Replaced the task API's direct Git exception dependency with an application-level workspace-refresh failure emitted by the lifecycle infrastructure adapter.
+- Added isolated list limit, retrieval, and missing-task coverage. Job/event/validation/finding history queries are the remaining endpoints in `api/tasks.py` that access SQLAlchemy directly.
+
+## 2026-09-05 — Clean Architecture migration: task history queries
+
+- Added transport-neutral job, event, validation, and review-finding view DTOs plus a single application query port and `QueryTaskHistory` handler.
+- Added a SQLAlchemy read adapter preserving the existing ordering for jobs/events and reverse-chronological validations/findings, with centralized job mapping reused by manual enqueueing.
+- Migrated all four history endpoints to the application read boundary; `api/tasks.py` now has no direct SQLAlchemy session, ORM model, or legacy service imports.
+- Added isolated coverage proving all history operations delegate through the query port. The task API boundary migration is complete; the control-plane API is the next large transport boundary.
+
+## 2026-09-05 — Clean Architecture migration: operations dashboard reads
+
+- Added transport-neutral activity and webhook-health views, an `OperationsQueries` port, and a `QueryOperations` application handler.
+- Moved active/queued job selection, deterministic ordering/limits, provider delivery counts, latest timestamps, and latest-error lookup into a SQLAlchemy query adapter.
+- Reduced the activity and webhook-health endpoints to application-query invocation and response serialization while preserving their existing API contracts.
+- Added isolated application delegation coverage. Provider catalog, workers/agents, integrations, repositories, and knowledge search remain in the control-plane migration backlog.
+
+## 2026-09-05 — Clean Architecture migration: provider catalog
+
+- Added transport-neutral provider/model catalog views, typed configuration/support failures, a provider-catalog workflow port, and a `DiscoverProviderCatalog` application handler.
+- Moved integration credential lookup, backend-only decryption, provider construction, capability discovery, and remote model listing into an infrastructure adapter.
+- Reduced the provider catalog endpoint to application invocation, typed 404/409 mapping, and response serialization without exposing decrypted credentials across the boundary.
+- Added isolated delegation coverage. Worker/agent reads, GitHub/Linear discovery, integration management, repositories, and knowledge search remain in the control-plane backlog.
+
+## 2026-09-05 — Clean Architecture migration: worker visibility
+
+- Added transport-neutral worker snapshots/views, a worker query port, and a `QueryWorkers` application handler.
+- Extracted the three-heartbeat online/freshness rule into a deterministic framework-free domain policy with an injectable evaluation time.
+- Moved worker ordering and ORM mapping into the SQLAlchemy read adapter; the endpoint now combines the query handler with configured heartbeat timing and serializes the result.
+- Added coverage for recent, stale, and explicitly stopped workers. Agent reads and updates are the next control-plane boundary.
+
+## 2026-09-05 — Clean Architecture migration: agent configuration
+
+- Added transport-neutral agent configuration commands/views, an application management handler, and a replaceable persistence workflow for reads and updates.
+- Moved default role creation, configuration persistence, active-job counts, cumulative token/cost totals, latest-run metadata, ordering, and ORM mapping into the SQLAlchemy adapter.
+- Extracted disabled/unconfigured/running/ready classification into a framework-free domain policy and made both list and update endpoints return the same complete operational view.
+- Added application delegation and status decision-table coverage. GitHub/Linear discovery, integration management, repositories, and knowledge search remain in the control-plane backlog.
+
+## 2026-09-05 — Clean Architecture migration: external integration discovery
+
+- Added transport-neutral repository and workflow-state views, a shared integration-discovery port, and a `DiscoverIntegrations` application handler.
+- Moved encrypted credential lookup/decryption, GitHub App/token auth resolution, GitHub client construction, Linear client construction, remote calls, and result mapping into infrastructure.
+- Migrated GitHub repository and Linear workflow-state discovery endpoints to typed application invocation and consistent missing-configuration handling.
+- Added isolated coverage for both discovery paths. GitHub App installation flow, integration management, repositories, and knowledge search remain in the control-plane backlog.
+
+## 2026-09-05 — Clean Architecture migration: GitHub App installation
+
+- Added a GitHub installation application handler, workflow port, typed invalid-state/not-configured/invalid-slug failures, and a transport-neutral callback result.
+- Moved signed-state creation and verification, integration lookup, credential decryption/re-encryption, installation ID persistence, GitHub App auth resolution, connectivity validation, status/error persistence, and redirect selection into infrastructure.
+- Reduced install URL and callback routes to application invocation plus typed HTTP/redirect translation; invalid callback state is still rejected before any database access.
+- Reworked callback coverage around both route delegation and the concrete encrypted adapter. Integration configuration management is the next control-plane boundary.
+
+## 2026-09-05 — Clean Architecture migration: integration management
+
+- Added typed integration commands/views, an application management handler, and an encrypted infrastructure workflow for listing, configuration, and connectivity verification.
+- Moved credential encryption/decryption, provider-specific GitHub/Linear/AI/registry validation, status/error persistence, and ORM mapping out of FastAPI.
+- Migrated all integration CRUD/test endpoints to the application boundary with typed missing-credential handling while preserving encrypted credential storage.
+- Ruff, MyPy, and the full 160-test backend suite pass. Repository management is the next control-plane boundary.
+
+## 2026-09-05 — Clean Architecture migration: repository management
+
+- Added typed repository commands/views, an application management handler, and a SQLAlchemy workflow for list/create/enable/disable/index-queue operations.
+- Moved row locking, missing/disabled validation, index state transitions, commits, clone-status derivation, and knowledge-chunk counting out of FastAPI.
+- Migrated repository management endpoints to typed application invocation and 404/409 translation while preserving response enrichment and ordering.
+- Ruff, MyPy, and the full 160-test backend suite pass. Semantic search and deeper indexing orchestration remain next.
+
+## 2026-09-05 — Clean Architecture migration: semantic knowledge search
+
+- Added typed knowledge results, repository missing/not-ready failures, a search application handler, and a replaceable search workflow port.
+- Moved repository readiness lookup, vector-search invocation, and result normalization into infrastructure; limit clamping is enforced at the application boundary.
+- Migrated the search endpoint to typed use-case invocation and 404/409 translation. This removed the final direct SQLAlchemy session, ORM model, and legacy service import from `control_plane.py`.
+- Added limit/delegation coverage; Ruff, MyPy, and all 161 backend tests pass. Webhook and indexing service orchestration are the next major boundaries.
+
+## 2026-09-05 — Clean Architecture migration: webhook ingestion
+
+- Added a webhook ingestion application handler, replaceable port, and typed missing-header/invalid-payload/invalid-signature failures.
+- Moved GitHub/Linear signature validation, timestamp freshness validation, JSON decoding, repository metadata extraction, durable delivery creation, commit/rollback, and duplicate-delivery handling into infrastructure.
+- Rebuilt the webhook routes as thin body/header adapters preserving GitHub 202/duplicate 200 and Linear idempotent 200 behavior.
+- Ruff, MyPy, and all 161 backend tests pass. Durable GitHub/Linear delivery interpretation remains the next webhook boundary.
+
+## 2026-09-05 — Scheduler delivery and indexing inversion
+
+- Added application ports/handlers for durable GitHub/Linear delivery processing and queued repository-index processing.
+- Added session-owning infrastructure adapters around the existing provider processors so transaction construction no longer leaks into scheduler orchestration.
+- Removed direct GitHub event, Linear event, and indexing service imports/calls from `Scheduler`; these capabilities are now explicit constructor dependencies wired in the composition root.
+- Added delegation coverage for both handlers; Ruff, MyPy, and all 163 backend tests pass. The internal legacy processors themselves remain the next deeper migration boundary.
+
+## 2026-09-05 — Scheduler startup and worker-presence inversion
+
+- Added application ports/handlers for startup maintenance and worker presence, backed by session-owning SQLAlchemy infrastructure adapters.
+- Removed direct expired-job recovery, restart reconciliation, worker registration, heartbeat mutation, and shutdown persistence from the scheduler.
+- The composition root now constructs explicit startup and presence dependencies using a stable process worker ID; the scheduler only controls timing and lifecycle.
+- Added startup delegation coverage; Ruff, MyPy, and all 164 backend tests pass. Job claiming/execution preparation remains the scheduler's last direct persistence-heavy path.
+
+## 2026-09-05 — Scheduler job-dispatch inversion
+
+- Added a typed claimed-job value object, job-dispatch port, and application handler for claiming and preparing leased work.
+- Moved database session ownership, atomic job claiming, lease-token validation, Executor workspace lease acquisition, contention requeueing, and the transition to running into a SQLAlchemy infrastructure adapter.
+- Removed the scheduler's final direct SQLAlchemy session, ORM Job entity, and orchestration-service dependencies; its worker identity is now supplied by the composition root.
+- Added isolated application delegation coverage; Ruff, MyPy, and all 165 backend tests pass. Deeper GitHub/Linear delivery and indexing implementations remain behind adapters and are the next migration targets.
+
+## 2026-09-05 — Durable event-query inversion
+
+- Added transport-neutral event views, a bounded event-query application handler, and a replaceable read port for latest-cursor and replay-page queries.
+- Moved SQLAlchemy session creation, aggregate cursor lookup, durable event ordering, replay limits, and ORM mapping into a persistence adapter.
+- Removed direct database and ORM dependencies from the SSE API module while preserving reconnect replay, invalid-cursor recovery, and heartbeat behavior.
+- Added isolated delegation and limit coverage; Ruff, MyPy, and all 166 backend tests pass. The health endpoint and internal delivery/index processors remain persistence-heavy migration targets.
+
+## 2026-09-05 — Readiness probe inversion
+
+- Added an application readiness use case, replaceable probe port, and typed service-unavailable failure that hides infrastructure exception details.
+- Moved the concrete database connectivity query into a SQLAlchemy persistence adapter supplied through FastAPI dependency wiring.
+- Removed SQLAlchemy and database-session imports from the health API; liveness remains deliberately independent from database readiness.
+- Added success and failure-path unit coverage; Ruff, MyPy, and all 168 backend tests pass. Internal GitHub/Linear delivery and indexing processors remain the largest persistence-heavy targets.
+
+## 2026-09-05 — Linear webhook domain-policy extraction
+
+- Extracted Linear priority normalization, label normalization, configured-repository parsing, and external-comment interpretation into the framework-free domain layer.
+- Kept the delivery processor focused on transactional coordination while moving deterministic payload decisions out of the SQLAlchemy service module.
+- Redirected policy tests to the domain boundary so these rules are validated without importing persistence infrastructure.
+- Ruff, MyPy, and all 168 backend tests pass. Linear delivery transaction coordination and GitHub/index processing still require deeper port-based decomposition.
+
+## 2026-09-05 — Agent-role boundary cleanup
+
+- Added a framework-free `AgentRole` domain enum for the four supported worker responsibilities.
+- Replaced the control-plane route's direct ORM `JobRole` dependency with the domain role type while preserving FastAPI path validation and response values.
+- Updated the agent response contract to use the domain enum, removing the final direct database-model import from `api/control_plane.py`.
+- Ruff, MyPy, and all 168 backend tests pass; `api/events.py`, `api/health.py`, `api/tasks.py`, `api/webhooks.py`, and `api/control_plane.py` now avoid direct persistence imports.
+
+## 2026-09-05 — Scheduler domain types and application boundary enforcement
+
+- Added transport-neutral domain execution states and reused the domain agent-role enum for worker-result dispatch.
+- Removed the scheduler's final ORM-model import; scheduler orchestration now depends only on settings, schemas, application handlers/ports, and domain values.
+- Added an AST architecture test that rejects FastAPI, Pydantic, HTTP clients, SQLAlchemy, database, infrastructure, integration, bootstrap, API, or legacy-service imports anywhere in the application layer.
+- Ruff, MyPy, `git diff --check`, and all 170 backend tests pass. The clean dependency direction is now mechanically guarded for both domain and application layers.
+
+## 2026-09-05 — Shared webhook delivery retry policy
+
+- Added a validated domain policy for delivery exhaustion thresholds and bounded persisted failure messages.
+- Wired both GitHub and Linear delivery processors to the same policy, eliminating duplicated retry decisions and preventing provider-specific semantic drift.
+- Added boundary, truncation, and invalid-configuration coverage; Ruff, MyPy, and all 174 backend tests pass.
+
+## 2026-09-05 — Repository indexing path policy extraction
+
+- Moved generated-directory, binary/archive/font/media, secret-file, traversal, absolute-path, and minified-bundle exclusion rules into the framework-free indexing domain.
+- Kept repository scanning responsible for Git object access and content-size/binary checks while delegating deterministic path eligibility to the domain policy.
+- Redirected indexing policy tests to the domain boundary; Ruff, MyPy, and all 174 backend tests pass.
+
+## 2026-09-05 — Repository indexing content policy extraction
+
+- Added domain-owned changed-path normalization and configurable embedding-vector dimension validation instead of coupling those deterministic rules to SQL persistence code.
+- Added a domain `SourceChunk` value object and incremental embedding-reuse selection based on stable file-path/content-hash identity.
+- Updated indexing orchestration and tests to consume the domain contracts while retaining Git, provider, and database operations in the outer layer.
+- Added explicit configurable-dimension and invalid-configuration tests; Ruff, MyPy, `git diff --check`, and all 176 backend tests pass.
+
+## 2026-09-05 — Repository text-chunking domain extraction
+
+- Moved deterministic content hashing, newline-aware chunk windows, overlap behavior, and source-chunk construction into the framework-free indexing domain.
+- Moved language detection and module/section/symbol/text metadata classification into the same domain boundary.
+- Updated indexing orchestration and policy tests to consume the domain functions while syntax-boundary discovery, Git access, embeddings, and persistence remain outer-layer concerns.
+- Ruff, MyPy, and all 176 backend tests pass; the architecture guard confirms the extracted code has no framework, persistence, provider, or service dependencies.
+
+## 2026-09-05 — Structured source and content-safety domain extraction
+
+- Moved top-level Python AST boundaries, TypeScript/JavaScript declaration boundaries, Svelte script boundaries, Markdown headings, and structured source-to-chunk assembly into the indexing domain.
+- Removed AST and regular-expression parsing responsibilities from the legacy indexing service, leaving it to coordinate repository access and downstream persistence.
+- Added a configurable domain content-safety rule that rejects NUL-containing binary data, oversized UTF-8 content, and invalid size limits before chunking.
+- Ruff, MyPy, `git diff --check`, and all 178 backend tests pass. The complete deterministic indexing pipeline is now domain-owned; Git, embeddings, and SQL remain outer-layer integrations.
+
+## 2026-09-05 — Legacy integration-service namespace cleanup
+
+- Moved repository indexing/search, GitHub delivery processing, Linear delivery processing, and startup reconciliation implementations from the ambiguous legacy `services` namespace into infrastructure.
+- Updated scheduler adapters, semantic-search adapters, context compilation, startup maintenance, reconciliation, and webhook-policy tests to reference their explicit outer-layer implementations.
+- Preserved the existing application ports and handlers, so orchestration continues depending inward while SQLAlchemy, Git, provider HTTP, encryption, and remote API details remain outside.
+- Ruff, MyPy, `git diff --check`, and all 178 backend tests pass. Remaining legacy services are worker/executor helpers and reusable persistence/integration primitives still consumed by infrastructure adapters.
+
+## 2026-09-05 — Worker runtime and persistence primitive relocation
+
+- Moved Docker/local subprocess transport, Executor filesystem/check execution, Context Compiler, and structured-output validation/repair under `infrastructure/workers`.
+- Moved job claiming, enqueueing, durable event recording, expired-lease recovery, workspace lease acquisition/release, and retry promotion into `infrastructure/persistence/job_operations.py`.
+- Moved the scheduler runtime under infrastructure after its database decisions had already been inverted behind application ports; bootstrap remains the sole composition root.
+- Updated every worker, adapter, persistence workflow, test, and integration caller; Ruff, MyPy, `git diff --check`, and all 178 backend tests pass.
+
+## 2026-09-05 — Legacy service layer removal
+
+- Moved encryption and credential rotation into infrastructure security, including the production Compose entrypoint and compatibility script.
+- Moved Linear synchronization, GitHub PR operations, review persistence, and Git workspace mechanics into explicit infrastructure modules.
+- Removed every Python module from the ambiguous `app/services` namespace and added an architecture test that fails CI if miscellaneous service modules are reintroduced.
+- Updated all application entrypoints, workers, adapters, infrastructure workflows, deployment configuration, and tests to use the explicit packages.
+- Fixed the remaining Svelte `ShowMore` state-capture warning; the canonical frontend check now passes ESLint, Prettier, 0-error/0-warning Svelte type checking, 21 unit tests, and the production build.
+- Ruff, MyPy, `git diff --check`, and all 179 backend tests pass.
+
+## 2026-09-05 — Domain-owned operational states
+
+- Moved task, job, integration, and repository-index lifecycle enums out of SQLAlchemy models and into framework-free domain modules.
+- ORM mappings now consume and explicitly re-export those domain enums for backward compatibility, preserving existing PostgreSQL enum names and stored values.
+- Transport schemas now depend on domain states instead of persistence models, removing their final database-layer dependency.
+- Added a CI architecture guard forbidding persistence imports from transport schemas.
+- Ruff lint/format, strict MyPy, `git diff --check`, all 180 backend tests, the full frontend check with 0 Svelte warnings and 21 unit tests, and both development/production Compose configuration validation pass.
+
+## 2026-09-05 — Post-migration container verification
+
+- Added the standard SvelteKit `prepare` lifecycle and copied `svelte.config.js` before Docker dependency installation so clean container builds generate framework types without the missing-tsconfig warning.
+- Rebuilt the Python 3.12 backend, Node 22 Svelte frontend, and polyglot Python/Node/Git worker images successfully after all module relocations.
+- Started the complete Compose stack from the rebuilt images; PostgreSQL and FastAPI report healthy, the dedicated scheduler worker remains running, and the frontend remains running.
+- Verified `GET /health/ready` returns database-ready JSON and the frontend root returns HTTP 200 through the published host ports.

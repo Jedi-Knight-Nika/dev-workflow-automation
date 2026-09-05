@@ -17,12 +17,10 @@ from app.db.models import (
     WorkerRun,
 )
 from app.db.session import SessionLocal
-from app.logging import configure_logging
-from app.providers import ProviderRequest, create_provider
-from app.schemas import WorkerResult
-from app.services.context_compiler import ContextCompiler
-from app.services.crypto import cipher
-from app.services.executor import (
+from app.infrastructure.git.workspaces import prepare_workspace, run_git
+from app.infrastructure.security.crypto import cipher
+from app.infrastructure.workers.context_compiler import ContextCompiler
+from app.infrastructure.workers.executor import (
     ExecutorProposal,
     ReviewerProposal,
     apply_proposal,
@@ -30,12 +28,14 @@ from app.services.executor import (
     run_checks,
     workspace_fingerprint,
 )
-from app.services.structured_output import (
+from app.infrastructure.workers.structured_output import (
     ProviderAttempt,
     StructuredOutputError,
     run_with_structured_repair,
 )
-from app.services.workspaces import prepare_workspace, run_git
+from app.logging import configure_logging
+from app.providers import ProviderRequest, create_provider
+from app.schemas import WorkerResult
 
 ROLE_INSTRUCTIONS = {
     "INTAKE": "Normalize the supplied event. Return concise JSON with result EVENT_INTERPRETED; event_type (NEW_TASK, INFORMATIONAL, REVIEW_FIX, ARCHITECTURAL_FINDING, REQUIREMENT_CHANGE, or NEEDS_HUMAN); actionability (ACTION_REQUIRED, INFORMATIONAL, or NEEDS_HUMAN); blocking; summary; and confidence. Classify ordinary concrete review fixes as REVIEW_FIX, architecture/design changes as ARCHITECTURAL_FINDING, changed requirements as REQUIREMENT_CHANGE, and harmless messages as INFORMATIONAL.",

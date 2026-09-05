@@ -1,4 +1,4 @@
-from app.services.github_events import (
+from app.infrastructure.github_events import (
     conversational_comment,
     extract_ci_diagnostics,
     focused_validation_payload,

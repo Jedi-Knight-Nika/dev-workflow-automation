@@ -4,9 +4,12 @@ import httpx
 import pytest
 
 from app.db.models import JobRole
+from app.infrastructure.workers.structured_output import (
+    parse_model_data,
+    run_with_structured_repair,
+)
 from app.providers import AIProvider, ProviderModel, ProviderRequest, ProviderResponse
 from app.providers.http import AnthropicProvider, GoogleProvider, OpenAIProvider
-from app.services.structured_output import parse_model_data, run_with_structured_repair
 
 
 class SequenceProvider(AIProvider):

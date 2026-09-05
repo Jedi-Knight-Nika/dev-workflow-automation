@@ -1,8 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncSession
+from typing import Annotated
 
-from app.db.session import get_session
+from fastapi import APIRouter, Depends, HTTPException
+
+from app.application.check_readiness import CheckReadiness, ServiceUnavailableError
+from app.application.ports.readiness import ReadinessProbe
+from app.bootstrap.dependencies import get_readiness_probe
 
 router = APIRouter(prefix="/health", tags=["health"])
 
@@ -13,9 +15,11 @@ async def live() -> dict[str, str]:
 
 
 @router.get("/ready")
-async def ready(session: AsyncSession = Depends(get_session)) -> dict[str, str]:
+async def ready(
+    probe: Annotated[ReadinessProbe, Depends(get_readiness_probe)],
+) -> dict[str, str]:
     try:
-        await session.execute(text("SELECT 1"))
-    except Exception as exc:
-        raise HTTPException(status_code=503, detail="Database unavailable") from exc
+        await CheckReadiness(probe).execute()
+    except ServiceUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     return {"status": "ready", "database": "ok"}

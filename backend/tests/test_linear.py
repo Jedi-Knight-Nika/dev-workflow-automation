@@ -7,14 +7,14 @@ import httpx
 import pytest
 
 from app.db.models import TaskState
-from app.integrations.linear import LinearClient, verify_linear_signature
-from app.services.linear_events import (
+from app.domain.webhooks.linear import (
     configured_repository_id,
     issue_labels,
     linear_comment,
     linear_priority,
 )
-from app.services.linear_sync import LINEAR_STATE_CONFIGURATION
+from app.infrastructure.linear_sync import LINEAR_STATE_CONFIGURATION
+from app.integrations.linear import LinearClient, verify_linear_signature
 
 
 def test_linear_signature_and_timestamp_are_verified() -> None:

@@ -1,7 +1,7 @@
 import uuid
 
 from app.config import Settings
-from app.services.worker_transport import demultiplex_docker_logs, docker_container_spec
+from app.infrastructure.workers.transport import demultiplex_docker_logs, docker_container_spec
 
 
 def test_docker_worker_is_hardened_and_receives_only_job_id() -> None:

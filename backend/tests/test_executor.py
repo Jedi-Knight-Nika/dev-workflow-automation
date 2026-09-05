@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from app.services.executor import (
+from app.infrastructure.workers.executor import (
     ExecutorProposal,
     FileWrite,
     ReviewerProposal,
