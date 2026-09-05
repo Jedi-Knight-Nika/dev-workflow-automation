@@ -18,7 +18,9 @@
   import { createTask as createTaskRequest } from '$lib/services/tasks';
   import { listWorkers } from '$lib/services/workers';
   import { getDashboardActivity } from '$lib/services/dashboard';
+  import { t } from '$lib/i18n/index.svelte';
   import type { DashboardActivity, Task, WorkerNode } from '$lib/types';
+  import type { TranslationKey } from '$lib/i18n/en';
 
   let workers: WorkerNode[] = [];
   let activity: DashboardActivity = { active_job: null, queued_jobs: [] };
@@ -44,10 +46,10 @@
         description,
         priority: 3,
         repository_id: repositoryId || null,
-        enqueue_planning: true
+        enqueue_planning: false
       });
     } catch (cause) {
-      error = cause instanceof Error ? cause.message : 'Could not queue task';
+      error = cause instanceof Error ? cause.message : t('dashboard.couldNotQueueTask');
       return;
     }
     title = '';
@@ -56,19 +58,19 @@
     await tasksResource.refresh();
   }
 
-  function dashboardGroups(): Array<{ label: string; tasks: Task[] }> {
+  function dashboardGroups(): Array<{ labelKey: TranslationKey; tasks: Task[] }> {
     const tasks = tasksResource.data;
     const queuedTasks = activity.queued_jobs
       .map((job) => tasks.find((task) => task.id === job.task_id))
       .filter((task): task is Task => task !== undefined);
     return [
-      { label: 'PRIORITIZED QUEUE', tasks: queuedTasks },
+      { labelKey: 'dashboard.prioritizedQueue', tasks: queuedTasks },
       {
-        label: 'WAITING / READY',
+        labelKey: 'dashboard.waitingReady',
         tasks: tasks.filter((task) => ['WAITING_GITHUB', 'READY_TO_MERGE'].includes(task.state))
       },
       {
-        label: 'RECENTLY COMPLETED',
+        labelKey: 'dashboard.recentlyCompleted',
         tasks: tasks.filter((task) => task.state === 'MERGED').slice(0, 6)
       }
     ];
@@ -92,26 +94,31 @@
     const events = new EventSource(`${API_URL}/api/v1/events/stream`);
     events.addEventListener('update', refreshOnUpdate);
     events.onerror = () => {
-      error = 'Live connection interrupted; retrying…';
+      error = t('dashboard.liveConnectionInterrupted');
     };
     return () => events.close();
   });
 </script>
 
-<svelte:head><title>Engineering Worker</title></svelte:head>
+<svelte:head><title>{t('dashboard.pageTitle')}</title></svelte:head>
 
 <header
-  class="border-line flex h-14 items-center justify-end border-b bg-panel-alt px-4 md:h-[72px] md:justify-between md:px-6"
+  class="border-line bg-panel-alt relative flex h-14 items-center justify-end overflow-hidden border-b bg-[radial-gradient(circle_at_10%_0%,color-mix(in_srgb,var(--color-brand)_16%,transparent),transparent_55%),radial-gradient(circle_at_95%_120%,color-mix(in_srgb,var(--color-brand-2)_14%,transparent),transparent_55%)] px-4 md:h-[72px] md:justify-between md:px-6"
 >
-  <div class="mx-auto flex w-full max-w-[1180px] items-center justify-end md:justify-between">
+  <div
+    class="relative mx-auto flex w-full max-w-[1180px] items-center justify-end md:justify-between"
+  >
     <div class="hidden items-center gap-3 md:flex">
       <span
-        class="border-brand text-brand neon-glow grid size-[38px] place-items-center border text-xs font-extrabold"
-        >AW</span
+        class="border-brand neon-glow relative flex size-[38px] shrink-0 overflow-hidden rounded-xl border motion-safe:animate-face-breathe"
       >
+        <img src="/logo-face.png" alt="" class="absolute inset-0 h-full w-full object-cover" />
+      </span>
       <div class="flex flex-col">
-        <strong>Engineering Worker</strong>
-        <small class="text-[11px] tracking-[.12em] text-muted uppercase">Control center</small>
+        <strong>{t('nav.brandName')}</strong>
+        <small class="text-[11px] tracking-[.12em] text-muted uppercase"
+          >{t('nav.controlCenter')}</small
+        >
       </div>
     </div>
     <div class="text-muted flex items-center gap-2 text-xs">
@@ -121,55 +128,63 @@
           : 'bg-warning'}"
       ></i>
       {workers.some((worker) => worker.online)
-        ? `${workers.filter((worker) => worker.online).length} worker online`
-        : 'No worker heartbeat'}
+        ? t('dashboard.workerOnline', {
+            count: workers.filter((worker) => worker.online).length
+          })
+        : t('dashboard.noWorkerHeartbeat')}
     </div>
   </div>
 </header>
 
 <main class="mx-auto max-w-[1180px] px-4 py-8 sm:px-6 sm:py-10 md:py-16">
-  <section class="grid items-start gap-8 lg:grid-cols-[1fr_460px] lg:gap-20">
+  <section class="grid items-start gap-8 xl:grid-cols-[1fr_460px] xl:gap-20">
     <div>
       <p class="text-brand mb-3.5 font-mono text-[11px] font-bold tracking-[.18em]">
-        AUTOMATION QUEUE
+        {t('dashboard.eyebrow')}
       </p>
       <h1
         class="text-gradient-brand max-w-[600px] text-[32px] leading-[1.05] font-bold tracking-[-.03em] motion-safe:animate-gradient-shift sm:text-[42px] sm:leading-[1.02] sm:tracking-[-.045em] md:text-[58px]"
       >
-        Ship work, not busywork.
+        {t('dashboard.heroTitle')}
       </h1>
-      <p
-        class="text-muted max-w-[550px] text-[15px] leading-[1.6] sm:text-[17px] sm:leading-[1.65]"
+      <blockquote
+        class="border-brand/40 text-muted mt-4 max-w-[550px] border-l-2 pl-4 text-[14px] leading-[1.65] italic sm:text-[15px]"
       >
-        Plan, execute, review, and monitor engineering tasks from one durable workflow.
-      </p>
+        “{t('dashboard.heroQuote')}”
+      </blockquote>
     </div>
     <form
-      class="bg-panel rounded-xl p-5 sm:p-6 sm:shadow-[12px_12px_0_#070908]"
+      class="bg-panel rounded-xl p-5 sm:p-6 sm:shadow-[12px_12px_0_color-mix(in_srgb,var(--color-brand)_55%,transparent)]"
       onsubmit={createTask}
     >
-      <label class="mb-3 block text-xs font-bold" for="task-title">New engineering task</label>
+      <div class="mb-3 flex items-center justify-between gap-3">
+        <label class="block text-xs font-bold" for="task-title">Manual task</label>
+        <span class="text-muted font-mono text-[10px]">UNASSIGNED</span>
+      </div>
       <div class="mb-2.5 space-y-2.5">
         <TextField
           id="task-title"
           bind:value={title}
-          placeholder="What needs to change?"
+          placeholder={t('dashboard.newTaskPlaceholder')}
           maxlength={500}
         />
         <TextArea
           bind:value={description}
-          placeholder="Requirements, constraints, acceptance criteria…"
+          placeholder={t('dashboard.descriptionPlaceholder')}
           class="h-[90px]"
         />
-        <Select bind:value={repositoryId} ariaLabel="Repository">
-          <option value="">No repository selected</option>
+        <Select bind:value={repositoryId} ariaLabel={t('repositories.title')}>
+          <option value="">{t('dashboard.noRepositorySelected')}</option>
           {#each repositoriesResource.data as repository (repository.id)}
             <option value={repository.id}>{repository.owner}/{repository.name}</option>
           {/each}
         </Select>
       </div>
+      <p class="text-muted mb-3 text-xs">
+        Create it here, then assign an AI team from Task management.
+      </p>
       <Button variant="primary" size="lg" type="submit" class="flex w-full justify-between"
-        >Queue task <span>→</span></Button
+        >Create manual task <span>→</span></Button
       >
     </form>
   </section>
@@ -177,13 +192,15 @@
   <section class="border-line mb-16 rounded-xl border p-4 sm:p-5">
     <div class="flex flex-wrap items-center justify-between gap-4">
       <div>
-        <p class="text-brand mb-2 font-mono text-[11px] font-bold tracking-[.18em]">WORKER FLEET</p>
-        <h2 class="m-0 text-xl font-bold">Execution capacity</h2>
+        <p class="text-brand mb-2 font-mono text-[11px] font-bold tracking-[.18em]">
+          {t('dashboard.workerFleetEyebrow')}
+        </p>
+        <h2 class="m-0 text-xl font-bold">{t('dashboard.executionCapacity')}</h2>
       </div>
-      <Button variant="ghost" onclick={loadWorkers}>Refresh</Button>
+      <Button variant="ghost" onclick={loadWorkers}>{t('common.refresh')}</Button>
     </div>
     {#if workers.length === 0}
-      <p class="text-muted mt-4 text-sm">No worker has registered yet.</p>
+      <p class="text-muted mt-4 text-sm">{t('dashboard.noWorkerRegistered')}</p>
     {:else}
       <div class="mt-4 grid gap-2">
         {#each workers as worker, index (worker.id)}
@@ -201,7 +218,8 @@
               <span
                 class="font-mono text-[10px] font-bold {worker.online
                   ? 'text-accent'
-                  : 'text-warning'}">{worker.online ? 'ONLINE' : 'OFFLINE'}</span
+                  : 'text-warning'}"
+                >{worker.online ? t('dashboard.online') : t('dashboard.offline')}</span
               >
             </div>
           </div>
@@ -213,22 +231,24 @@
   <section
     class="border-line my-16 grid grid-cols-2 overflow-hidden rounded-xl border lg:grid-cols-4"
   >
-    {#each [[tasksResource.data.length, 'Total tasks'], [tasksResource.data.filter( (t) => ['PLANNING', 'IMPLEMENTING', 'INTERNAL_REVIEW'].includes(t.state) ).length, 'Active'], [tasksResource.data.filter((t) => t.state === 'WAITING_GITHUB').length, 'Waiting'], [tasksResource.data.filter( (t) => ['CONTEXT_PENDING', 'NEEDS_HUMAN'].includes(t.state) ).length, 'Needs attention']] as metric, index (`${metric[1]}`)}
+    {#each [[tasksResource.data.length, 'dashboard.totalTasks'], [tasksResource.data.filter( (t) => ['PLANNING', 'IMPLEMENTING', 'INTERNAL_REVIEW'].includes(t.state) ).length, 'dashboard.active'], [tasksResource.data.filter((t) => t.state === 'WAITING_GITHUB').length, 'dashboard.waiting'], [tasksResource.data.filter( (t) => ['CONTEXT_PENDING', 'NEEDS_HUMAN'].includes(t.state) ).length, 'dashboard.needsAttention']] as [count, labelKey], index (labelKey)}
       <div
         class:border-r={index % 2 === 0}
         class:border-b={index < 2}
         class="border-line flex flex-col p-4 sm:p-6 lg:border-r lg:border-b-0 last:lg:border-r-0 motion-safe:animate-fade-in-up"
         style="animation-delay: {index * 40}ms"
       >
-        <b class="font-mono text-[26px] font-medium sm:text-[32px]">{metric[0]}</b>
-        <span class="mt-1 text-xs text-muted">{metric[1]}</span>
+        <b class="font-mono text-[26px] font-medium sm:text-[32px]">{count}</b>
+        <span class="mt-1 text-xs text-muted">{t(labelKey as TranslationKey)}</span>
       </div>
     {/each}
   </section>
 
   <section class="mb-16 grid gap-4 lg:grid-cols-3">
     <Card hover class="motion-safe:animate-fade-in-up">
-      <p class="text-brand font-mono text-[10px] tracking-widest">CURRENTLY WORKING</p>
+      <p class="text-brand font-mono text-[10px] tracking-widest">
+        {t('dashboard.currentlyWorking')}
+      </p>
       {#if activity.active_job}
         {@const activeTask = tasksResource.data.find(
           (task) => task.id === activity.active_job?.task_id
@@ -246,10 +266,12 @@
             >{activity.active_job.role} · {activity.active_job.action.replaceAll('_', ' ')}</span
           >
         </a>
-      {:else}<p class="text-muted mt-3 text-sm">Execution lane is idle.</p>{/if}
+      {:else}<p class="text-muted mt-3 text-sm">{t('dashboard.executionLaneIdle')}</p>{/if}
     </Card>
     <Card hover class="motion-safe:animate-fade-in-up" style="animation-delay: 60ms">
-      <p class="text-brand font-mono text-[10px] tracking-widest">INTEGRATION HEALTH</p>
+      <p class="text-brand font-mono text-[10px] tracking-widest">
+        {t('dashboard.integrationHealth')}
+      </p>
       {#each integrationsResource.data.filter( (item) => ['github', 'linear'].includes(item.provider_name) ) as integration (integration.id)}
         {@const hook = webhookHealthResource.data.find(
           (item) => item.provider === integration.provider_name
@@ -265,29 +287,32 @@
             >{integration.status} · {hook?.pending || 0} pending · {hook?.failed || 0} failed</span
           >
         </div>
-      {:else}<p class="text-muted mt-3 text-sm">No integrations configured.</p>{/each}
+      {:else}<p class="text-muted mt-3 text-sm">{t('dashboard.noIntegrationsConfigured')}</p>{/each}
     </Card>
     <Card hover class="motion-safe:animate-fade-in-up" style="animation-delay: 120ms">
-      <p class="text-brand font-mono text-[10px] tracking-widest">INDEX HEALTH</p>
+      <p class="text-brand font-mono text-[10px] tracking-widest">{t('dashboard.indexHealth')}</p>
       <p class="mt-3 text-2xl font-mono">
         {repositoriesResource.data.filter((repository) => repository.index_status === 'READY')
           .length}/{repositoriesResource.data.length}
       </p>
-      <p class="text-muted text-xs">repositories ready for retrieval</p>
+      <p class="text-muted text-xs">{t('dashboard.reposReadyForRetrieval')}</p>
       {#if repositoriesResource.data.some((repository) => repository.index_status === 'FAILED')}
         <p class="mt-2 text-xs text-danger">
-          {repositoriesResource.data.filter((repository) => repository.index_status === 'FAILED')
-            .length} index failures need attention
+          {t('dashboard.indexFailuresNeedAttention', {
+            count: repositoriesResource.data.filter(
+              (repository) => repository.index_status === 'FAILED'
+            ).length
+          })}
         </p>
       {/if}
     </Card>
   </section>
 
   <section class="mb-16 grid gap-5 lg:grid-cols-3">
-    {#each dashboardGroups() as group (group.label)}
+    {#each dashboardGroups() as group (group.labelKey)}
       <Card hover>
-        <p class="text-brand mb-3 font-mono text-[10px] tracking-widest">{group.label}</p>
-        {#each group.tasks as task, index (`${group.label}-${task.id}-${index}`)}
+        <p class="text-brand mb-3 font-mono text-[10px] tracking-widest">{t(group.labelKey)}</p>
+        {#each group.tasks as task, index (`${group.labelKey}-${task.id}-${index}`)}
           <a
             class="border-line flex justify-between gap-3 border-b py-2 text-xs transition-colors hover:text-brand motion-safe:animate-fade-in-up"
             style="animation-delay: {index * 30}ms"
@@ -297,7 +322,7 @@
               >{task.state.replaceAll('_', ' ')}</span
             >
           </a>
-        {:else}<p class="text-muted text-sm">None.</p>{/each}
+        {:else}<p class="text-muted text-sm">{t('common.none')}</p>{/each}
       </Card>
     {/each}
   </section>
@@ -306,11 +331,11 @@
     <div class="flex items-end justify-between">
       <div>
         <p class="text-brand mb-3.5 font-mono text-[11px] font-bold tracking-[.18em]">
-          CURRENT WORK
+          {t('dashboard.currentWorkEyebrow')}
         </p>
-        <h2 class="m-0 text-[22px] font-bold sm:text-[27px]">Task queue</h2>
+        <h2 class="m-0 text-[22px] font-bold sm:text-[27px]">{t('dashboard.taskQueue')}</h2>
       </div>
-      <Button variant="ghost" onclick={() => tasksResource.refresh()}>Refresh</Button>
+      <Button variant="ghost" onclick={() => tasksResource.refresh()}>{t('common.refresh')}</Button>
     </div>
     <ErrorBanner message={error || tasksResource.error} class="mt-5" />
     {#if tasksResource.loading && tasksResource.data.length === 0}
@@ -332,8 +357,8 @@
     {:else if tasksResource.data.length === 0}
       <EmptyState
         variant="panel"
-        title="The lane is clear."
-        message="Queue the first task above to validate the worker pipeline."
+        title={t('dashboard.laneIsClear')}
+        message={t('dashboard.queueFirstTask')}
       />
     {:else}
       <div class="border-line mt-5 overflow-hidden rounded-xl border">
@@ -351,7 +376,7 @@
                   >
                   <h3 class="my-1 text-base font-semibold">{task.title}</h3>
                   <p class="m-0 text-[13px] text-muted">
-                    {task.description || 'No additional context provided.'}
+                    {task.description || t('dashboard.noAdditionalContext')}
                   </p>
                 </div>
                 <div

@@ -24,6 +24,7 @@ from app.application.ports.thinker_completion import ThinkerCompletionCommand
 from app.application.ports.worker_runtime import WorkerRunner
 from app.application.process_deliveries import ProcessDeliveries
 from app.application.process_indexes import ProcessIndexes
+from app.application.reconcile_tasks import ReconcileExternalTasks
 from app.application.run_startup_maintenance import RunStartupMaintenance
 from app.config import Settings
 from app.domain.agents import AgentRole
@@ -49,6 +50,7 @@ class Scheduler:
         index_processor: ProcessIndexes,
         startup_maintenance: RunStartupMaintenance,
         worker_presence: ManageWorkerPresence,
+        task_reconciler: ReconcileExternalTasks,
     ) -> None:
         self.settings = settings
         self._job_dispatch = job_dispatch
@@ -62,6 +64,7 @@ class Scheduler:
         self._index_processor = index_processor
         self._startup_maintenance = startup_maintenance
         self._worker_presence = worker_presence
+        self._task_reconciler = task_reconciler
         self.worker_id = worker_id
         self._stop = asyncio.Event()
         self._loop_task: asyncio.Task[None] | None = None
@@ -103,6 +106,7 @@ class Scheduler:
     async def _run(self) -> None:
         while not self._stop.is_set():
             try:
+                await self._task_reconciler.execute()
                 await self._delivery_processor.execute()
                 job = await self._job_dispatch.claim()
                 if job:

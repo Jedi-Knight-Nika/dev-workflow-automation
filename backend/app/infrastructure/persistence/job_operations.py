@@ -2,16 +2,19 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
-from sqlalchemy import CursorResult, or_, select, update
+from sqlalchemy import CursorResult, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from app.db.models import (
     Job,
     JobRole,
     JobState,
     Task,
+    TaskAssignment,
     TaskEvent,
     TaskState,
+    Team,
     WorkspaceLease,
 )
 
@@ -63,17 +66,39 @@ async def enqueue_job(
 
 async def claim_next_job(session: AsyncSession, worker_id: str, lease_seconds: int) -> Job | None:
     # PostgreSQL row locking makes claims safe across scheduler processes.
+    active_job = aliased(Job)
+    active_task = aliased(Task)
+    active_team_tasks = (
+        select(func.count(func.distinct(active_job.task_id)))
+        .join(active_task, active_task.id == active_job.task_id)
+        .where(
+            active_task.team_id == Task.team_id,
+            active_job.state.in_([JobState.CLAIMED, JobState.RUNNING]),
+            active_job.task_id != Job.task_id,
+        )
+        .correlate(Task, Job)
+        .scalar_subquery()
+    )
     stmt = (
         select(Job)
         .join(Task)
+        .outerjoin(Team, Team.id == Task.team_id)
         .where(
             Job.state.in_([JobState.QUEUED, JobState.RETRY_WAIT]),
             or_(Job.retry_not_before.is_(None), Job.retry_not_before <= datetime.now(UTC)),
             Task.manual_takeover.is_(False),
             Task.state.notin_([TaskState.PAUSED, TaskState.CANCELLED]),
+            or_(
+                Task.team_id.is_(None),
+                (
+                    Team.enabled.is_(True)
+                    & Team.archived_at.is_(None)
+                    & (active_team_tasks < Team.max_concurrent_tasks)
+                ),
+            ),
         )
         .order_by(Job.priority.asc(), Job.created_at.asc())
-        .with_for_update(skip_locked=True)
+        .with_for_update(of=Job, skip_locked=True)
         .limit(1)
     )
     job = (await session.execute(stmt)).scalar_one_or_none()
@@ -88,6 +113,14 @@ async def claim_next_job(session: AsyncSession, worker_id: str, lease_seconds: i
     job.finished_at = None
     job.attempt += 1
     job.started_at = now
+    await session.execute(
+        update(TaskAssignment)
+        .where(
+            TaskAssignment.task_id == job.task_id,
+            TaskAssignment.status == "QUEUED",
+        )
+        .values(status="RUNNING", started_at=now)
+    )
     await record_event(
         session, job.task_id, "JOB_CLAIMED", {"job_id": str(job.id), "worker_id": worker_id}
     )

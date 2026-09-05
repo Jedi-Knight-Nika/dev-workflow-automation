@@ -18,6 +18,28 @@ class TaskCreate(BaseModel):
     repository_id: uuid.UUID | None = None
 
 
+class ExternalTaskRead(BaseModel):
+    provider: str
+    external_id: str
+    identifier: str
+    url: str | None
+    state_id: str | None
+    state_name: str | None
+    assignee_id: str | None
+    assignee_name: str | None
+    assignee_email: str | None
+    creator_name: str | None
+    team_name: str | None
+    team_key: str | None
+    project_name: str | None
+    labels: list[str]
+    estimate: float | None
+    due_date: str | None
+    provider_created_at: str | None
+    provider_updated_at: str | None
+    raw_payload: dict[str, Any]
+
+
 class TaskRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: uuid.UUID
@@ -33,6 +55,13 @@ class TaskRead(BaseModel):
     pull_request_number: int | None
     pull_request_url: str | None
     manual_takeover: bool
+    source: ExternalTaskRead | None = None
+    repository_name: str | None = None
+    due_at: datetime | None = None
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+    team_id: uuid.UUID | None = None
+    team_name: str | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -203,6 +232,31 @@ class WorkflowNodeRead(BaseModel):
     model_validation_status: str = "NOT_CONFIGURED"
     model_validation_message: str | None = None
     model_validated_at: datetime | None = None
+    integration_mode: str = Field(default="webhook", pattern="^(webhook|poll|hybrid|manual)$")
+    poll_interval_seconds: int = Field(default=300, ge=60, le=86_400)
+    filter_assignee_id: str = Field(default="", max_length=255)
+    filter_state_ids: list[str] = Field(default_factory=list)
+    integration_sync_status: str = "IDLE"
+    integration_sync_error: str | None = None
+    integration_last_synced_at: datetime | None = None
+    reasoning_effort: str = Field(default="default", pattern="^(default|low|medium|high|max)$")
+    max_output_tokens: int | None = Field(default=None, ge=256, le=200_000)
+    temperature: float | None = Field(default=None, ge=0, le=2)
+    timeout_minutes: int = Field(default=60, ge=1, le=720)
+    max_retries: int = Field(default=2, ge=0, le=10)
+    max_review_cycles: int = Field(default=3, ge=0, le=20)
+    context_depth: str = Field(default="normal", pattern="^(low|normal|deep)$")
+    rag_retrieval_depth: str = Field(default="normal", pattern="^(low|normal|deep)$")
+    fallback_provider: str | None = Field(default=None, pattern="^(openai|anthropic|google)$")
+    fallback_model: str | None = Field(default=None, max_length=255)
+    agent_id: uuid.UUID | None = None
+
+
+class LinearMemberRead(BaseModel):
+    id: str
+    name: str
+    email: str
+    active: bool
 
 
 class WorkflowNodeModelValidationRead(BaseModel):
@@ -334,3 +388,70 @@ class ReviewFindingRead(BaseModel):
     created_at: datetime
     last_seen_at: datetime | None
     resolved_at: datetime | None
+
+
+class TeamWrite(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    description: str = Field(default="", max_length=4000)
+    enabled: bool = True
+    max_concurrent_tasks: int = Field(default=1, ge=1, le=32)
+    repository_ids: list[uuid.UUID] = Field(default_factory=list)
+
+
+class RoleWrite(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    category: str
+    description: str = Field(default="", max_length=4000)
+    system_instructions: str = Field(default="", max_length=100_000)
+    capabilities: list[str] = Field(default_factory=list)
+    permissions: list[str] = Field(default_factory=list)
+    allowed_results: list[str] = Field(default_factory=list)
+    knowledge_collection_ids: list[uuid.UUID] = Field(default_factory=list)
+    default_provider: str | None = None
+    default_model: str | None = Field(default=None, max_length=255)
+    default_reasoning_effort: str = "default"
+    default_timeout_minutes: int = Field(default=30, ge=1, le=720)
+    default_max_retries: int = Field(default=2, ge=0, le=10)
+    enabled: bool = True
+
+
+class RoleRead(RoleWrite):
+    id: uuid.UUID
+    built_in: bool
+    version: int
+    active_agents: int
+    created_at: datetime
+    updated_at: datetime
+
+
+class RoleClone(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+
+
+class TeamRead(TeamWrite):
+    id: uuid.UUID
+    queued_tasks: int
+    running_tasks: int
+    completed_tasks: int
+    total_input_tokens: int
+    total_output_tokens: int
+    estimated_cost_usd: float
+    created_at: datetime
+    updated_at: datetime
+
+
+class TaskAssignmentCreate(BaseModel):
+    task_id: uuid.UUID
+    reason: str = Field(default="manual", max_length=500)
+
+
+class TaskAssignmentRead(BaseModel):
+    id: uuid.UUID
+    task_id: uuid.UUID
+    team_id: uuid.UUID
+    status: str
+    queue_position: int
+    reason: str
+    assigned_at: datetime
+    started_at: datetime | None
+    completed_at: datetime | None

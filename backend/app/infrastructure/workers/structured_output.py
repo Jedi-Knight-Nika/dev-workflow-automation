@@ -102,7 +102,7 @@ async def run_with_structured_repair(
     attempts: list[ProviderAttempt] = []
     prompt = request.prompt
     last_error: ValidationError | None = None
-    for attempt_number in range(max(0, min(max_repairs, 2)) + 1):
+    for attempt_number in range(max(0, min(max_repairs, 10)) + 1):
         started = time.monotonic()
         response = await provider.run(
             ProviderRequest(
@@ -110,6 +110,9 @@ async def run_with_structured_repair(
                 system=request.system,
                 prompt=prompt,
                 max_output_tokens=request.max_output_tokens,
+                temperature=request.temperature,
+                reasoning_effort=request.reasoning_effort,
+                timeout_seconds=request.timeout_seconds,
             )
         )
         attempts.append(ProviderAttempt(response, round((time.monotonic() - started) * 1000)))

@@ -1,10 +1,22 @@
+import type { TranslationKey } from './i18n/en';
+
 export const NAV_ITEMS = [
-  { href: '/', label: 'Dashboard' },
-  { href: '/tasks', label: 'Tasks' },
-  { href: '/repositories', label: 'Repositories' },
-  { href: '/agents', label: 'Workflow' },
-  { href: '/integrations', label: 'Integrations' },
-  { href: '/settings', label: 'Settings' }
+  { href: '/', label: 'Dashboard', labelKey: 'nav.dashboard' satisfies TranslationKey },
+  { href: '/tasks', label: 'Tasks', labelKey: 'nav.tasks' satisfies TranslationKey },
+  { href: '/teams', label: 'Teams', labelKey: 'nav.teams' satisfies TranslationKey },
+  { href: '/roles', label: 'Roles', labelKey: 'nav.roles' satisfies TranslationKey },
+  {
+    href: '/repositories',
+    label: 'Repositories',
+    labelKey: 'nav.repositories' satisfies TranslationKey
+  },
+  { href: '/agents', label: 'Workflow', labelKey: 'nav.workflow' satisfies TranslationKey },
+  {
+    href: '/integrations',
+    label: 'Integrations',
+    labelKey: 'nav.integrations' satisfies TranslationKey
+  },
+  { href: '/settings', label: 'Settings', labelKey: 'nav.settings' satisfies TranslationKey }
 ] as const;
 
 export type NavItem = (typeof NAV_ITEMS)[number];

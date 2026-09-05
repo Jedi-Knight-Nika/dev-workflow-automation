@@ -21,8 +21,11 @@
   --animate-shimmer: shimmer 1.6s ease-in-out infinite;
   --animate-glow-pulse: glow-pulse 2.6s ease-in-out infinite;
   --animate-gradient-shift: gradient-shift 6s ease infinite;
+  --animate-face-breathe: face-breathe 3.4s cubic-bezier(0.45, 0, 0.55, 1) infinite;
 
   --ease-smooth: cubic-bezier(0.16, 1, 0.3, 1);
+
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
 /* System preference (no explicit choice saved) */
@@ -131,11 +134,26 @@
   }
 }
 
+@keyframes face-breathe {
+  0%,
+  100% {
+    transform: scale(1);
+    box-shadow: 0 0 14px color-mix(in srgb, var(--color-brand) 40%, transparent);
+  }
+  50% {
+    transform: scale(1.045);
+    box-shadow:
+      0 0 26px color-mix(in srgb, var(--color-brand) 65%, transparent),
+      0 0 12px color-mix(in srgb, var(--color-brand-2) 40%, transparent);
+  }
+}
+
 @layer base {
   body {
     @apply m-0 bg-surface text-[color:var(--color-text)] antialiased;
     font-family:
-      Inter,
+      'Noto Sans',
+      'Noto Sans Georgian',
       ui-sans-serif,
       system-ui,
       -apple-system,

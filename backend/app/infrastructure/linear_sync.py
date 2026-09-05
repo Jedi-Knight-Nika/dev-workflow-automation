@@ -4,6 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Integration, Task, TaskEvent, TaskState
+from app.infrastructure.integration_access import role_allows_integration
 from app.infrastructure.persistence.job_operations import record_event
 from app.infrastructure.security.crypto import cipher
 from app.integrations.linear import LinearClient
@@ -48,6 +49,15 @@ async def sync_task_to_linear(
             task.id,
             "LINEAR_SYNC_SKIPPED",
             {"reason": f"Linear credential or {state_label} state is not configured"},
+        )
+        await session.commit()
+        return False
+    if not await role_allows_integration(session, "DELIVERER", integration.id):
+        await record_event(
+            session,
+            task.id,
+            "LINEAR_SYNC_SKIPPED",
+            {"reason": "Linear is not enabled on the Deliverer node"},
         )
         await session.commit()
         return False

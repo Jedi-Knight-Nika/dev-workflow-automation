@@ -8,6 +8,7 @@ from app.application.jobs import (
 from app.application.manage_worker_presence import ManageWorkerPresence
 from app.application.process_deliveries import ProcessDeliveries
 from app.application.process_indexes import ProcessIndexes
+from app.application.reconcile_tasks import ReconcileExternalTasks
 from app.application.run_startup_maintenance import RunStartupMaintenance
 from app.config import Settings
 from app.db.session import SessionLocal
@@ -15,6 +16,7 @@ from app.domain.jobs import RetryPolicy
 from app.infrastructure.delivery_processing import SqlAlchemyDeliveryProcessor
 from app.infrastructure.index_processing import SqlAlchemyIndexProcessor
 from app.infrastructure.job_dispatch import SqlAlchemyJobDispatch
+from app.infrastructure.linear_reconciliation import SqlAlchemyLinearTaskReconciliation
 from app.infrastructure.persistence.executor_completion import (
     SqlAlchemyExecutorCompletionUnitOfWorkFactory,
 )
@@ -89,6 +91,7 @@ def create_scheduler(settings: Settings) -> Scheduler:
         index_processor,
         startup_maintenance,
         worker_presence,
+        ReconcileExternalTasks(SqlAlchemyLinearTaskReconciliation(SessionLocal)),
     )
 
 

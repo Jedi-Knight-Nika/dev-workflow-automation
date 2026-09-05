@@ -16,6 +16,7 @@
   import LinearWorkflowFields from '$lib/components/integrations/LinearWorkflowFields.svelte';
   import TextField from '$lib/components/TextField.svelte';
   import type { GitHubInstallationAccount, LinearWorkflowState } from '$lib/types';
+  import { t } from '$lib/i18n/index.svelte';
   const providers = [
     { name: 'github', type: 'source_control', label: 'GitHub', active: true },
     { name: 'linear', type: 'task_management', label: 'Linear', active: true },
@@ -164,7 +165,8 @@
       ]);
       statusesRefreshedAt = new Date();
       const rejected = results.filter((result) => result.status === 'rejected');
-      if (rejected.length) error = `${rejected.length} connection checks could not be completed.`;
+      if (rejected.length)
+        error = t('integrations.connectionChecksIncomplete', { count: rejected.length });
     } finally {
       refreshingStatuses = false;
     }
@@ -172,9 +174,9 @@
 </script>
 
 <PageHeader
-  eyebrow="CONNECTIONS"
-  title="Integrations"
-  description="External systems and AI providers available to the orchestrator."
+  eyebrow={t('integrations.eyebrow')}
+  title={t('integrations.title')}
+  description={t('integrations.description')}
 />
 <main class="p-4 sm:p-6 md:p-10">
   <ErrorBanner
@@ -183,13 +185,15 @@
   />
   <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
     <p class="text-muted text-xs">
-      Statuses are tested automatically after initial configuration.
+      {t('integrations.autoTestedHint')}
       {#if statusesRefreshedAt}
-        Last refreshed {statusesRefreshedAt.toLocaleTimeString()}.
+        {t('integrations.lastRefreshed', { time: statusesRefreshedAt.toLocaleTimeString() })}
       {/if}
     </p>
     <Button onclick={refreshStatuses} disabled={refreshingStatuses}>
-      {refreshingStatuses ? 'Checking connections…' : 'Refresh statuses'}
+      {refreshingStatuses
+        ? t('integrations.checkingConnections')
+        : t('integrations.refreshStatuses')}
     </Button>
   </div>
   <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
@@ -203,7 +207,7 @@
         <h2 class="my-2 text-xl font-semibold">{provider.label}</h2>
         {#if provider.name === 'github'}
           <p class="text-muted mb-3 text-xs">
-            Authenticate GitHub first, then choose exactly which repositories the AI may access.
+            {t('integrations.githubAuthHint')}
           </p>
           {#if githubAccount}
             <button
@@ -215,7 +219,9 @@
               <img class="h-9 w-9 rounded-full" src={githubAccount.avatar_url} alt="" />
               <span>
                 <strong class="block text-sm">@{githubAccount.login}</strong>
-                <span class="text-muted text-[10px]">{githubAccount.account_type} account</span>
+                <span class="text-muted text-[10px]"
+                  >{t('integrations.accountType', { type: githubAccount.account_type })}</span
+                >
               </span>
             </button>
           {/if}
@@ -225,13 +231,17 @@
           <div
             class="border-line mb-3 grid grid-cols-2 overflow-hidden rounded-lg border font-mono text-[10px]"
           >
-            <span class="border-line border-r p-2">WEBHOOK PENDING {health.pending}</span>
+            <span class="border-line border-r p-2"
+              >{t('integrations.webhookPending')} {health.pending}</span
+            >
             <span class="p-2 {health.failed ? 'text-danger' : 'text-accent'}"
-              >FAILED {health.failed}</span
+              >{t('integrations.failed')} {health.failed}</span
             >
           </div>
           {#if health.last_error}
-            <p class="mb-3 text-xs text-danger">Last delivery error: {health.last_error}</p>
+            <p class="mb-3 text-xs text-danger">
+              {t('integrations.lastDeliveryError')}: {health.last_error}
+            </p>
           {/if}
         {/if}
         {#if editing === provider.name && provider.name !== 'github'}
@@ -244,10 +254,10 @@
           >
             <TextField
               id={`credential-${provider.name}`}
-              label={`API key or token ${
+              label={`${t('integrations.apiKeyOrToken')} ${
                 integrationsResource.data.find((item) => item.provider_name === provider.name)
                   ?.has_credentials
-                  ? '(leave blank to keep existing)'
+                  ? t('integrations.keepExisting')
                   : ''
               }`}
               type="password"
@@ -279,7 +289,9 @@
             {#if provider.name === 'npm_registry' || provider.name === 'pypi_registry'}
               <TextField
                 id={`registry-url-${provider.name}`}
-                label={provider.name === 'npm_registry' ? 'Registry URL' : 'Package index URL'}
+                label={provider.name === 'npm_registry'
+                  ? t('integrations.registryUrl')
+                  : t('integrations.packageIndexUrl')}
                 type="url"
                 bind:value={registryUrl}
                 placeholder={provider.name === 'npm_registry'
@@ -289,18 +301,18 @@
               />
             {/if}
             <p class="text-muted mt-2 text-[10px]">
-              Stored encrypted. The value is never returned to the browser.
+              {t('integrations.storedEncrypted')}
             </p>
             <div class="mt-3 flex flex-wrap gap-2">
               <Button variant="primary" type="submit" disabled={saving}
-                >{saving ? 'Saving…' : 'Save securely'}</Button
+                >{saving ? t('integrations.saving') : t('integrations.saveSecurely')}</Button
               >
               <Button
                 type="button"
                 onclick={() => {
                   editing = '';
                   credential = '';
-                }}>Cancel</Button
+                }}>{t('integrations.cancel')}</Button
               >
             </div>
           </form>
@@ -314,22 +326,25 @@
         {#if integration(provider.name)?.has_credentials && status(provider.name) !== 'DISCONNECTED'}
           <p class="text-muted mt-2 text-[10px]">
             {status(provider.name) === 'CONNECTED'
-              ? 'Credentials verified successfully.'
+              ? t('integrations.credentialsVerified')
               : status(provider.name) === 'ERROR'
-                ? 'Credential verification failed.'
-                : 'Credentials saved; verification pending.'}
+                ? t('integrations.credentialVerificationFailed')
+                : t('integrations.credentialsPendingVerification')}
           </p>
         {/if}
         <div class="mt-6 flex flex-wrap items-center justify-between gap-2">
           <span
             class="font-mono text-[10px] {status(provider.name) === 'CONNECTED'
               ? 'text-accent'
-              : 'text-muted'}">{provider.active ? status(provider.name) : 'COMING SOON'}</span
+              : 'text-muted'}"
+            >{provider.active ? status(provider.name) : t('integrations.comingSoon')}</span
           >
           <div class="flex flex-wrap gap-2">
             {#if provider.name === 'github'}
               <Button variant="primary" onclick={installGithubApp}>
-                {status('github') === 'CONNECTED' ? 'Reconnect GitHub' : 'Connect GitHub'}
+                {status('github') === 'CONNECTED'
+                  ? t('integrations.reconnectGithub')
+                  : t('integrations.connectGithub')}
               </Button>
             {/if}
             {#if provider.name === 'github' && status('github') === 'CONNECTED'}
@@ -337,7 +352,7 @@
                 class="border-line rounded-lg border px-3 py-2 text-xs text-muted hover:border-brand hover:text-brand"
                 href={resolve('/repositories')}
               >
-                Choose repositories
+                {t('integrations.chooseRepositories')}
               </a>
             {/if}
             {#if provider.name !== 'github'}<Button
@@ -359,10 +374,10 @@
                   registryUrl = String(existing?.registry_url || existing?.index_url || '');
                 }}
                 >{provider.name === 'github' && status(provider.name) === 'DISCONNECTED'
-                  ? 'Connect GitHub'
+                  ? t('integrations.connectGithub')
                   : status(provider.name) === 'DISCONNECTED'
-                    ? 'Configure'
-                    : 'Update'}</Button
+                    ? t('integrations.configure')
+                    : t('integrations.update')}</Button
               >{/if}
           </div>
         </div>

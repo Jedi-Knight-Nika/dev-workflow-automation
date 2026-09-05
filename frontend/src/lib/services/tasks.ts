@@ -19,8 +19,36 @@ export type CreateJobInput = {
 
 export type TaskCommand = 'pause' | 'cancel' | 'takeover' | 'resume';
 
-export function listTasks(): Promise<Task[]> {
-  return api<Task[]>('/tasks');
+export type TaskFilters = {
+  search?: string;
+  state?: string[];
+  provider?: string;
+  repository_id?: string;
+  priority?: number[];
+  created_from?: string;
+  created_to?: string;
+  due_from?: string;
+  due_to?: string;
+  assignee?: string;
+  team?: string;
+  project?: string;
+  label?: string;
+  provider_state?: string;
+  assigned_team_id?: string;
+  unassigned?: boolean;
+  sort?: 'priority' | 'created' | 'updated' | 'due';
+  direction?: 'asc' | 'desc';
+};
+
+export function listTasks(filters: TaskFilters = {}): Promise<Task[]> {
+  const query = new URLSearchParams({ limit: '500' });
+  for (const [key, value] of Object.entries(filters)) {
+    if (value === undefined || value === '' || (Array.isArray(value) && value.length === 0))
+      continue;
+    if (Array.isArray(value)) value.forEach((item) => query.append(key, String(item)));
+    else query.set(key, String(value));
+  }
+  return api<Task[]>(`/tasks?${query.toString()}`);
 }
 
 export function getTask(taskId: string): Promise<Task> {

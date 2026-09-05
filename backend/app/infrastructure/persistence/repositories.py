@@ -34,25 +34,24 @@ class SqlAlchemyTaskRepository:
         self._session = session
 
     async def add(self, task: Task) -> None:
-        self._session.add(
-            TaskRecord(
-                id=task.id,
-                external_key=task.external_key,
-                title=task.title,
-                description=task.description,
-                priority=task.priority,
-                state=TaskRecordState(task.state.value),
-                repository_id=task.repository_id,
-                current_revision=task.current_revision,
-                branch_name=task.branch_name,
-                workspace_path=task.workspace_path,
-                pull_request_number=task.pull_request_number,
-                pull_request_url=task.pull_request_url,
-                manual_takeover=task.manual_takeover,
-                created_at=task.created_at,
-                updated_at=task.updated_at,
-            )
+        record = TaskRecord(
+            id=task.id,
+            external_key=task.external_key,
+            title=task.title,
+            description=task.description,
+            priority=task.priority,
+            state=TaskRecordState(task.state.value),
+            repository_id=task.repository_id,
+            current_revision=task.current_revision,
+            branch_name=task.branch_name,
+            workspace_path=task.workspace_path,
+            pull_request_number=task.pull_request_number,
+            pull_request_url=task.pull_request_url,
+            manual_takeover=task.manual_takeover,
+            created_at=task.created_at,
+            updated_at=task.updated_at,
         )
+        self._session.add(record)
         await self._session.flush()
 
 

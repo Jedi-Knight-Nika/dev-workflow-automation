@@ -25,17 +25,22 @@ class OpenAIProvider(AIProvider):
         )
 
     async def run(self, request: ProviderRequest) -> ProviderResponse:
-        async with httpx.AsyncClient(timeout=120) as client:
+        payload: dict[str, Any] = {
+            "model": request.model,
+            "instructions": request.system,
+            "input": request.prompt,
+            "max_output_tokens": request.max_output_tokens,
+            "store": False,
+        }
+        if request.temperature is not None:
+            payload["temperature"] = request.temperature
+        if request.reasoning_effort != "default":
+            payload["reasoning"] = {"effort": request.reasoning_effort}
+        async with httpx.AsyncClient(timeout=request.timeout_seconds) as client:
             response = await client.post(
                 "https://api.openai.com/v1/responses",
                 headers={"authorization": f"Bearer {self.api_key}"},
-                json={
-                    "model": request.model,
-                    "instructions": request.system,
-                    "input": request.prompt,
-                    "max_output_tokens": request.max_output_tokens,
-                    "store": False,
-                },
+                json=payload,
             )
             response.raise_for_status()
             data: dict[str, Any] = response.json()
@@ -74,19 +79,22 @@ class AnthropicProvider(AIProvider):
         )
 
     async def run(self, request: ProviderRequest) -> ProviderResponse:
-        async with httpx.AsyncClient(timeout=120) as client:
+        payload: dict[str, Any] = {
+            "model": request.model,
+            "system": request.system,
+            "messages": [{"role": "user", "content": request.prompt}],
+            "max_tokens": request.max_output_tokens,
+        }
+        if request.temperature is not None:
+            payload["temperature"] = request.temperature
+        async with httpx.AsyncClient(timeout=request.timeout_seconds) as client:
             response = await client.post(
                 "https://api.anthropic.com/v1/messages",
                 headers={
                     "x-api-key": self.api_key,
                     "anthropic-version": "2023-06-01",
                 },
-                json={
-                    "model": request.model,
-                    "system": request.system,
-                    "messages": [{"role": "user", "content": request.prompt}],
-                    "max_tokens": request.max_output_tokens,
-                },
+                json=payload,
             )
             response.raise_for_status()
             data: dict[str, Any] = response.json()
@@ -125,7 +133,10 @@ class GoogleProvider(AIProvider):
         return sorted(models, key=lambda item: item.id)
 
     async def run(self, request: ProviderRequest) -> ProviderResponse:
-        async with httpx.AsyncClient(timeout=120) as client:
+        generation_config: dict[str, Any] = {"max_output_tokens": request.max_output_tokens}
+        if request.temperature is not None:
+            generation_config["temperature"] = request.temperature
+        async with httpx.AsyncClient(timeout=request.timeout_seconds) as client:
             response = await client.post(
                 "https://generativelanguage.googleapis.com/v1beta/interactions",
                 headers={"x-goog-api-key": self.api_key},
@@ -133,6 +144,7 @@ class GoogleProvider(AIProvider):
                     "model": request.model,
                     "system_instruction": request.system,
                     "input": request.prompt,
+                    "generation_config": generation_config,
                 },
             )
             response.raise_for_status()

@@ -41,11 +41,15 @@ class Task(Base):
     repository_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("repositories.id", ondelete="SET NULL")
     )
+    team_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("teams.id", ondelete="SET NULL"))
     branch_name: Mapped[str | None] = mapped_column(String(255))
     workspace_path: Mapped[str | None] = mapped_column(Text)
     pull_request_number: Mapped[int | None] = mapped_column(Integer)
     pull_request_url: Mapped[str | None] = mapped_column(Text)
     manual_takeover: Mapped[bool] = mapped_column(default=False)
+    due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow
@@ -183,6 +187,9 @@ class AgentKnowledgeChunk(Base):
 class WorkflowDefinition(Base):
     __tablename__ = "workflow_definitions"
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    team_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("teams.id", ondelete="CASCADE"), unique=True
+    )
     version: Mapped[int] = mapped_column(Integer, default=1)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow
@@ -194,6 +201,9 @@ class WorkflowNode(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
     workflow_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("workflow_definitions.id", ondelete="CASCADE")
+    )
+    agent_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("ai_agents.id", ondelete="SET NULL")
     )
     role: Mapped[str] = mapped_column(String(30))
     label: Mapped[str] = mapped_column(String(100))
@@ -210,6 +220,39 @@ class WorkflowNode(Base):
     model_validation_status: Mapped[str] = mapped_column(String(30), default="NOT_CONFIGURED")
     model_validation_message: Mapped[str | None] = mapped_column(Text)
     model_validated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    integration_mode: Mapped[str] = mapped_column(String(20), default="webhook")
+    poll_interval_seconds: Mapped[int] = mapped_column(Integer, default=300)
+    filter_assignee_id: Mapped[str] = mapped_column(String(255), default="")
+    filter_state_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
+    integration_sync_status: Mapped[str] = mapped_column(String(30), default="IDLE")
+    integration_sync_error: Mapped[str | None] = mapped_column(Text)
+    integration_last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    reasoning_effort: Mapped[str] = mapped_column(String(20), default="default")
+    max_output_tokens: Mapped[int | None] = mapped_column(Integer)
+    temperature: Mapped[float | None] = mapped_column(Numeric(4, 2))
+    timeout_minutes: Mapped[int] = mapped_column(Integer, default=60)
+    max_retries: Mapped[int] = mapped_column(Integer, default=2)
+    max_review_cycles: Mapped[int] = mapped_column(Integer, default=3)
+    context_depth: Mapped[str] = mapped_column(String(20), default="normal")
+    rag_retrieval_depth: Mapped[str] = mapped_column(String(20), default="normal")
+    fallback_provider: Mapped[str | None] = mapped_column(String(50))
+    fallback_model: Mapped[str | None] = mapped_column(String(255))
+
+
+class ExternalTaskSnapshot(Base):
+    __tablename__ = "external_task_snapshots"
+    __table_args__ = (
+        UniqueConstraint("provider", "external_id", name="uq_external_task_provider_id"),
+    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    task_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tasks.id", ondelete="CASCADE"))
+    provider: Mapped[str] = mapped_column(String(50))
+    external_id: Mapped[str] = mapped_column(String(255))
+    identifier: Mapped[str] = mapped_column(String(100))
+    assignee_id: Mapped[str | None] = mapped_column(String(255))
+    state_id: Mapped[str | None] = mapped_column(String(255))
+    raw_payload: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    synchronized_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
 class WorkflowEdge(Base):
@@ -277,7 +320,90 @@ class WorkerRun(Base):
     estimated_cost_usd: Mapped[float | None] = mapped_column(Numeric(14, 6))
     duration_ms: Mapped[int] = mapped_column(Integer)
     provider_request_id: Mapped[str | None] = mapped_column(String(255))
+    agent_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("ai_agents.id", ondelete="SET NULL")
+    )
+    role_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("roles.id", ondelete="SET NULL"))
+    role_version: Mapped[int | None] = mapped_column(Integer)
+    effective_permissions: Mapped[list[str]] = mapped_column(JSON, default=list)
+    effective_knowledge_scope: Mapped[list[str]] = mapped_column(JSON, default=list)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class Team(Base):
+    __tablename__ = "teams"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name: Mapped[str] = mapped_column(String(120), unique=True)
+    description: Mapped[str] = mapped_column(Text, default="")
+    enabled: Mapped[bool] = mapped_column(default=True)
+    max_concurrent_tasks: Mapped[int] = mapped_column(Integer, default=1)
+    repository_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class Role(Base):
+    __tablename__ = "roles"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name: Mapped[str] = mapped_column(String(120), unique=True)
+    category: Mapped[str] = mapped_column(String(30))
+    description: Mapped[str] = mapped_column(Text, default="")
+    system_instructions: Mapped[str] = mapped_column(Text, default="")
+    capabilities: Mapped[list[str]] = mapped_column(JSON, default=list)
+    permissions: Mapped[list[str]] = mapped_column(JSON, default=list)
+    allowed_results: Mapped[list[str]] = mapped_column(JSON, default=list)
+    knowledge_collection_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
+    default_provider: Mapped[str | None] = mapped_column(String(50))
+    default_model: Mapped[str | None] = mapped_column(String(255))
+    default_reasoning_effort: Mapped[str] = mapped_column(String(20), default="default")
+    default_timeout_minutes: Mapped[int] = mapped_column(Integer, default=30)
+    default_max_retries: Mapped[int] = mapped_column(Integer, default=2)
+    enabled: Mapped[bool] = mapped_column(default=True)
+    built_in: Mapped[bool] = mapped_column(default=False)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class AIAgent(Base):
+    __tablename__ = "ai_agents"
+    __table_args__ = (UniqueConstraint("team_id", "name", name="uq_ai_agent_team_name"),)
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    team_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("teams.id", ondelete="CASCADE"))
+    role_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("roles.id", ondelete="RESTRICT"))
+    name: Mapped[str] = mapped_column(String(120))
+    provider: Mapped[str | None] = mapped_column(String(50))
+    model: Mapped[str | None] = mapped_column(String(255))
+    custom_instructions: Mapped[str] = mapped_column(Text, default="")
+    permission_overrides: Mapped[dict[str, str]] = mapped_column(JSON, default=dict)
+    knowledge_collection_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
+    enabled: Mapped[bool] = mapped_column(default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+
+class TaskAssignment(Base):
+    __tablename__ = "task_assignments"
+    __table_args__ = (
+        Index("ix_task_assignments_team_queue", "team_id", "status", "queue_position"),
+    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    task_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tasks.id", ondelete="CASCADE"))
+    team_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("teams.id", ondelete="RESTRICT"))
+    status: Mapped[str] = mapped_column(String(30), default="QUEUED")
+    queue_position: Mapped[int] = mapped_column(BigInteger, default=0)
+    reason: Mapped[str] = mapped_column(Text, default="")
+    assigned_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class WorkerNode(Base):

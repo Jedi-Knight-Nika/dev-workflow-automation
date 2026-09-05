@@ -1,3 +1,4 @@
+import uuid
 from typing import Annotated
 
 from fastapi import Depends
@@ -6,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.application.query_events import QueryEvents
 from app.config import Settings, get_settings
 from app.db.session import SessionLocal, get_session
+from app.infrastructure.agent_knowledge import SqlAlchemyAgentKnowledgeWorkflow
 from app.infrastructure.github_installation import EncryptedGitHubInstallationWorkflow
 from app.infrastructure.integration_discovery import EncryptedIntegrationDiscoveryWorkflow
 from app.infrastructure.integration_management import EncryptedIntegrationManagementWorkflow
@@ -19,9 +21,11 @@ from app.infrastructure.persistence.readiness import SqlAlchemyReadinessProbe
 from app.infrastructure.persistence.repository_management import (
     SqlAlchemyRepositoryManagementWorkflow,
 )
+from app.infrastructure.persistence.role_management import SqlAlchemyRoleManagementWorkflow
 from app.infrastructure.persistence.task_history import SqlAlchemyTaskHistoryQueries
 from app.infrastructure.persistence.task_lifecycle import SqlAlchemyTaskLifecycleUnitOfWorkFactory
 from app.infrastructure.persistence.task_queries import SqlAlchemyTaskQueries
+from app.infrastructure.persistence.team_management import SqlAlchemyTeamManagementWorkflow
 from app.infrastructure.persistence.terminal_sessions import SqlAlchemyTerminalSessionGateway
 from app.infrastructure.persistence.tracker_sync import SqlAlchemyLinearSyncWorkflow
 from app.infrastructure.persistence.worker_queries import SqlAlchemyWorkerQueries
@@ -121,10 +125,35 @@ def get_agent_configuration_workflow(
     return SqlAlchemyAgentConfigurationWorkflow(session)
 
 
+def get_agent_knowledge_workflow(
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> SqlAlchemyAgentKnowledgeWorkflow:
+    return SqlAlchemyAgentKnowledgeWorkflow(session)
+
+
 def get_workflow_designer(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> SqlAlchemyWorkflowDesigner:
     return SqlAlchemyWorkflowDesigner(session)
+
+
+def get_team_management_workflow(
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> SqlAlchemyTeamManagementWorkflow:
+    return SqlAlchemyTeamManagementWorkflow(session)
+
+
+def get_role_management_workflow(
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> SqlAlchemyRoleManagementWorkflow:
+    return SqlAlchemyRoleManagementWorkflow(session)
+
+
+def get_team_workflow_designer(
+    team_id: uuid.UUID,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> SqlAlchemyWorkflowDesigner:
+    return SqlAlchemyWorkflowDesigner(session, team_id)
 
 
 def get_terminal_session_gateway(

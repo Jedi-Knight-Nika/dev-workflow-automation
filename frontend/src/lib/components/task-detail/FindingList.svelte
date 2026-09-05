@@ -1,14 +1,15 @@
 <script lang="ts">
   import ShowMore from '$lib/components/ShowMore.svelte';
   import type { ReviewFinding } from '$lib/types';
+  import { t } from '$lib/i18n/index.svelte';
 
   let { findings }: { findings: ReviewFinding[] } = $props();
 </script>
 
 <section class="border-line rounded-xl border p-5 xl:col-span-2">
-  <h2 class="mb-4 font-semibold">Internal review findings</h2>
+  <h2 class="mb-4 font-semibold">{t('taskDetail.internalReviewFindings')}</h2>
   {#if findings.length === 0}
-    <p class="text-muted text-sm">No internal findings recorded.</p>
+    <p class="text-muted text-sm">{t('taskDetail.noFindingsRecorded')}</p>
   {:else}
     <ShowMore items={findings}>
       {#snippet children(visibleFindings: ReviewFinding[])}
@@ -20,7 +21,7 @@
             <div class="flex flex-wrap justify-between gap-3">
               <strong class="text-sm"
                 >{finding.severity} · {finding.status}{finding.occurrence_count > 1
-                  ? ` · repeated ${finding.occurrence_count}×`
+                  ? ` · ${t('taskDetail.repeated')} ${finding.occurrence_count}×`
                   : ''}</strong
               >
               <span class="text-muted font-mono text-[10px]"

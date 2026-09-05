@@ -48,10 +48,12 @@ class ContextCompiler:
         session: AsyncSession,
         max_chars: int = DEFAULT_CONTEXT_CHARS,
         include_repository_knowledge: bool = True,
+        retrieval_depth: str = "normal",
     ) -> None:
         self.session = session
         self.max_chars = max_chars
         self.include_repository_knowledge = include_repository_knowledge
+        self.retrieval_depth = retrieval_depth
 
     def _base(self, task: Task, job: Job) -> dict[str, Any]:
         return {
@@ -76,8 +78,12 @@ class ContextCompiler:
             and repository is not None
             and repository.index_status == IndexStatus.READY
         ):
-            rows.extend(await semantic_search(self.session, repository.id, query, limit=8))
-        manual = await search_agent_knowledge(self.session, role, query, limit=6)
+            repository_limit = {"low": 4, "normal": 8, "deep": 16}.get(self.retrieval_depth, 8)
+            rows.extend(
+                await semantic_search(self.session, repository.id, query, limit=repository_limit)
+            )
+        manual_limit = {"low": 3, "normal": 6, "deep": 12}.get(self.retrieval_depth, 6)
+        manual = await search_agent_knowledge(self.session, role, query, limit=manual_limit)
         rows.extend(
             {
                 "file_path": f"manual://{row['source_id']}",

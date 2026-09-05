@@ -1,14 +1,15 @@
 <script lang="ts">
   import ShowMore from '$lib/components/ShowMore.svelte';
   import type { Job } from '$lib/types';
+  import { t } from '$lib/i18n/index.svelte';
 
   let { jobs }: { jobs: Job[] } = $props();
 </script>
 
 <section class="border-line rounded-xl border p-5">
-  <h2 class="mb-4 font-semibold">Jobs</h2>
+  <h2 class="mb-4 font-semibold">{t('taskDetail.jobs')}</h2>
   {#if jobs.length === 0}
-    <p class="text-muted text-sm">No jobs recorded.</p>
+    <p class="text-muted text-sm">{t('taskDetail.noJobsRecorded')}</p>
   {:else}
     <ShowMore items={jobs}>
       {#snippet children(visibleJobs: Job[])}
@@ -20,7 +21,7 @@
             <div class="flex justify-between">
               <strong>{job.role}</strong><span class="font-mono text-xs">{job.state}</span>
             </div>
-            <small class="text-muted">{job.action} · attempt {job.attempt}</small>
+            <small class="text-muted">{job.action} · {t('taskDetail.attempt')} {job.attempt}</small>
             {#if job.result}
               <p class="mt-1 text-xs">
                 <span class="font-mono text-accent">{job.result.result}</span>
@@ -29,7 +30,8 @@
             {/if}
             {#if job.retry_not_before}
               <p class="mt-1 text-xs text-warning">
-                Retry scheduled for {new Date(job.retry_not_before).toLocaleString()}
+                {t('taskDetail.retryScheduledFor')}
+                {new Date(job.retry_not_before).toLocaleString()}
               </p>
             {/if}
             {#if job.failure_reason}

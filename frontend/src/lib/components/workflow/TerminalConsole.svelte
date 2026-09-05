@@ -7,6 +7,7 @@
   import type { AgentConfig, TerminalAccess } from '$lib/types';
   import { runTaskCommand } from '$lib/services/tasks';
   import { closeTerminal, openTerminal, terminalWebSocketUrl } from '$lib/services/terminals';
+  import { t } from '$lib/i18n/index.svelte';
 
   let { agent, nodeId, onclose }: { agent: AgentConfig; nodeId: string; onclose: () => void } =
     $props();
@@ -34,7 +35,7 @@
       terminal = new Terminal({
         cursorBlink: true,
         convertEol: true,
-        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+        fontFamily: "'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace",
         fontSize: 13,
         theme: { background: '#070b12', foreground: '#d8e3f3', cursor: '#6ea2ff' },
         scrollback: 10_000
@@ -54,7 +55,7 @@
         const message = JSON.parse(String(event.data)) as { type: string; data?: string };
         if (message.type === 'output' && message.data) terminal?.write(message.data);
       };
-      socket.onerror = () => (error = 'Terminal connection failed');
+      socket.onerror = () => (error = t('terminal.connectionFailed'));
       socket.onclose = () => (connected = false);
       terminal.onData((data) => socket?.send(JSON.stringify({ type: 'input', data })));
       terminal.onResize(({ cols, rows }) =>
@@ -94,36 +95,38 @@
   >
     <header class="border-line flex items-center gap-3 border-b p-4">
       <div>
-        <p class="text-brand font-mono text-[10px]">MANUAL CONTROL · {agent.role}</p>
-        <h2 class="font-semibold">Workspace console</h2>
+        <p class="text-brand font-mono text-[10px]">
+          {t('terminal.manualControl', { role: agent.role })}
+        </p>
+        <h2 class="font-semibold">{t('terminal.workspaceConsole')}</h2>
       </div>
       <span class="font-mono text-[10px] {connected ? 'text-accent' : 'text-muted'}">
-        {connected ? 'CONNECTED' : 'OFFLINE'}
+        {connected ? t('terminal.connected') : t('terminal.offline')}
       </span>
       <div class="ml-auto flex gap-2">
-        {#if connected}<Button size="sm" variant="ghost" onclick={interrupt}>Send Ctrl+C</Button
+        {#if connected}<Button size="sm" variant="ghost" onclick={interrupt}
+            >{t('terminal.sendCtrlC')}</Button
           >{/if}
-        {#if connected}<Button size="sm" onclick={release}>Release & resume AI</Button>{/if}
-        <Button size="sm" variant="ghost" onclick={onclose}>Close</Button>
+        {#if connected}<Button size="sm" onclick={release}>{t('terminal.releaseResume')}</Button
+          >{/if}
+        <Button size="sm" variant="ghost" onclick={onclose}>{t('terminal.close')}</Button>
       </div>
     </header>
     <ErrorBanner message={error} class="m-3" />
     {#if !agent.active_task_id || !agent.active_task_has_workspace}
       <div class="m-auto max-w-md text-center">
-        <h3 class="font-semibold">No active workspace</h3>
+        <h3 class="font-semibold">{t('terminal.noActiveWorkspace')}</h3>
         <p class="text-muted mt-2 text-sm">
-          This agent needs an active task with a prepared repository workspace before manual control
-          is available.
+          {t('terminal.noActiveWorkspaceHint')}
         </p>
       </div>
     {:else if !connected}
       <div class="m-auto text-center">
         <p class="text-muted mb-4 max-w-md text-sm">
-          Taking control pauses this task, cancels queued AI work, and records a durable takeover
-          event. Terminal input is enabled only after takeover succeeds.
+          {t('terminal.takeoverHint')}
         </p>
         <Button variant="primary" disabled={connecting} onclick={connect}>
-          {connecting ? 'Taking control…' : 'Take control and connect'}
+          {connecting ? t('terminal.takingControl') : t('terminal.takeControlConnect')}
         </Button>
       </div>
     {/if}

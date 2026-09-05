@@ -2,6 +2,7 @@ import asyncio
 import json
 import sys
 import uuid
+from dataclasses import dataclass
 from typing import Any
 
 from sqlalchemy import select
@@ -9,12 +10,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import (
     AgentConfig,
+    AIAgent,
     Integration,
     Job,
     JobRole,
     Repository,
+    Role,
     Task,
     WorkerRun,
+    WorkflowDefinition,
+    WorkflowNode,
 )
 from app.db.session import SessionLocal
 from app.infrastructure.git.workspaces import prepare_workspace, run_git
@@ -44,6 +49,133 @@ ROLE_INSTRUCTIONS = {
     "REVIEWER": "Act as an independent code reviewer. Inspect the supplied task, plan, and actual Git diff. Return only JSON matching {result, summary, findings: [{severity, path, line, message}], reason}. result must be PASS, FAIL_ACTIONABLE, FAIL_ARCHITECTURAL, UNCERTAIN, or NEEDS_HUMAN. PASS has no findings. Failure outcomes require concrete findings. UNCERTAIN and NEEDS_HUMAN require a reason. Report only evidenced correctness, security, architectural, regression, or missing-test problems; do not invent evidence.",
     "TESTER": "Act as an independent verification agent. Evaluate the supplied changes and test evidence. Return JSON with result PASS, FAIL_ACTIONABLE, UNCERTAIN, or NEEDS_HUMAN; a concise summary; concrete findings; and reason when blocked or uncertain. Never claim a command ran unless its captured result is supplied.",
 }
+PLATFORM_BASE_INSTRUCTIONS = """Mandatory platform contract: obey runtime permission boundaries; never expose secrets; never fabricate missing requirements or tool results; do not command or spawn other agents; do not merge or publish unless a deterministic runtime capability explicitly performs it; respect current task and repository state; obey loop limits; return structured output to the orchestrator."""
+
+
+@dataclass(frozen=True, slots=True)
+class ResolvedAgentConfig:
+    provider: str
+    model: str
+    system_prompt: str
+    configuration: dict[str, Any]
+    repository_ids: tuple[str, ...]
+    agent_id: uuid.UUID | None = None
+    role_id: uuid.UUID | None = None
+    role_version: int | None = None
+    permissions: tuple[str, ...] = ()
+    knowledge_scope: tuple[str, ...] = ()
+    capabilities: tuple[str, ...] = ()
+    allowed_results: tuple[str, ...] = ()
+
+
+REQUIRED_CAPABILITY = {
+    JobRole.INTAKE: "CAN_CLASSIFY_EXTERNAL_EVENT",
+    JobRole.THINKER: "CAN_PLAN",
+    JobRole.EXECUTOR: "CAN_IMPLEMENT",
+    JobRole.REVIEWER: "CAN_REVIEW",
+}
+
+
+def require_permission(config: ResolvedAgentConfig, permission: str) -> None:
+    """Enforce Role permissions at operation boundaries, not only through instructions."""
+    if config.role_id is not None and permission not in config.permissions:
+        raise RuntimeError(f"Agent role does not permit {permission}")
+
+
+async def resolve_agent_config(
+    session: AsyncSession, task: Task, role: JobRole
+) -> ResolvedAgentConfig | None:
+    fallback = await session.get(AgentConfig, role)
+    node = None
+    if task.team_id:
+        node = await session.scalar(
+            select(WorkflowNode)
+            .join(WorkflowDefinition, WorkflowDefinition.id == WorkflowNode.workflow_id)
+            .where(
+                WorkflowDefinition.team_id == task.team_id,
+                WorkflowNode.role == role.value,
+                WorkflowNode.enabled.is_(True),
+            )
+            .order_by(WorkflowNode.id)
+        )
+    if node:
+        agent = await session.get(AIAgent, node.agent_id) if node.agent_id else None
+        role_record = await session.get(Role, agent.role_id) if agent else None
+        if agent is not None and (
+            not agent.enabled or role_record is None or not role_record.enabled
+        ):
+            return None
+        required_capability = REQUIRED_CAPABILITY.get(role)
+        if (
+            role_record is not None
+            and required_capability is not None
+            and required_capability not in role_record.capabilities
+        ):
+            return None
+        node_configuration = dict(fallback.configuration or {}) if fallback else {}
+        node_configuration.update(
+            reasoning_effort=node.reasoning_effort,
+            max_output_tokens=node.max_output_tokens,
+            temperature=float(node.temperature) if node.temperature is not None else None,
+            timeout_minutes=node.timeout_minutes,
+            structured_output_retries=node.max_retries,
+            max_review_cycles=node.max_review_cycles,
+            context_depth=node.context_depth,
+            rag_retrieval_depth=node.rag_retrieval_depth,
+            fallback_provider=node.fallback_provider,
+            fallback_model=node.fallback_model,
+        )
+        return ResolvedAgentConfig(
+            (agent.provider if agent and agent.provider else None)
+            or node.provider
+            or (role_record.default_provider if role_record else None)
+            or "openai",
+            (agent.model if agent and agent.model else None)
+            or node.model
+            or (role_record.default_model if role_record else None)
+            or "",
+            "\n\n".join(
+                filter(
+                    None,
+                    [
+                        PLATFORM_BASE_INSTRUCTIONS,
+                        role_record.system_instructions
+                        if role_record
+                        else ROLE_INSTRUCTIONS[role.value],
+                        agent.custom_instructions if agent else node.system_prompt,
+                    ],
+                )
+            ),
+            node_configuration,
+            tuple(node.repository_ids or []),
+            agent.id if agent else None,
+            role_record.id if role_record else None,
+            role_record.version if role_record else None,
+            tuple(
+                permission
+                for permission in (role_record.permissions if role_record else [])
+                if not agent or agent.permission_overrides.get(permission) != "DENY"
+            ),
+            tuple(
+                dict.fromkeys(
+                    [
+                        *(role_record.knowledge_collection_ids if role_record else []),
+                        *(agent.knowledge_collection_ids if agent else []),
+                    ]
+                )
+            ),
+            tuple(role_record.capabilities if role_record else ()),
+            tuple(role_record.allowed_results if role_record else ()),
+        )
+    if fallback is None or not fallback.enabled or not fallback.model:
+        return None
+    return ResolvedAgentConfig(
+        fallback.provider,
+        fallback.model,
+        str(fallback.configuration.get("system_prompt") or ROLE_INSTRUCTIONS[role.value]),
+        dict(fallback.configuration or {}),
+        (),
+    )
 
 
 async def package_registry_environment(session: AsyncSession) -> dict[str, str]:
@@ -117,6 +249,11 @@ async def persist_attempts(
                 ),
                 duration_ms=attempt.duration_ms,
                 provider_request_id=attempt.response.request_id,
+                agent_id=configuration.get("_agent_id"),
+                role_id=configuration.get("_role_id"),
+                role_version=configuration.get("_role_version"),
+                effective_permissions=configuration.get("_permissions", []),
+                effective_knowledge_scope=configuration.get("_knowledge_scope", []),
             )
         )
     await session.commit()
@@ -126,11 +263,18 @@ async def run(job_id: uuid.UUID) -> WorkerResult:
     async with SessionLocal() as session:
         job = (await session.execute(select(Job).where(Job.id == job_id))).scalar_one()
         task = await session.get(Task, job.task_id)
-        config = await session.get(AgentConfig, job.role)
+        config = await resolve_agent_config(session, task, job.role) if task else None
         if task is None:
             raise RuntimeError(f"Task {job.task_id} not found")
-        if config is None or not config.enabled or not config.model:
+        if config is None or not config.model:
             raise RuntimeError(f"Agent {job.role.value} is not fully configured")
+        config.configuration.update(
+            _agent_id=config.agent_id,
+            _role_id=config.role_id,
+            _role_version=config.role_version,
+            _permissions=list(config.permissions),
+            _knowledge_scope=list(config.knowledge_scope),
+        )
         integration = await session.scalar(
             select(Integration).where(Integration.provider_name == config.provider)
         )
@@ -142,22 +286,35 @@ async def run(job_id: uuid.UUID) -> WorkerResult:
         repository = (
             await session.get(Repository, task.repository_id) if task.repository_id else None
         )
+        if (
+            repository is not None
+            and config.repository_ids
+            and str(repository.id) not in config.repository_ids
+        ):
+            raise RuntimeError(f"Agent {job.role.value} is not granted access to this repository")
         workspace = None
         if job.role in {JobRole.EXECUTOR, JobRole.REVIEWER}:
+            require_permission(config, "READ_REPOSITORY")
             if task.repository_id is None:
                 raise RuntimeError(f"{job.role.value} task has no repository")
             if repository is None or not repository.enabled:
                 raise RuntimeError(f"{job.role.value} repository is unavailable")
             workspace = await prepare_workspace(session, task, repository)
-        configured_limit = config.configuration.get("max_context_chars", 160_000)
+        depth_limits = {"low": 60_000, "normal": 160_000, "deep": 400_000}
+        configured_limit = config.configuration.get(
+            "max_context_chars",
+            depth_limits.get(str(config.configuration.get("context_depth")), 160_000),
+        )
         max_context_chars = (
             int(configured_limit) if isinstance(configured_limit, (int, str)) else 160_000
         )
         use_repository_knowledge = config.configuration.get("use_repository_knowledge", True)
+        can_read_rag = config.role_id is None or "READ_RAG" in config.permissions
         compiler = ContextCompiler(
             session,
             max_context_chars,
-            include_repository_knowledge=use_repository_knowledge is not False,
+            include_repository_knowledge=use_repository_knowledge is not False and can_read_rag,
+            retrieval_depth=str(config.configuration.get("rag_retrieval_depth", "normal")),
         )
         if job.role == JobRole.INTAKE:
             prompt_data = await compiler.compile_for_intake(task, job)
@@ -177,11 +334,12 @@ async def run(job_id: uuid.UUID) -> WorkerResult:
                 provider,
                 ProviderRequest(
                     model=config.model,
-                    system=str(
-                        config.configuration.get("system_prompt")
-                        or ROLE_INSTRUCTIONS[job.role.value]
-                    ),
+                    system=config.system_prompt,
                     prompt=prompt,
+                    max_output_tokens=int(config.configuration.get("max_output_tokens") or 4096),
+                    temperature=config.configuration.get("temperature"),
+                    reasoning_effort=str(config.configuration.get("reasoning_effort", "default")),
+                    timeout_seconds=int(config.configuration.get("timeout_minutes", 60)) * 60,
                 ),
                 job.role,
                 max_repairs,
@@ -209,7 +367,9 @@ async def run(job_id: uuid.UUID) -> WorkerResult:
                 summary = proposal.summary
                 data = proposal.model_dump(mode="json")
             else:
+                require_permission(config, "WRITE_REPOSITORY")
                 apply_proposal(workspace, proposal)
+                require_permission(config, "RUN_TESTS")
                 checks = await run_checks(
                     workspace, credential_environment=await package_registry_environment(session)
                 )
@@ -230,6 +390,8 @@ async def run(job_id: uuid.UUID) -> WorkerResult:
             result = review.result
             summary = review.summary
             data = review.model_dump(mode="json")
+        if config.allowed_results and result not in config.allowed_results:
+            raise RuntimeError(f"Agent role does not allow structured result {result}")
         return WorkerResult(
             job_id=job.id,
             task_id=job.task_id,

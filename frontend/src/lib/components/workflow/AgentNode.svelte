@@ -11,6 +11,7 @@
     integrationNames: string[];
     repositoryCount: number;
     modelValidationStatus: string;
+    enabled: boolean;
     onMenu?: (event: MouseEvent) => void;
   };
 
@@ -34,7 +35,7 @@
 </script>
 
 <Handle type="target" position={Position.Left} />
-<div class="node-shell">
+<div class="node-shell" class:disabled={!agent.enabled}>
   <div class="avatar" class:system={agent.system}>{initials}</div>
   <div class="min-w-0 flex-1">
     <div class="mb-1 flex items-center gap-2">
@@ -42,10 +43,11 @@
       {#if agent.system}<span class="system-pill">CORE</span>{/if}
     </div>
     <div class="flex items-center gap-1.5">
-      <span class="status-dot" class:running={agent.status === 'RUNNING'}></span>
+      <span class="status-dot" class:running={agent.status === 'RUNNING'} class:off={!agent.enabled}
+      ></span>
       <span class="role-name">{agent.role}</span><span class="separator">·</span>
-      <span class="text-[9px] tracking-[0.1em] text-slate-400"
-        >{agent.status.replaceAll('_', ' ')}</span
+      <span class="text-muted text-[9px] tracking-[0.1em]"
+        >{agent.enabled ? agent.status.replaceAll('_', ' ') : 'DISABLED'}</span
       >
     </div>
     <div class="model-row">
@@ -112,24 +114,32 @@
     width: 2.25rem;
     flex: none;
     place-items: center;
-    border: 1px solid rgb(96 165 250 / 35%);
+    border: 1px solid color-mix(in srgb, var(--color-brand-2) 35%, transparent);
     border-radius: 0.7rem;
-    background: linear-gradient(145deg, rgb(37 99 235 / 25%), rgb(79 70 229 / 15%));
-    color: #bfdbfe;
+    background: linear-gradient(
+      145deg,
+      color-mix(in srgb, var(--color-brand-2) 25%, transparent),
+      color-mix(in srgb, var(--color-brand) 15%, transparent)
+    );
+    color: var(--color-brand-2);
     font-size: 0.65rem;
     font-weight: 800;
     letter-spacing: 0.06em;
   }
   .avatar.system {
-    border-color: rgb(167 139 250 / 45%);
-    background: linear-gradient(145deg, rgb(124 58 237 / 28%), rgb(79 70 229 / 18%));
-    color: #ddd6fe;
+    border-color: color-mix(in srgb, var(--color-brand) 45%, transparent);
+    background: linear-gradient(
+      145deg,
+      color-mix(in srgb, var(--color-brand) 28%, transparent),
+      color-mix(in srgb, var(--color-brand) 18%, transparent)
+    );
+    color: var(--color-brand);
   }
   .system-pill {
-    border: 1px solid rgb(167 139 250 / 35%);
+    border: 1px solid color-mix(in srgb, var(--color-brand) 35%, transparent);
     border-radius: 999px;
     padding: 0.1rem 0.32rem;
-    color: #c4b5fd;
+    color: var(--color-brand);
     font-size: 0.45rem;
     font-weight: 800;
     letter-spacing: 0.12em;
@@ -138,20 +148,28 @@
     height: 0.4rem;
     width: 0.4rem;
     border-radius: 999px;
-    background: #64748b;
+    background: var(--color-muted);
   }
   .status-dot.running {
-    background: #34d399;
-    box-shadow: 0 0 9px rgb(52 211 153 / 75%);
+    background: var(--color-accent);
+    box-shadow: 0 0 9px color-mix(in srgb, var(--color-accent) 75%, transparent);
+  }
+  .status-dot.off {
+    background: var(--color-danger);
+    box-shadow: none;
+  }
+  .node-shell.disabled {
+    opacity: 0.5;
+    filter: saturate(0.35);
   }
   .role-name {
-    color: #93c5fd;
+    color: var(--color-brand-2);
     font-size: 0.55rem;
     font-weight: 800;
     letter-spacing: 0.12em;
   }
   .separator {
-    color: #475569;
+    color: var(--color-muted);
     font-size: 0.6rem;
   }
   .model-row {
@@ -160,7 +178,7 @@
     align-items: center;
     gap: 0.35rem;
     margin-top: 0.45rem;
-    border-top: 1px solid rgb(51 65 85 / 55%);
+    border-top: 1px solid var(--color-line);
     padding-top: 0.42rem;
   }
   .provider-mark {
@@ -169,16 +187,16 @@
     height: 1.05rem;
     flex: none;
     place-items: center;
-    border: 1px solid #475569;
+    border: 1px solid var(--color-line);
     border-radius: 0.3rem;
-    background: #172033;
-    color: #bfdbfe;
+    background: var(--color-panel-alt);
+    color: var(--color-brand-2);
     font-size: 0.45rem;
     font-weight: 900;
   }
   .model-name {
     overflow: hidden;
-    color: #94a3b8;
+    color: var(--color-muted);
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     font-size: 0.55rem;
     text-overflow: ellipsis;
@@ -190,20 +208,20 @@
     height: 0.42rem;
     flex: none;
     border-radius: 50%;
-    background: #64748b;
+    background: var(--color-muted);
   }
   .validation-dot.available {
-    background: #34d399;
-    box-shadow: 0 0 6px rgb(52 211 153 / 65%);
+    background: var(--color-accent);
+    box-shadow: 0 0 6px color-mix(in srgb, var(--color-accent) 65%, transparent);
   }
   .validation-dot.invalid {
-    background: #fb7185;
-    box-shadow: 0 0 6px rgb(251 113 133 / 55%);
+    background: var(--color-danger);
+    box-shadow: 0 0 6px color-mix(in srgb, var(--color-danger) 55%, transparent);
   }
   .validation-label {
     max-width: 4.5rem;
     overflow: hidden;
-    color: #94a3b8;
+    color: var(--color-muted);
     font-size: 0.45rem;
     font-weight: 800;
     letter-spacing: 0.08em;
@@ -221,23 +239,23 @@
     min-width: 1.18rem;
     height: 1.18rem;
     place-items: center;
-    border: 1px solid rgb(96 165 250 / 30%);
+    border: 1px solid color-mix(in srgb, var(--color-brand-2) 30%, transparent);
     border-radius: 0.35rem;
-    background: rgb(37 99 235 / 12%);
+    background: color-mix(in srgb, var(--color-brand-2) 12%, transparent);
     padding: 0 0.18rem;
-    color: #93c5fd;
+    color: var(--color-brand-2);
     font-size: 0.43rem;
     font-weight: 900;
   }
   .more-count {
-    color: #64748b;
+    color: var(--color-muted);
     font-size: 0.5rem;
   }
   .project-count {
     margin-left: 0.2rem;
-    border-left: 1px solid #334155;
+    border-left: 1px solid var(--color-line);
     padding-left: 0.45rem;
-    color: #64748b;
+    color: var(--color-muted);
     font-size: 0.5rem;
   }
   .menu-hint {
@@ -245,12 +263,12 @@
     border-radius: 0.35rem;
     background: transparent;
     padding: 0.25rem;
-    color: #64748b;
+    color: var(--color-muted);
     font-size: 0.75rem;
     letter-spacing: 0.08em;
   }
   .menu-hint:hover {
-    background: rgb(51 65 85 / 45%);
-    color: #cbd5e1;
+    background: color-mix(in srgb, var(--color-line) 45%, transparent);
+    color: var(--color-heading);
   }
 </style>

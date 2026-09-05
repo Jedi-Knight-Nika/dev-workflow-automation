@@ -14,6 +14,35 @@ export type Task = {
   manual_takeover: boolean;
   created_at: string;
   updated_at: string;
+  repository_name?: string | null;
+  due_at?: string | null;
+  started_at?: string | null;
+  completed_at?: string | null;
+  source?: ExternalTaskSource | null;
+  team_id?: string | null;
+  team_name?: string | null;
+};
+
+export type ExternalTaskSource = {
+  provider: string;
+  external_id: string;
+  identifier: string;
+  url: string | null;
+  state_id: string | null;
+  state_name: string | null;
+  assignee_id: string | null;
+  assignee_name: string | null;
+  assignee_email: string | null;
+  creator_name: string | null;
+  team_name: string | null;
+  team_key: string | null;
+  project_name: string | null;
+  labels: string[];
+  estimate: number | null;
+  due_date: string | null;
+  provider_created_at: string | null;
+  provider_updated_at: string | null;
+  raw_payload: Record<string, unknown>;
 };
 
 export type Repository = {
@@ -128,6 +157,24 @@ export type WorkflowNode = {
   model_validation_status: string;
   model_validation_message: string | null;
   model_validated_at: string | null;
+  integration_mode: string;
+  poll_interval_seconds: number;
+  filter_assignee_id: string;
+  filter_state_ids: string[];
+  integration_sync_status: string;
+  integration_sync_error: string | null;
+  integration_last_synced_at: string | null;
+  reasoning_effort: 'default' | 'low' | 'medium' | 'high' | 'max';
+  max_output_tokens: number | null;
+  temperature: number | null;
+  timeout_minutes: number;
+  max_retries: number;
+  max_review_cycles: number;
+  context_depth: 'low' | 'normal' | 'deep';
+  rag_retrieval_depth: 'low' | 'normal' | 'deep';
+  fallback_provider: string | null;
+  fallback_model: string | null;
+  agent_id: string | null;
 };
 
 export type WorkflowEdge = {
@@ -244,4 +291,63 @@ export type LinearWorkflowState = {
   team_id: string;
   team_name: string;
   team_key: string;
+};
+
+export type LinearMember = {
+  id: string;
+  name: string;
+  email: string;
+  active: boolean;
+};
+
+export type Team = {
+  id: string;
+  name: string;
+  description: string;
+  enabled: boolean;
+  max_concurrent_tasks: number;
+  repository_ids: string[];
+  queued_tasks: number;
+  running_tasks: number;
+  completed_tasks: number;
+  total_input_tokens: number;
+  total_output_tokens: number;
+  estimated_cost_usd: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type Role = {
+  id: string;
+  name: string;
+  category: string;
+  description: string;
+  system_instructions: string;
+  capabilities: string[];
+  permissions: string[];
+  allowed_results: string[];
+  knowledge_collection_ids: string[];
+  default_provider: string | null;
+  default_model: string | null;
+  default_reasoning_effort: string;
+  default_timeout_minutes: number;
+  default_max_retries: number;
+  enabled: boolean;
+  built_in: boolean;
+  version: number;
+  active_agents: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type TaskAssignment = {
+  id: string;
+  task_id: string;
+  team_id: string;
+  status: string;
+  queue_position: number;
+  reason: string;
+  assigned_at: string;
+  started_at: string | null;
+  completed_at: string | null;
 };

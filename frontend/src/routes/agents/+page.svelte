@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { page } from '$app/state';
   import { onMount } from 'svelte';
   import { API_URL } from '$lib/api';
   import PageHeader from '$lib/components/PageHeader.svelte';
@@ -19,6 +20,7 @@
   } from '$lib/services/agents';
   import { listIntegrations } from '$lib/services/integrations';
   import { listRepositories } from '$lib/services/repositories';
+  import { t } from '$lib/i18n/index.svelte';
   import type {
     AgentConfig,
     AgentKnowledge,
@@ -44,6 +46,7 @@
   let consoleAgent: AgentConfig | null = null;
   let inspectorTab = 'instructions';
   const number = new Intl.NumberFormat();
+  const teamId = page.url.searchParams.get('team') || undefined;
   const date = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' });
   function configuredNumber(agent: AgentConfig, key: string): number | '' {
     const value = Number(agent.configuration[key]);
@@ -70,7 +73,7 @@
   async function load() {
     [agents, workflow, integrations, repositories] = await Promise.all([
       listAgents(),
-      getWorkflow(),
+      getWorkflow(teamId),
       listIntegrations(),
       listRepositories()
     ]);
@@ -81,7 +84,7 @@
   }
   async function persistWorkflow(graph: WorkflowGraph) {
     try {
-      workflow = await saveWorkflow(graph);
+      workflow = await saveWorkflow(graph, teamId);
       saved = 'WORKFLOW';
       setTimeout(() => (saved = ''), 1500);
     } catch (cause) {
@@ -158,9 +161,9 @@
 </script>
 
 <PageHeader
-  eyebrow="WORKFLOW BUILDER"
-  title="Engineering workflow"
-  description="Configure the single pipeline, its AI workers, prompts, models, and knowledge access."
+  eyebrow={t('workflow.eyebrow')}
+  title={teamId ? 'Team workflow' : t('workflow.title')}
+  description={t('workflow.description')}
 />
 <main class="p-4 sm:p-6 md:p-10">
   <ErrorBanner message={error} class="mb-4" />
@@ -171,6 +174,7 @@
       {integrations}
       {repositories}
       {selectedRole}
+      {teamId}
       onselect={(role, nodeId) => {
         selectedRole = role;
         selectedNodeId = nodeId;
@@ -196,14 +200,14 @@
               <i></i>{agent.status.replaceAll('_', ' ')}
             </span>
           </div>
-          <p class="text-muted text-xs">Agent configuration and runtime context</p>
+          <p class="text-muted text-xs">{t('workflow.agentContext')}</p>
         </div>
         <div class="ml-auto flex items-center gap-3">
           <Button size="sm" variant="ghost" onclick={() => (consoleAgent = agent)}
-            >⌘ Live console</Button
+            >{t('workflow.liveConsole')}</Button
           >
           <label class="enable-control">
-            <span>{agent.enabled ? 'Enabled' : 'Disabled'}</span>
+            <span>{agent.enabled ? t('workflow.enabled') : t('workflow.disabled')}</span>
             <input
               type="checkbox"
               bind:checked={agent.enabled}
@@ -211,21 +215,35 @@
             />
           </label>
           <Button size="sm" variant="primary" onclick={() => save(agent)}>
-            {saved === agent.role ? 'Saved ✓' : 'Save changes'}
+            {saved === agent.role ? t('workflow.savedCheck') : t('workflow.saveChanges')}
           </Button>
         </div>
       </header>
 
       <div class="metrics-strip">
-        <div><span>ACTIVE</span><b>{agent.active_jobs}</b></div>
-        <div><span>TOTAL RUNS</span><b>{number.format(agent.total_runs)}</b></div>
-        <div><span>INPUT TOKENS</span><b>{number.format(agent.total_input_tokens)}</b></div>
-        <div><span>OUTPUT TOKENS</span><b>{number.format(agent.total_output_tokens)}</b></div>
-        <div><span>EST. COST</span><b>${agent.total_estimated_cost_usd.toFixed(4)}</b></div>
+        <div><span>{t('workflow.metricActive')}</span><b>{agent.active_jobs}</b></div>
+        <div>
+          <span>{t('workflow.metricTotalRuns')}</span><b>{number.format(agent.total_runs)}</b>
+        </div>
+        <div>
+          <span>{t('workflow.metricInputTokens')}</span><b
+            >{number.format(agent.total_input_tokens)}</b
+          >
+        </div>
+        <div>
+          <span>{t('workflow.metricOutputTokens')}</span><b
+            >{number.format(agent.total_output_tokens)}</b
+          >
+        </div>
+        <div>
+          <span>{t('workflow.metricEstCost')}</span><b
+            >${agent.total_estimated_cost_usd.toFixed(4)}</b
+          >
+        </div>
       </div>
 
       <nav class="inspector-tabs" aria-label="Agent settings">
-        {#each [['instructions', 'Instructions'], ['model', 'Model & cost'], ['knowledge', 'Knowledge']] as tab (tab[0])}
+        {#each [['instructions', t('workflow.tabInstructions')], ['model', t('workflow.tabModel')], ['knowledge', t('workflow.tabKnowledge')]] as tab (tab[0])}
           <button
             class:active={inspectorTab === tab[0]}
             type="button"
@@ -239,10 +257,10 @@
           <div class="mx-auto max-w-4xl">
             <div class="section-heading">
               <div>
-                <h3>System instructions</h3>
-                <p>Define this agent’s role, boundaries, and expected output.</p>
+                <h3>{t('workflow.systemInstructions')}</h3>
+                <p>{t('workflow.systemInstructionsDescription')}</p>
               </div>
-              <span>OPTIONAL</span>
+              <span>{t('workflow.optional')}</span>
             </div>
             <TextArea
               rows={14}
@@ -253,11 +271,11 @@
                   'system_prompt',
                   (event.currentTarget as HTMLTextAreaElement).value
                 )}
-              placeholder="Leave blank to use the safe built-in role prompt."
+              placeholder={t('workflow.systemInstructionsPlaceholder')}
               class="prompt-editor font-mono text-xs"
             />
             <p class="text-muted mt-2 text-[10px]">
-              The built-in safety and tool rules remain active around your custom instructions.
+              {t('workflow.builtInSafetyNote')}
             </p>
           </div>
         {:else if inspectorTab === 'model'}
@@ -265,27 +283,27 @@
             <div class="setting-card md:col-span-2">
               <div class="section-heading">
                 <div>
-                  <h3>Language model</h3>
-                  <p>Provider and exact model used for this role.</p>
+                  <h3>{t('workflow.languageModel')}</h3>
+                  <p>{t('workflow.languageModelDescription')}</p>
                 </div>
               </div>
               <div class="grid gap-4 md:grid-cols-[0.7fr_1.3fr]">
                 <label class="field-label"
-                  >Provider<select class="field" bind:value={agent.provider}
+                  >{t('agents.provider')}<select class="field" bind:value={agent.provider}
                     ><option value="openai">OpenAI</option><option value="anthropic"
                       >Anthropic</option
                     ><option value="google">Google</option></select
                   ></label
                 >
                 <label class="field-label" for={`model-${agent.role}`}
-                  >Model
+                  >{t('agents.model')}
                   <div class="flex gap-2">
                     {#if catalogs[agent.provider]?.models.length}
                       <select
                         id={`model-${agent.role}`}
                         class="field flex-1"
                         bind:value={agent.model}
-                        ><option value="">Select model</option
+                        ><option value="">{t('workflow.selectModel')}</option
                         >{#each catalogs[agent.provider].models as model (model.id)}<option
                             value={model.id}>{model.display_name} · {model.id}</option
                           >{/each}</select
@@ -294,12 +312,14 @@
                         id={`model-${agent.role}`}
                         class="field flex-1"
                         bind:value={agent.model}
-                        placeholder="Enter model ID"
+                        placeholder={t('workflow.enterModelId')}
                       />{/if}
                     <Button
                       disabled={loadingProvider === agent.provider}
                       onclick={() => discoverModels(agent.provider)}
-                      >{loadingProvider === agent.provider ? 'Loading…' : 'Discover'}</Button
+                      >{loadingProvider === agent.provider
+                        ? t('common.loading')
+                        : t('workflow.discover')}</Button
                     >
                   </div>
                 </label>
@@ -307,7 +327,7 @@
             </div>
             <div class="setting-card">
               <label class="field-label"
-                >Input cost <span>USD / 1M tokens</span><input
+                >{t('workflow.inputCost')} <span>{t('workflow.usdPerMillionTokens')}</span><input
                   class="field"
                   type="number"
                   min="0"
@@ -319,7 +339,7 @@
             </div>
             <div class="setting-card">
               <label class="field-label"
-                >Output cost <span>USD / 1M tokens</span><input
+                >{t('workflow.outputCost')} <span>{t('workflow.usdPerMillionTokens')}</span><input
                   class="field"
                   type="number"
                   min="0"
@@ -330,8 +350,12 @@
               >
             </div>
             <p class="text-muted text-xs md:col-span-2">
-              {#if agent.last_run_at}Last run {date.format(new Date(agent.last_run_at))} · {agent.last_provider}/{agent.last_model}
-                · {agent.last_duration_ms} ms{:else}No model run recorded yet.{/if}
+              {#if agent.last_run_at}{t('workflow.lastRun', {
+                  date: date.format(new Date(agent.last_run_at)),
+                  provider: agent.last_provider ?? '',
+                  model: agent.last_model ?? '',
+                  duration: agent.last_duration_ms ?? 0
+                })}{:else}{t('workflow.noModelRunRecorded')}{/if}
             </p>
           </div>
         {:else}
@@ -339,9 +363,9 @@
             <div class="setting-card h-fit">
               <div class="flex items-center justify-between gap-4">
                 <div>
-                  <h3 class="text-sm font-semibold">Repository context</h3>
+                  <h3 class="text-sm font-semibold">{t('workflow.repositoryContext')}</h3>
                   <p class="text-muted mt-1 text-xs">
-                    Retrieve relevant indexed source code during runs.
+                    {t('workflow.repositoryContextDescription')}
                   </p>
                 </div>
                 <input
@@ -355,28 +379,35 @@
             <div class="setting-card lg:row-span-2">
               <div class="section-heading">
                 <div>
-                  <h3>Manual knowledge</h3>
-                  <p>Add role-specific product context, rules, or examples.</p>
+                  <h3>{t('workflow.manualKnowledge')}</h3>
+                  <p>{t('workflow.manualKnowledgeDescription')}</p>
                 </div>
-                <span>VECTOR SEARCH</span>
+                <span>{t('workflow.vectorSearch')}</span>
               </div>
-              <input class="field mb-3" bind:value={knowledgeTitle} placeholder="Knowledge title" />
+              <input
+                class="field mb-3"
+                bind:value={knowledgeTitle}
+                placeholder={t('workflow.knowledgeTitlePlaceholder')}
+              />
               <TextArea
                 rows={8}
                 bind:value={knowledgeContent}
-                placeholder="Paste architecture rules, product context, examples, or operating instructions…"
+                placeholder={t('workflow.knowledgeContentPlaceholder')}
                 class="mb-3 text-xs"
               />
               <Button
                 variant="primary"
                 disabled={preparingKnowledge || knowledgeContent.trim().length < 20}
                 onclick={prepareKnowledge}
-                >{preparingKnowledge ? 'Embedding…' : 'Embed knowledge'}</Button
+                >{preparingKnowledge
+                  ? t('workflow.embedding')
+                  : t('workflow.embedKnowledge')}</Button
               >
             </div>
             <div class="setting-card">
               <h3 class="mb-3 text-sm font-semibold">
-                Stored sources <span class="text-muted font-normal"
+                {t('workflow.storedSources')}
+                <span class="text-muted font-normal"
                   >({(knowledge[selectedRole] || []).length})</span
                 >
               </h3>
@@ -385,14 +416,15 @@
                       class="knowledge-item"
                     >
                       <span
-                        ><b>{source.title}</b><small>{source.chunk_count} vector chunks</small
+                        ><b>{source.title}</b><small
+                          >{t('workflow.vectorChunks', { count: source.chunk_count })}</small
                         ></span
                       ><Button size="sm" variant="danger" onclick={() => removeKnowledge(source)}
-                        >Delete</Button
+                        >{t('workflow.delete')}</Button
                       >
                     </div>{/each}
                 </div>{:else}<p class="text-muted text-xs">
-                  No manual knowledge added for this agent.
+                  {t('workflow.noManualKnowledge')}
                 </p>{/if}
             </div>
           </div>
@@ -416,10 +448,14 @@
     width: 2.6rem;
     height: 2.6rem;
     place-items: center;
-    border: 1px solid rgb(96 165 250 / 35%);
+    border: 1px solid color-mix(in srgb, var(--color-brand-2) 35%, transparent);
     border-radius: 0.75rem;
-    background: linear-gradient(145deg, rgb(37 99 235 / 25%), rgb(79 70 229 / 15%));
-    color: #bfdbfe;
+    background: linear-gradient(
+      145deg,
+      color-mix(in srgb, var(--color-brand-2) 25%, transparent),
+      color-mix(in srgb, var(--color-brand) 15%, transparent)
+    );
+    color: var(--color-brand-2);
     font-size: 0.7rem;
     font-weight: 800;
     letter-spacing: 0.08em;
@@ -428,10 +464,10 @@
     display: flex;
     align-items: center;
     gap: 0.35rem;
-    border: 1px solid #334155;
+    border: 1px solid var(--color-line);
     border-radius: 999px;
     padding: 0.2rem 0.45rem;
-    color: #94a3b8;
+    color: var(--color-muted);
     font-size: 0.5rem;
     font-weight: 800;
     letter-spacing: 0.1em;
@@ -440,28 +476,28 @@
     width: 0.35rem;
     height: 0.35rem;
     border-radius: 50%;
-    background: #64748b;
+    background: var(--color-muted);
   }
   .status-badge.online {
-    border-color: rgb(52 211 153 / 30%);
-    color: #6ee7b7;
+    border-color: color-mix(in srgb, var(--color-accent) 30%, transparent);
+    color: var(--color-accent);
   }
   .status-badge.online i {
-    background: #34d399;
-    box-shadow: 0 0 7px rgb(52 211 153 / 70%);
+    background: var(--color-accent);
+    box-shadow: 0 0 7px color-mix(in srgb, var(--color-accent) 70%, transparent);
   }
   .enable-control {
     display: flex;
     align-items: center;
     gap: 0.45rem;
-    color: #94a3b8;
+    color: var(--color-muted);
     font-size: 0.65rem;
   }
   .metrics-strip {
     display: grid;
     grid-template-columns: repeat(2, 1fr);
     border-bottom: 1px solid var(--color-line);
-    background: rgb(6 11 19 / 28%);
+    background: var(--color-panel-alt);
   }
   .metrics-strip div {
     display: flex;
@@ -471,13 +507,13 @@
     padding: 0.75rem 1.25rem;
   }
   .metrics-strip span {
-    color: #64748b;
+    color: var(--color-muted);
     font-size: 0.5rem;
     font-weight: 800;
     letter-spacing: 0.12em;
   }
   .metrics-strip b {
-    color: #e2e8f0;
+    color: var(--color-heading);
     font-size: 0.85rem;
   }
   .inspector-tabs {
@@ -489,15 +525,15 @@
   .inspector-tabs button {
     position: relative;
     padding: 1rem 0 0.85rem;
-    color: #64748b;
+    color: var(--color-muted);
     font-size: 0.7rem;
     font-weight: 700;
   }
   .inspector-tabs button:hover {
-    color: #cbd5e1;
+    color: var(--color-heading);
   }
   .inspector-tabs button.active {
-    color: #93c5fd;
+    color: var(--color-brand-2);
   }
   .inspector-tabs button.active::after {
     position: absolute;
@@ -505,7 +541,7 @@
     bottom: -1px;
     left: 0;
     height: 2px;
-    background: #60a5fa;
+    background: var(--color-brand-2);
     content: '';
   }
   .section-heading {
@@ -516,20 +552,20 @@
     margin-bottom: 0.8rem;
   }
   .section-heading h3 {
-    color: #e2e8f0;
+    color: var(--color-heading);
     font-size: 0.85rem;
     font-weight: 650;
   }
   .section-heading p {
     margin-top: 0.2rem;
-    color: #64748b;
+    color: var(--color-muted);
     font-size: 0.68rem;
   }
   .section-heading > span {
-    border: 1px solid #334155;
+    border: 1px solid var(--color-line);
     border-radius: 999px;
     padding: 0.2rem 0.4rem;
-    color: #64748b;
+    color: var(--color-muted);
     font-size: 0.48rem;
     font-weight: 800;
     letter-spacing: 0.1em;
@@ -537,17 +573,17 @@
   .setting-card {
     border: 1px solid var(--color-line);
     border-radius: 0.75rem;
-    background: rgb(9 15 25 / 35%);
+    background: var(--color-panel-alt);
     padding: 1.1rem;
   }
   .field-label {
     display: block;
-    color: #94a3b8;
+    color: var(--color-muted);
     font-size: 0.65rem;
   }
   .field-label > span {
     float: right;
-    color: #64748b;
+    color: var(--color-muted);
   }
   .field {
     display: block;
@@ -578,7 +614,7 @@
   .knowledge-item small {
     display: block;
     margin-top: 0.1rem;
-    color: #64748b;
+    color: var(--color-muted);
     font-size: 0.58rem;
   }
   :global(.prompt-editor) {

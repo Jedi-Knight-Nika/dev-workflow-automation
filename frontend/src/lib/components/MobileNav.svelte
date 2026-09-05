@@ -3,6 +3,8 @@
   import { resolve } from '$app/paths';
   import { NAV_ITEMS, isActiveNavItem } from '$lib/nav';
   import ThemeToggle from '$lib/components/ThemeToggle.svelte';
+  import LanguageToggle from '$lib/components/LanguageToggle.svelte';
+  import { t } from '$lib/i18n/index.svelte';
 
   let open = $state(false);
 
@@ -22,16 +24,18 @@
 >
   <div class="flex items-center gap-2">
     <span
-      class="border-brand text-brand neon-glow grid size-7 rounded-xl place-items-center border font-mono text-[10px] font-bold"
-      >AW</span
+      class="border-brand neon-glow relative flex size-7 shrink-0 overflow-hidden rounded-xl border motion-safe:animate-face-breathe"
     >
-    <strong class="text-heading text-sm">Engineering Worker</strong>
+      <img src="/logo-face.png" alt="" class="absolute inset-0 h-full w-full object-cover" />
+    </span>
+    <strong class="text-heading text-sm">{t('nav.brandName')}</strong>
   </div>
   <div class="flex items-center gap-2">
+    <LanguageToggle />
     <ThemeToggle />
     <button
       class="border-line text-muted grid size-9 place-items-center rounded-lg border transition-transform motion-safe:active:scale-[.92]"
-      aria-label={open ? 'Close menu' : 'Open menu'}
+      aria-label={open ? t('nav.closeMenu') : t('nav.openMenu')}
       aria-expanded={open}
       onclick={() => (open = !open)}
     >
@@ -59,10 +63,11 @@
   >
     <div class="border-line mb-3 flex h-12 items-center gap-2 border-b pb-3">
       <span
-        class="border-brand text-brand neon-glow grid size-8 rounded-xl place-items-center border font-mono text-[10px] font-bold"
-        >AW</span
+        class="border-brand neon-glow relative flex size-8 shrink-0 overflow-hidden rounded-xl border motion-safe:animate-face-breathe"
       >
-      <strong class="text-heading text-sm">Engineering Worker</strong>
+        <img src="/logo-face.png" alt="" class="absolute inset-0 h-full w-full object-cover" />
+      </span>
+      <strong class="text-heading text-sm">{t('nav.brandName')}</strong>
     </div>
     {#each NAV_ITEMS as item (item.href)}
       <a
@@ -75,7 +80,7 @@
           ? 'border-brand bg-panel text-heading'
           : 'text-muted hover:text-heading border-transparent'}"
       >
-        {item.label}
+        {t(item.labelKey)}
       </a>
     {/each}
   </nav>

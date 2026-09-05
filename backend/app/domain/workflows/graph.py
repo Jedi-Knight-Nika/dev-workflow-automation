@@ -9,6 +9,7 @@ ALLOWED_ACTIVATION_POLICIES = frozenset({"any", "all", "required", "manual", "ba
 ALLOWED_MODEL_STATUSES = frozenset(
     {"NOT_CONFIGURED", "UNVERIFIED", "AVAILABLE", "MODEL_NOT_FOUND", "UNAUTHORIZED", "ERROR"}
 )
+ALLOWED_INTEGRATION_MODES = frozenset({"webhook", "poll", "hybrid", "manual"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -29,6 +30,24 @@ class WorkflowNodeData:
     model_validation_status: str = "NOT_CONFIGURED"
     model_validation_message: str | None = None
     model_validated_at: datetime | None = None
+    integration_mode: str = "webhook"
+    poll_interval_seconds: int = 300
+    filter_assignee_id: str = ""
+    filter_state_ids: tuple[str, ...] = ()
+    integration_sync_status: str = "IDLE"
+    integration_sync_error: str | None = None
+    integration_last_synced_at: datetime | None = None
+    reasoning_effort: str = "default"
+    max_output_tokens: int | None = None
+    temperature: float | None = None
+    timeout_minutes: int = 60
+    max_retries: int = 2
+    max_review_cycles: int = 3
+    context_depth: str = "normal"
+    rag_retrieval_depth: str = "normal"
+    fallback_provider: str | None = None
+    fallback_model: str | None = None
+    agent_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,10 +97,30 @@ def validate_workflow_graph(graph: WorkflowGraphData) -> None:
             raise ValueError("Workflow node system prompt is too long")
         if node.model_validation_status not in ALLOWED_MODEL_STATUSES:
             raise ValueError("Unsupported model validation status")
+        if node.integration_mode not in ALLOWED_INTEGRATION_MODES:
+            raise ValueError("Unsupported integration trigger mode")
+        if not 60 <= node.poll_interval_seconds <= 86_400:
+            raise ValueError("Polling interval must be between 60 seconds and 24 hours")
+        if len(node.filter_state_ids) != len(set(node.filter_state_ids)):
+            raise ValueError("Workflow node state filters must be unique")
         if node.activation_policy not in ALLOWED_ACTIVATION_POLICIES:
             raise ValueError(f"Unsupported activation policy: {node.activation_policy}")
         if not 0 <= node.batch_window_seconds <= 300:
             raise ValueError("Batch window must be between 0 and 300 seconds")
+        if node.reasoning_effort not in {"default", "low", "medium", "high", "max"}:
+            raise ValueError("Unsupported reasoning effort")
+        if node.max_output_tokens is not None and not 256 <= node.max_output_tokens <= 200_000:
+            raise ValueError("Max output tokens must be between 256 and 200000")
+        if node.temperature is not None and not 0 <= node.temperature <= 2:
+            raise ValueError("Temperature must be between 0 and 2")
+        if not 1 <= node.timeout_minutes <= 720:
+            raise ValueError("Timeout must be between 1 and 720 minutes")
+        if not 0 <= node.max_retries <= 10 or not 0 <= node.max_review_cycles <= 20:
+            raise ValueError("Retry and review limits are outside the supported range")
+        if node.context_depth not in {"low", "normal", "deep"}:
+            raise ValueError("Unsupported context depth")
+        if node.rag_retrieval_depth not in {"low", "normal", "deep"}:
+            raise ValueError("Unsupported RAG retrieval depth")
     known = set(node_ids)
     outgoing: dict[str, set[str]] = {node_id: set() for node_id in known}
     for edge in graph.edges:

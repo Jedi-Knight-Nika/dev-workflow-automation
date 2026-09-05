@@ -16,6 +16,7 @@
     setRepositoryEnabled,
     searchRepositoryKnowledge
   } from '$lib/services/repositories';
+  import { t } from '$lib/i18n/index.svelte';
   import type {
     DiscoveredRepository,
     GitHubInstallationAccount,
@@ -45,20 +46,22 @@
       (item) => item.provider === 'github' && item.external_repo_id === repository.external_repo_id
     );
   function knowledgeLabel(repository: Repository) {
-    if (repository.index_status === 'READY') return 'AI READY';
-    if (['QUEUED', 'INDEXING'].includes(repository.index_status)) return 'EMBEDDING';
-    if (repository.index_status === 'FAILED') return 'FAILED';
-    return 'NOT READY';
+    if (repository.index_status === 'READY') return t('repositories.aiReadyLabel');
+    if (['QUEUED', 'INDEXING'].includes(repository.index_status))
+      return t('repositories.embeddingLabel');
+    if (repository.index_status === 'FAILED') return t('repositories.failedLabel');
+    return t('repositories.notReadyLabel');
   }
   function knowledgeDescription(repository: Repository) {
     if (repository.index_status === 'READY') {
-      return `${repository.chunk_count} knowledge chunks are searchable by the AI.`;
+      return t('repositories.knowledgeChunksSearchable', { count: repository.chunk_count });
     }
     if (['QUEUED', 'INDEXING'].includes(repository.index_status)) {
-      return 'The repository is being cloned, chunked, and embedded automatically.';
+      return t('repositories.beingClonedChunkedEmbedded');
     }
-    if (repository.index_status === 'FAILED') return repository.index_error || 'Embedding failed.';
-    return 'Create the knowledge index before assigning work to this repository.';
+    if (repository.index_status === 'FAILED')
+      return repository.index_error || t('repositories.embeddingFailed');
+    return t('repositories.createIndexBeforeAssigning');
   }
   async function add(event: SubmitEvent) {
     event.preventDefault();
@@ -146,7 +149,11 @@
     }
   }
   async function removeRepository(repository: Repository) {
-    if (!window.confirm(`Remove ${repository.owner}/${repository.name} and its knowledge index?`)) {
+    if (
+      !window.confirm(
+        t('repositories.confirmRemove', { name: `${repository.owner}/${repository.name}` })
+      )
+    ) {
       return;
     }
     busyRepository = repository.id;
@@ -189,17 +196,17 @@
 </script>
 
 <PageHeader
-  eyebrow="SOURCE CONTROL"
-  title="GitHub repositories"
-  description="Connect GitHub, choose where the AI may work, and prepare repository knowledge."
+  eyebrow={t('repositories.eyebrow')}
+  title={t('repositories.newTitle')}
+  description={t('repositories.newDescription')}
 />
 <main class="space-y-6 p-4 sm:p-6 md:p-10">
   <section class="grid gap-3 md:grid-cols-3">
     <article class="border-line bg-panel rounded-xl border p-4">
-      <p class="font-mono text-[10px] text-brand">01 · CONNECT</p>
-      <strong class="mt-2 block">Connect GitHub</strong>
+      <p class="font-mono text-[10px] text-brand">{t('repositories.step1Eyebrow')}</p>
+      <strong class="mt-2 block">{t('repositories.connectGithub')}</strong>
       <p class="text-muted mt-1 text-xs">
-        Authenticate before selecting private or public repositories.
+        {t('repositories.connectGithubDescription')}
       </p>
       <div class="mt-4 flex items-center justify-between gap-2">
         <span class="flex items-center gap-2">
@@ -212,41 +219,48 @@
             {githubAccount
               ? `@${githubAccount.login}`
               : githubConnected()
-                ? 'CONNECTED'
-                : 'NOT CONNECTED'}
+                ? t('repositories.connected')
+                : t('repositories.notConnected')}
           </span>
         </span>
         <a
           class="border-line rounded-lg border px-3 py-2 text-xs hover:border-brand hover:text-brand"
           href={resolve('/integrations')}
         >
-          {githubConnected() ? 'Manage connection' : 'Connect GitHub'}
+          {githubConnected() ? t('repositories.manageConnection') : t('repositories.connectGithub')}
         </a>
       </div>
     </article>
     <article
       class="border-line bg-panel rounded-xl border p-4 {githubConnected() ? '' : 'opacity-50'}"
     >
-      <p class="font-mono text-[10px] text-brand">02 · SELECT</p>
-      <strong class="mt-2 block">Choose repositories</strong>
-      <p class="text-muted mt-1 text-xs">Only imported repositories can be used by the worker.</p>
-      <p class="mt-4 font-mono text-[10px]">{repositoriesResource.data.length} SELECTED</p>
+      <p class="font-mono text-[10px] text-brand">{t('repositories.step2Eyebrow')}</p>
+      <strong class="mt-2 block">{t('repositories.chooseRepositories')}</strong>
+      <p class="text-muted mt-1 text-xs">{t('repositories.onlyImportedCanBeUsed')}</p>
+      <p class="mt-4 font-mono text-[10px]">
+        {t('repositories.selectedCount', { count: repositoriesResource.data.length })}
+      </p>
     </article>
     <article class="border-line bg-panel rounded-xl border p-4">
-      <p class="font-mono text-[10px] text-brand">03 · PREPARE</p>
-      <strong class="mt-2 block">Build AI knowledge</strong>
+      <p class="font-mono text-[10px] text-brand">{t('repositories.step3Eyebrow')}</p>
+      <strong class="mt-2 block">{t('repositories.buildAiKnowledge')}</strong>
       <p class="text-muted mt-1 text-xs">
-        Importing automatically clones, chunks, and embeds source code.
+        {t('repositories.importingAutomaticallyClones')}
       </p>
       <p class="mt-4 font-mono text-[10px] text-accent">
-        {repositoriesResource.data.filter((repository) => repository.index_status === 'READY')
-          .length} AI READY
+        {t('repositories.aiReadyCount', {
+          count: repositoriesResource.data.filter(
+            (repository) => repository.index_status === 'READY'
+          ).length
+        })}
       </p>
     </article>
   </section>
 
   {#if error || repositoriesResource.error || integrationsResource.error}
-    <p class="border-danger/40 bg-danger/5 rounded-lg border p-3 text-xs text-danger">
+    <p
+      class="border-danger/40 bg-danger/5 overflow-hidden rounded-lg border p-3 text-xs break-words text-danger"
+    >
       {error || repositoriesResource.error || integrationsResource.error}
     </p>
   {/if}
@@ -254,38 +268,39 @@
   <section class="border-line overflow-hidden rounded-xl border">
     <div class="border-line flex flex-wrap items-center justify-between gap-3 border-b p-4">
       <div>
-        <strong>Select from GitHub</strong>
+        <strong>{t('repositories.selectFromGithub')}</strong>
         <p class="text-muted text-xs">
-          Importing grants the worker access and starts knowledge preparation automatically.
+          {t('repositories.importingGrantsAccess')}
         </p>
       </div>
       <Button variant="primary" onclick={discover} disabled={discovering || !githubConnected()}
-        >{discovering ? 'Loading…' : 'Choose repositories'}</Button
+        >{discovering ? t('common.loading') : t('repositories.chooseRepositoriesButton')}</Button
       >
     </div>
     {#if !githubConnected()}
       <div class="bg-panel-alt p-5 text-center">
-        <p class="text-sm">Connect GitHub before choosing repositories.</p>
+        <p class="text-sm">{t('repositories.connectGithubBeforeChoosing')}</p>
         <a
           class="mt-3 inline-block text-xs text-brand hover:underline"
-          href={resolve('/integrations')}>Go to GitHub connection →</a
+          href={resolve('/integrations')}>{t('repositories.goToGithubConnection')}</a
         >
       </div>
     {/if}
     {#if githubConnected() && discoveryCompleted && discovered.length === 0}
       <div class="bg-panel-alt border-line border-b p-5 text-center">
-        <strong class="text-sm">No repositories have been granted to this GitHub App</strong>
+        <strong class="text-sm">{t('repositories.noReposGrantedTitle')}</strong>
         <p class="text-muted mx-auto mt-1 max-w-xl text-xs">
-          Open GitHub access settings, choose “All repositories” or select at least one repository,
-          save, then return here and try again.
+          {t('repositories.noReposGrantedDescription')}
         </p>
         <Button class="mt-3" variant="primary" onclick={manageGithubAccess}>
-          Manage repository access
+          {t('repositories.manageRepositoryAccess')}
         </Button>
       </div>
     {/if}
     {#if discovered.length}<div class="border-brand border-b">
-        <p class="bg-panel-alt px-4 py-2 font-mono text-[10px] text-brand">AVAILABLE FROM GITHUB</p>
+        <p class="bg-panel-alt px-4 py-2 font-mono text-[10px] text-brand">
+          {t('repositories.availableFromGithub')}
+        </p>
         {#each discovered as repository, index (repository.external_repo_id)}<div
             class="border-line flex flex-wrap items-center justify-between gap-3 border-t p-3 motion-safe:animate-fade-in-up"
             style="animation-delay: {Math.min(index, 10) * 30}ms"
@@ -294,14 +309,16 @@
               >{repository.full_name} {repository.private ? '· private' : ''}</span
             >
             {#if imported(repository)}
-              <span class="font-mono text-[10px] text-accent">IMPORTED</span>
+              <span class="font-mono text-[10px] text-accent">{t('repositories.imported')}</span>
             {:else}
               <Button
                 variant="primary"
                 disabled={busyRepository === repository.external_repo_id}
                 onclick={() => selectRepository(repository)}
               >
-                {busyRepository === repository.external_repo_id ? 'Importing…' : 'Import + embed'}
+                {busyRepository === repository.external_repo_id
+                  ? t('repositories.importing')
+                  : t('repositories.importPlusEmbed')}
               </Button>
             {/if}
           </div>{/each}
@@ -316,7 +333,8 @@
             <span
               class="rounded-full border border-line px-2 py-0.5 font-mono text-[10px] {repository.enabled
                 ? 'border-accent/40 text-accent'
-                : 'text-muted'}">{repository.enabled ? 'ENABLED' : 'DISABLED'}</span
+                : 'text-muted'}"
+              >{repository.enabled ? t('repositories.enabled') : t('repositories.disabled')}</span
             >
           </div>
           <p class="text-muted mt-1 text-xs break-all">
@@ -324,7 +342,7 @@
           </p>
           <div class="mt-3 rounded-lg border border-line bg-panel-alt p-3">
             <div class="flex items-center justify-between gap-3">
-              <strong class="text-xs">AI knowledge</strong>
+              <strong class="text-xs">{t('repositories.aiKnowledge')}</strong>
               <span
                 class="font-mono text-[10px] {repository.index_status === 'READY'
                   ? 'text-accent'
@@ -338,14 +356,20 @@
             <p class="text-muted mt-1 text-xs">{knowledgeDescription(repository)}</p>
           </div>
           <div class="text-muted mt-3 grid gap-1 font-mono text-[10px] sm:grid-cols-2">
-            <span>Clone: {repository.clone_status.replaceAll('_', ' ')}</span>
-            <span>Chunks: {repository.chunk_count}</span>
-            <span>Remote: {repository.latest_sha?.slice(0, 12) || 'not fetched'}</span>
-            <span>Indexed: {repository.indexed_sha?.slice(0, 12) || 'never'}</span>
+            <span>{t('repositories.clone')}: {repository.clone_status.replaceAll('_', ' ')}</span>
+            <span>{t('repositories.chunks')}: {repository.chunk_count}</span>
+            <span
+              >{t('repositories.remote')}: {repository.latest_sha?.slice(0, 12) ||
+                t('repositories.notFetched')}</span
+            >
+            <span
+              >{t('repositories.indexed')}: {repository.indexed_sha?.slice(0, 12) ||
+                t('repositories.never')}</span
+            >
             <span class="sm:col-span-2"
-              >Last successful preparation: {repository.indexed_at
+              >{t('repositories.lastSuccessfulPreparation')}: {repository.indexed_at
                 ? date.format(new Date(repository.indexed_at))
-                : 'never'}</span
+                : t('repositories.never')}</span
             >
           </div>
           {#if repository.index_error}<p class="mt-1 max-w-xl text-xs text-danger">
@@ -358,7 +382,9 @@
             disabled={!repository.enabled ||
               ['QUEUED', 'INDEXING'].includes(repository.index_status)}
             onclick={() => queueIndex(repository)}
-            >{repository.index_status === 'READY' ? 'Re-embed' : 'Prepare knowledge'}</Button
+            >{repository.index_status === 'READY'
+              ? t('repositories.reEmbed')
+              : t('repositories.prepareKnowledge')}</Button
           >
           <Button
             size="sm"
@@ -366,10 +392,12 @@
             onclick={() => {
               searchingRepository = repository.id;
               results = [];
-            }}>Search</Button
+            }}>{t('repositories.search')}</Button
           >
           <Button size="sm" onclick={() => toggleRepository(repository)}
-            >{repository.enabled ? 'Disable' : 'Enable + index'}</Button
+            >{repository.enabled
+              ? t('repositories.disable')
+              : t('repositories.enableAndIndex')}</Button
           >
           <Button
             variant="danger"
@@ -377,10 +405,12 @@
             disabled={busyRepository === repository.id}
             onclick={() => removeRepository(repository)}
           >
-            {busyRepository === repository.id ? 'Removing…' : 'Remove'}
+            {busyRepository === repository.id
+              ? t('repositories.removing')
+              : t('repositories.remove')}
           </Button>
         </div>
-      </article>{:else}<EmptyState message="No repositories selected." />{/each}
+      </article>{:else}<EmptyState message={t('repositories.empty')} />{/each}
     {#if searchingRepository}<form
         class="border-line border-t p-4"
         onsubmit={(event) => {
@@ -392,8 +422,10 @@
         }}
       >
         <div class="flex flex-col gap-2 sm:flex-row">
-          <TextField bind:value={query} placeholder="Semantic repository search" />
-          <Button variant="primary" type="submit" class="sm:w-auto">Search</Button>
+          <TextField bind:value={query} placeholder={t('repositories.searchPlaceholder')} />
+          <Button variant="primary" type="submit" class="sm:w-auto"
+            >{t('repositories.search')}</Button
+          >
         </div>
         {#each results as result (`${result.file_path}-${result.chunk_index}`)}<article
             class="border-line mt-3 rounded-lg border p-3"
@@ -411,14 +443,14 @@
         type="button"
         onclick={() => (showManualForm = !showManualForm)}
       >
-        {showManualForm ? 'Hide manual import' : 'Can’t find a repository? Import by clone URL'}
+        {showManualForm ? t('repositories.hideManualImport') : t('repositories.cantFindRepository')}
       </button>
       {#if showManualForm}
         <form class="mt-4 grid gap-2 md:grid-cols-[1fr_1fr_2fr_auto]" onsubmit={add}>
-          <TextField bind:value={owner} placeholder="Owner" required />
-          <TextField bind:value={name} placeholder="Repository name" required />
-          <TextField bind:value={cloneUrl} placeholder="Clone URL" required />
-          <Button variant="primary" type="submit">Import + embed</Button>
+          <TextField bind:value={owner} placeholder={t('repositories.owner')} required />
+          <TextField bind:value={name} placeholder={t('repositories.repositoryName')} required />
+          <TextField bind:value={cloneUrl} placeholder={t('repositories.cloneUrl')} required />
+          <Button variant="primary" type="submit">{t('repositories.importPlusEmbed')}</Button>
         </form>
       {/if}
     </div>

@@ -3,9 +3,12 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
 
 from app.application.manage_terminal import ManageTerminal
-from app.application.ports.terminal_sessions import OpenTerminalCommand, TerminalUnavailable
+from app.application.ports.terminal_sessions import (
+    OpenTerminalCommand,
+    TerminalSessionGateway,
+    TerminalUnavailable,
+)
 from app.bootstrap.dependencies import get_terminal_session_gateway
-from app.infrastructure.persistence.terminal_sessions import SqlAlchemyTerminalSessionGateway
 from app.infrastructure.terminal_runtime import terminal_runtime
 from app.schemas import TerminalAccessRead, TerminalOpen
 
@@ -16,7 +19,7 @@ router = APIRouter(tags=["terminals"])
 async def open_terminal(
     task_id: uuid.UUID,
     body: TerminalOpen,
-    gateway: SqlAlchemyTerminalSessionGateway = Depends(get_terminal_session_gateway),
+    gateway: TerminalSessionGateway = Depends(get_terminal_session_gateway),
 ) -> TerminalAccessRead:
     try:
         access = await ManageTerminal(gateway).open(
@@ -30,7 +33,7 @@ async def open_terminal(
 @router.delete("/terminal/{session_id}", status_code=204)
 async def close_terminal(
     session_id: uuid.UUID,
-    gateway: SqlAlchemyTerminalSessionGateway = Depends(get_terminal_session_gateway),
+    gateway: TerminalSessionGateway = Depends(get_terminal_session_gateway),
 ) -> None:
     if not await ManageTerminal(gateway).close(session_id):
         raise HTTPException(status_code=404, detail="Terminal session not found")

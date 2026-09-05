@@ -27,6 +27,7 @@
     retryTaskLinearSync
   } from '$lib/services/tasks';
   import type { Job, ReviewFinding, Task, TaskEvent, ValidationRecord } from '$lib/types';
+  import { t } from '$lib/i18n/index.svelte';
   let task = $state<Task | null>(null);
   let jobs = $state<Job[]>([]);
   let events = $state<TaskEvent[]>([]);
@@ -141,9 +142,9 @@
 </script>
 
 <PageHeader
-  eyebrow="TASK DETAIL"
-  title={task?.title || 'Loading task…'}
-  description={task?.description || 'Plan, jobs, and complete event history.'}
+  eyebrow={t('taskDetail.eyebrow')}
+  title={task?.title || t('taskDetail.loadingTask')}
+  description={task?.description || t('taskDetail.defaultDescription')}
 />
 <main class="grid gap-6 p-4 sm:p-6 md:p-10 xl:grid-cols-2">
   <ErrorBanner message={error} class="xl:col-span-2" />

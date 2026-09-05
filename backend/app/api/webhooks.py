@@ -3,11 +3,11 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
 from app.application.ingest_webhooks import IngestWebhooks
 from app.application.ports.webhook_ingestion import (
     WebhookHeadersMissing,
+    WebhookIngestionWorkflow,
     WebhookPayloadInvalid,
     WebhookSignatureInvalid,
 )
 from app.bootstrap.dependencies import get_webhook_ingestion_workflow
-from app.infrastructure.webhook_ingestion import SqlAlchemyWebhookIngestionWorkflow
 
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])
 
@@ -21,7 +21,7 @@ def _translate(exc: Exception) -> HTTPException:
 @router.post("/linear", status_code=status.HTTP_200_OK)
 async def linear_webhook(
     request: Request,
-    workflow: SqlAlchemyWebhookIngestionWorkflow = Depends(get_webhook_ingestion_workflow),
+    workflow: WebhookIngestionWorkflow = Depends(get_webhook_ingestion_workflow),
     linear_delivery: str | None = Header(default=None),
     linear_event: str | None = Header(default=None),
     linear_signature: str | None = Header(default=None),
@@ -41,7 +41,7 @@ async def linear_webhook(
 @router.post("/github", status_code=status.HTTP_202_ACCEPTED)
 async def github_webhook(
     request: Request,
-    workflow: SqlAlchemyWebhookIngestionWorkflow = Depends(get_webhook_ingestion_workflow),
+    workflow: WebhookIngestionWorkflow = Depends(get_webhook_ingestion_workflow),
     x_github_delivery: str | None = Header(default=None),
     x_github_event: str | None = Header(default=None),
     x_hub_signature_256: str | None = Header(default=None),

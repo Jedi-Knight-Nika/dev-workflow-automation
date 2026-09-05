@@ -3,6 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.application.ports.integration_discovery import (
     IntegrationNotConfigured,
+    LinearMemberView,
     RepositoryDiscoveryView,
     WorkflowStateView,
 )
@@ -53,4 +54,11 @@ class EncryptedIntegrationDiscoveryWorkflow:
                 state["team_key"],
             )
             for state in states
+        ]
+
+    async def linear_members(self) -> list[LinearMemberView]:
+        members = await LinearClient(await self._credential("linear")).list_members()
+        return [
+            LinearMemberView(member["id"], member["name"], member["email"], member["active"])
+            for member in members
         ]

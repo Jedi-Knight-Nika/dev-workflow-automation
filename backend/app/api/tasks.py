@@ -1,18 +1,35 @@
 import uuid
+from dataclasses import asdict
+from datetime import datetime
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
+from app.application.ports.job_enqueueing import JobEnqueueWorkflow
+from app.application.ports.merge_workflow import MergeWorkflow
 from app.application.ports.pull_request_publication import (
     PublishConflict,
     PublishTaskNotFound,
     PublishUnavailable,
+    PullRequestPublicationWorkflow,
 )
-from app.application.ports.task_lifecycle import WorkspaceRefreshUnavailable
-from app.application.ports.tracker_sync import TrackerSyncConflict, TrackerTaskNotFound
+from app.application.ports.task_history import TaskHistoryQueries
+from app.application.ports.task_lifecycle import (
+    TaskLifecycleUnitOfWorkFactory,
+    WorkspaceRefreshUnavailable,
+)
+from app.application.ports.task_queries import TaskListFilters, TaskQueries, TaskView
+from app.application.ports.tracker_sync import (
+    TrackerSyncConflict,
+    TrackerSyncWorkflow,
+    TrackerTaskNotFound,
+)
+from app.application.ports.unit_of_work import UnitOfWork
 from app.application.ports.workspace_workflow import (
     WorkspaceConflict,
     WorkspaceTaskNotFound,
     WorkspaceUnavailable,
+    WorkspaceWorkflow,
 )
 from app.application.pull_requests import (
     MergeConflict,
@@ -43,18 +60,7 @@ from app.bootstrap.dependencies import (
     get_unit_of_work,
     get_workspace_workflow,
 )
-from app.domain.tasks import InvalidTaskTransition, LifecycleAction
-from app.infrastructure.persistence import SqlAlchemyUnitOfWork
-from app.infrastructure.persistence.job_enqueueing import SqlAlchemyJobEnqueueWorkflow
-from app.infrastructure.persistence.task_history import SqlAlchemyTaskHistoryQueries
-from app.infrastructure.persistence.task_lifecycle import SqlAlchemyTaskLifecycleUnitOfWorkFactory
-from app.infrastructure.persistence.task_queries import SqlAlchemyTaskQueries
-from app.infrastructure.persistence.tracker_sync import SqlAlchemyLinearSyncWorkflow
-from app.infrastructure.pull_requests import (
-    SqlAlchemyGitHubMergeWorkflow,
-    SqlAlchemyGitHubPublicationWorkflow,
-)
-from app.infrastructure.workspaces import SqlAlchemyGitWorkspaceWorkflow
+from app.domain.tasks import InvalidTaskTransition, LifecycleAction, TaskState
 from app.schemas import (
     EventRead,
     JobCreate,
@@ -70,18 +76,75 @@ from app.schemas import (
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
 
+def task_view_response(view: TaskView) -> TaskRead:
+    return TaskRead.model_validate(
+        {
+            **asdict(view.task),
+            "source": asdict(view.source) if view.source else None,
+            "repository_name": view.repository_name,
+            "due_at": view.due_at,
+            "started_at": view.started_at,
+            "completed_at": view.completed_at,
+            "team_id": view.team_id,
+            "team_name": view.team_name,
+        }
+    )
+
+
 @router.get("", response_model=list[TaskRead])
 async def list_tasks(
     limit: int = Query(default=100, ge=1, le=500),
-    queries: SqlAlchemyTaskQueries = Depends(get_task_queries),
+    search: str | None = Query(default=None, max_length=200),
+    state: list[TaskState] = Query(default=[]),
+    provider: str | None = Query(default=None, max_length=50),
+    repository_id: uuid.UUID | None = None,
+    priority: list[int] = Query(default=[]),
+    created_from: datetime | None = None,
+    created_to: datetime | None = None,
+    due_from: datetime | None = None,
+    due_to: datetime | None = None,
+    updated_from: datetime | None = None,
+    updated_to: datetime | None = None,
+    assignee: str | None = Query(default=None, max_length=200),
+    team: str | None = Query(default=None, max_length=200),
+    project: str | None = Query(default=None, max_length=200),
+    label: str | None = Query(default=None, max_length=200),
+    provider_state: str | None = Query(default=None, max_length=200),
+    assigned_team_id: uuid.UUID | None = None,
+    unassigned: bool = False,
+    sort: Literal["priority", "created", "updated", "due"] = "priority",
+    direction: Literal["asc", "desc"] = "asc",
+    queries: TaskQueries = Depends(get_task_queries),
 ) -> list[TaskRead]:
-    return [TaskRead.model_validate(task) for task in await ListTasks(queries).execute(limit)]
+    filters = TaskListFilters(
+        search,
+        tuple(state),
+        provider,
+        repository_id,
+        tuple(priority),
+        created_from,
+        created_to,
+        due_from,
+        due_to,
+        updated_from,
+        updated_to,
+        assignee,
+        team,
+        project,
+        label,
+        provider_state,
+        assigned_team_id,
+        unassigned,
+        sort,
+        direction,
+    )
+    return [task_view_response(task) for task in await ListTasks(queries).execute(limit, filters)]
 
 
 @router.post("", response_model=TaskRead, status_code=status.HTTP_201_CREATED)
 async def create_task(
     body: TaskCreate,
-    unit_of_work: SqlAlchemyUnitOfWork = Depends(get_unit_of_work),
+    unit_of_work: UnitOfWork = Depends(get_unit_of_work),
 ) -> TaskRead:
     task = await CreateTask(unit_of_work).execute(
         CreateTaskCommand(
@@ -99,7 +162,7 @@ async def create_task(
 @router.post("/{task_id}/workspace", response_model=TaskRead)
 async def create_task_workspace(
     task_id: uuid.UUID,
-    workflow: SqlAlchemyGitWorkspaceWorkflow = Depends(get_workspace_workflow),
+    workflow: WorkspaceWorkflow = Depends(get_workspace_workflow),
 ) -> TaskRead:
     try:
         task = await PrepareTaskWorkspace(workflow).execute(task_id)
@@ -115,7 +178,7 @@ async def create_task_workspace(
 @router.post("/{task_id}/pull-request", response_model=PullRequestRead)
 async def create_or_update_pull_request(
     task_id: uuid.UUID,
-    workflow: SqlAlchemyGitHubPublicationWorkflow = Depends(get_pull_request_publication_workflow),
+    workflow: PullRequestPublicationWorkflow = Depends(get_pull_request_publication_workflow),
 ) -> PullRequestRead:
     try:
         result = await PublishTaskPullRequest(workflow).execute(task_id)
@@ -131,7 +194,7 @@ async def create_or_update_pull_request(
 @router.get("/{task_id}/validations", response_model=list[ValidationRead])
 async def list_task_validations(
     task_id: uuid.UUID,
-    queries: SqlAlchemyTaskHistoryQueries = Depends(get_task_history_queries),
+    queries: TaskHistoryQueries = Depends(get_task_history_queries),
 ) -> list[ValidationRead]:
     items = await QueryTaskHistory(queries).validations(task_id)
     return [ValidationRead.model_validate(item) for item in items]
@@ -140,7 +203,7 @@ async def list_task_validations(
 @router.get("/{task_id}/findings", response_model=list[ReviewFindingRead])
 async def list_task_findings(
     task_id: uuid.UUID,
-    queries: SqlAlchemyTaskHistoryQueries = Depends(get_task_history_queries),
+    queries: TaskHistoryQueries = Depends(get_task_history_queries),
 ) -> list[ReviewFindingRead]:
     items = await QueryTaskHistory(queries).findings(task_id)
     return [ReviewFindingRead.model_validate(item) for item in items]
@@ -149,7 +212,7 @@ async def list_task_findings(
 @router.post("/{task_id}/merge", response_model=MergeResult)
 async def merge_task_pull_request(
     task_id: uuid.UUID,
-    workflow: SqlAlchemyGitHubMergeWorkflow = Depends(get_merge_workflow),
+    workflow: MergeWorkflow = Depends(get_merge_workflow),
 ) -> MergeResult:
     try:
         result = await MergeTask(workflow).execute(task_id)
@@ -165,7 +228,7 @@ async def merge_task_pull_request(
 @router.post("/{task_id}/linear-sync")
 async def retry_linear_sync(
     task_id: uuid.UUID,
-    workflow: SqlAlchemyLinearSyncWorkflow = Depends(get_tracker_sync_workflow),
+    workflow: TrackerSyncWorkflow = Depends(get_tracker_sync_workflow),
 ) -> dict[str, bool]:
     try:
         synchronized = await SynchronizeMergedTask(workflow).execute(task_id)
@@ -179,19 +242,19 @@ async def retry_linear_sync(
 @router.get("/{task_id}", response_model=TaskRead)
 async def get_task(
     task_id: uuid.UUID,
-    queries: SqlAlchemyTaskQueries = Depends(get_task_queries),
+    queries: TaskQueries = Depends(get_task_queries),
 ) -> TaskRead:
     try:
         task = await GetTask(queries).execute(task_id)
     except TaskNotFound as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    return TaskRead.model_validate(task)
+    return task_view_response(task)
 
 
 @router.get("/{task_id}/jobs", response_model=list[JobRead])
 async def list_task_jobs(
     task_id: uuid.UUID,
-    queries: SqlAlchemyTaskHistoryQueries = Depends(get_task_history_queries),
+    queries: TaskHistoryQueries = Depends(get_task_history_queries),
 ) -> list[JobRead]:
     items = await QueryTaskHistory(queries).jobs(task_id)
     return [JobRead.model_validate(item) for item in items]
@@ -201,7 +264,7 @@ async def list_task_jobs(
 async def create_job(
     task_id: uuid.UUID,
     body: JobCreate,
-    workflow: SqlAlchemyJobEnqueueWorkflow = Depends(get_job_enqueue_workflow),
+    workflow: JobEnqueueWorkflow = Depends(get_job_enqueue_workflow),
 ) -> JobRead:
     try:
         job = await EnqueueTaskJob(workflow).execute(
@@ -223,7 +286,7 @@ async def create_job(
 @router.get("/{task_id}/events", response_model=list[EventRead])
 async def list_task_events(
     task_id: uuid.UUID,
-    queries: SqlAlchemyTaskHistoryQueries = Depends(get_task_history_queries),
+    queries: TaskHistoryQueries = Depends(get_task_history_queries),
 ) -> list[EventRead]:
     items = await QueryTaskHistory(queries).events(task_id)
     return [EventRead.model_validate(item) for item in items]
@@ -232,7 +295,7 @@ async def list_task_events(
 @router.post("/{task_id}/pause", response_model=TaskRead)
 async def pause_task(
     task_id: uuid.UUID,
-    factory: SqlAlchemyTaskLifecycleUnitOfWorkFactory = Depends(get_task_lifecycle_factory),
+    factory: TaskLifecycleUnitOfWorkFactory = Depends(get_task_lifecycle_factory),
 ) -> TaskRead:
     return await _change_lifecycle(task_id, LifecycleAction.PAUSE, factory)
 
@@ -240,7 +303,7 @@ async def pause_task(
 @router.post("/{task_id}/cancel", response_model=TaskRead)
 async def cancel_task(
     task_id: uuid.UUID,
-    factory: SqlAlchemyTaskLifecycleUnitOfWorkFactory = Depends(get_task_lifecycle_factory),
+    factory: TaskLifecycleUnitOfWorkFactory = Depends(get_task_lifecycle_factory),
 ) -> TaskRead:
     return await _change_lifecycle(task_id, LifecycleAction.CANCEL, factory)
 
@@ -248,7 +311,7 @@ async def cancel_task(
 @router.post("/{task_id}/takeover", response_model=TaskRead)
 async def take_over_task(
     task_id: uuid.UUID,
-    factory: SqlAlchemyTaskLifecycleUnitOfWorkFactory = Depends(get_task_lifecycle_factory),
+    factory: TaskLifecycleUnitOfWorkFactory = Depends(get_task_lifecycle_factory),
 ) -> TaskRead:
     return await _change_lifecycle(task_id, LifecycleAction.TAKEOVER, factory)
 
@@ -256,13 +319,13 @@ async def take_over_task(
 @router.post("/{task_id}/resume", response_model=TaskRead)
 async def resume_task(
     task_id: uuid.UUID,
-    factory: SqlAlchemyTaskLifecycleUnitOfWorkFactory = Depends(get_task_lifecycle_factory),
+    factory: TaskLifecycleUnitOfWorkFactory = Depends(get_task_lifecycle_factory),
 ) -> TaskRead:
     return await _change_lifecycle(task_id, LifecycleAction.RESUME, factory)
 
 
 async def _change_lifecycle(
-    task_id: uuid.UUID, action: LifecycleAction, factory: SqlAlchemyTaskLifecycleUnitOfWorkFactory
+    task_id: uuid.UUID, action: LifecycleAction, factory: TaskLifecycleUnitOfWorkFactory
 ) -> TaskRead:
     try:
         task = await ChangeTaskLifecycle(factory).execute(task_id, action)

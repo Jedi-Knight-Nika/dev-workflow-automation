@@ -7,6 +7,7 @@ from app.application.ports.merge_workflow import MergeContext, MergeOutcome
 from app.application.pull_requests.merge_task import MergeConflict
 from app.db.models import IndexStatus, Integration, Repository, Task, TaskState, ValidationRecord
 from app.domain.pull_requests import ValidationEvidence
+from app.infrastructure.integration_access import role_allows_integration
 from app.infrastructure.linear_sync import sync_merged_task_to_linear
 from app.infrastructure.persistence.job_operations import record_event
 from app.infrastructure.security.crypto import cipher
@@ -24,6 +25,8 @@ class SqlAlchemyGitHubMergeWorkflow:
         )
         if integration is None or integration.encrypted_credentials is None:
             raise MergeConflict("GitHub integration is unavailable")
+        if not await role_allows_integration(self._session, "DELIVERER", integration.id):
+            raise MergeConflict("GitHub is not enabled on the Deliverer node")
         auth = await resolve_github_auth(cipher.decrypt(integration.encrypted_credentials))
         return GitHubClient(auth.token, auth.installation)
 

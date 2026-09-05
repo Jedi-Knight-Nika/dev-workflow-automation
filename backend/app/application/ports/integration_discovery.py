@@ -27,6 +27,15 @@ class WorkflowStateView:
     team_key: str
 
 
+@dataclass(frozen=True, slots=True)
+class LinearMemberView:
+    id: str
+    name: str
+    email: str
+    active: bool
+
+
 class IntegrationDiscoveryWorkflow(Protocol):
     async def github_repositories(self) -> list[RepositoryDiscoveryView]: ...
     async def linear_workflow_states(self) -> list[WorkflowStateView]: ...
+    async def linear_members(self) -> list[LinearMemberView]: ...

@@ -1,38 +1,23 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-
-  let theme = $state<'light' | 'dark'>('dark');
-
-  function apply(next: 'light' | 'dark') {
-    theme = next;
-    document.documentElement.dataset.theme = next;
-    try {
-      localStorage.setItem('theme', next);
-    } catch {
-      /* storage unavailable, theme just won't persist */
-    }
-  }
+  import { t } from '$lib/i18n/index.svelte';
+  import { getTheme, setTheme, initTheme } from '$lib/theme.svelte';
 
   onMount(() => {
-    const stored = localStorage.getItem('theme');
-    if (stored === 'light' || stored === 'dark') {
-      theme = stored;
-    } else {
-      theme = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
-    }
+    initTheme();
   });
 
   function toggle() {
-    apply(theme === 'dark' ? 'light' : 'dark');
+    setTheme(getTheme() === 'dark' ? 'light' : 'dark');
   }
 </script>
 
 <button
   class="border-line text-muted hover:border-brand hover:text-brand grid size-9 place-items-center rounded-lg border transition-transform motion-safe:active:scale-90"
   onclick={toggle}
-  aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+  aria-label={getTheme() === 'dark' ? t('theme.toLight') : t('theme.toDark')}
 >
-  {#key theme}
+  {#key getTheme()}
     <svg
       class="size-4 motion-safe:animate-fade-in"
       viewBox="0 0 24 24"
@@ -42,7 +27,7 @@
       stroke-linecap="round"
       stroke-linejoin="round"
     >
-      {#if theme === 'dark'}
+      {#if getTheme() === 'dark'}
         <circle cx="12" cy="12" r="4" />
         <path
           d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"

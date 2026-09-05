@@ -15,6 +15,24 @@ class LinearWorkflowState(TypedDict):
     team_key: str
 
 
+class LinearMember(TypedDict):
+    id: str
+    name: str
+    email: str
+    active: bool
+
+
+class LinearIssue(TypedDict):
+    id: str
+    identifier: str
+    title: str
+    description: str
+    priority: int
+    assignee_id: str | None
+    state_id: str | None
+    raw: dict[str, Any]
+
+
 def verify_linear_signature(
     body: bytes,
     secret: str,
@@ -35,7 +53,7 @@ class LinearClient:
     def __init__(self, api_key: str) -> None:
         self.headers = {"authorization": api_key, "content-type": "application/json"}
 
-    async def _graphql(self, query: str, variables: dict[str, str] | None = None) -> dict[str, Any]:
+    async def _graphql(self, query: str, variables: dict[str, Any] | None = None) -> dict[str, Any]:
         async with httpx.AsyncClient(timeout=30, headers=self.headers) as client:
             response = await client.post(
                 "https://api.linear.app/graphql",
@@ -75,6 +93,64 @@ class LinearClient:
                 }
             )
         return sorted(states, key=lambda state: (state["team_name"], state["name"]))
+
+    async def list_members(self) -> list[LinearMember]:
+        data = await self._graphql(
+            """query Members { users(first: 250) { nodes { id name email active } } }"""
+        )
+        return sorted(
+            [
+                {
+                    "id": str(node["id"]),
+                    "name": str(node.get("name") or node.get("email") or "Unknown"),
+                    "email": str(node.get("email") or ""),
+                    "active": bool(node.get("active", True)),
+                }
+                for node in data.get("users", {}).get("nodes", [])
+            ],
+            key=lambda member: member["name"].lower(),
+        )
+
+    async def list_issues(self, assignee_id: str, state_ids: list[str]) -> list[LinearIssue]:
+        data = await self._graphql(
+            """
+            query AssignedIssues($assigneeId: ID!, $stateIds: [ID!]!) {
+              issues(first: 100, filter: {
+                assignee: { id: { eq: $assigneeId } },
+                state: { id: { in: $stateIds } }
+              }) {
+                nodes {
+                  id identifier title description priority url dueDate estimate
+                  createdAt updatedAt completedAt startedAt
+                  assignee { id name email }
+                  creator { id name email }
+                  state { id name type }
+                  team { id name key }
+                  project { id name }
+                  labels { nodes { id name color } }
+                }
+              }
+            }
+            """,
+            {"assigneeId": assignee_id, "stateIds": state_ids},
+        )
+        issues: list[LinearIssue] = []
+        for node in data.get("issues", {}).get("nodes", []):
+            assignee = node.get("assignee") or {}
+            state = node.get("state") or {}
+            issues.append(
+                {
+                    "id": str(node["id"]),
+                    "identifier": str(node["identifier"]),
+                    "title": str(node.get("title") or node["identifier"]),
+                    "description": str(node.get("description") or ""),
+                    "priority": int(node.get("priority") or 0),
+                    "assignee_id": str(assignee["id"]) if assignee.get("id") else None,
+                    "state_id": str(state["id"]) if state.get("id") else None,
+                    "raw": dict(node),
+                }
+            )
+        return issues
 
     async def update_issue_state(self, issue_id: str, state_id: str) -> None:
         query = """

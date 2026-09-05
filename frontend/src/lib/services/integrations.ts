@@ -3,6 +3,7 @@ import type {
   GitHubInstallationAccount,
   Integration,
   LinearWorkflowState,
+  LinearMember,
   WebhookHealth
 } from '$lib/types';
 
@@ -49,4 +50,8 @@ export function getGithubInstallationAccount(): Promise<GitHubInstallationAccoun
 
 export function listLinearWorkflowStates(): Promise<LinearWorkflowState[]> {
   return api<LinearWorkflowState[]>('/linear/workflow-states');
+}
+
+export function listLinearMembers(): Promise<LinearMember[]> {
+  return api<LinearMember[]>('/linear/members');
 }

@@ -1,14 +1,15 @@
 <script lang="ts">
   import ShowMore from '$lib/components/ShowMore.svelte';
   import type { TaskEvent } from '$lib/types';
+  import { t } from '$lib/i18n/index.svelte';
 
   let { events }: { events: TaskEvent[] } = $props();
 </script>
 
 <section class="border-line rounded-xl border p-5">
-  <h2 class="mb-4 font-semibold">Timeline</h2>
+  <h2 class="mb-4 font-semibold">{t('taskDetail.timeline')}</h2>
   {#if events.length === 0}
-    <p class="text-muted text-sm">No events recorded.</p>
+    <p class="text-muted text-sm">{t('taskDetail.noEventsRecorded')}</p>
   {:else}
     <ShowMore items={events}>
       {#snippet children(visibleEvents: TaskEvent[])}

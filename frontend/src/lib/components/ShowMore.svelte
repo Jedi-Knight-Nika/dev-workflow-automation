@@ -1,6 +1,7 @@
 <script lang="ts" generics="T">
   import Button from '$lib/components/Button.svelte';
   import type { Snippet } from 'svelte';
+  import { t } from '$lib/i18n/index.svelte';
 
   let {
     items,
@@ -30,7 +31,11 @@
       size="sm"
       onclick={() => {
         visibleCount += step;
-      }}>Show {Math.min(remaining, step)} more ({remaining} left)</Button
+      }}
+      >{t('taskDetail.showMore', {
+        count: Math.min(remaining, step),
+        remaining
+      })}</Button
     >
   </div>
 {/if}

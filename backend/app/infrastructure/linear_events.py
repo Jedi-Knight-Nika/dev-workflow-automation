@@ -3,15 +3,27 @@ from datetime import UTC, datetime
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import Integration, Job, JobRole, JobState, Task, TaskState, WebhookDelivery
+from app.db.models import (
+    ExternalTaskSnapshot,
+    Integration,
+    Job,
+    JobRole,
+    JobState,
+    Task,
+    TaskState,
+    WebhookDelivery,
+    WorkflowNode,
+)
 from app.domain.webhooks import (
     DeliveryRetryPolicy,
     configured_repository_id,
     issue_labels,
     linear_comment,
+    linear_datetime,
     linear_priority,
 )
 from app.infrastructure.persistence.job_operations import enqueue_job, record_event
+from app.infrastructure.persistence.team_routing import assign_routed_team
 
 
 async def process_linear_delivery(session: AsyncSession, delivery: WebhookDelivery) -> None:
@@ -70,7 +82,33 @@ async def process_linear_delivery(session: AsyncSession, delivery: WebhookDelive
             await record_event(session, task.id, "LINEAR_ISSUE_REMOVED", {}, source="linear")
         delivery.status = "PROCESSED"
         return
-    triggered = trigger_label in issue_labels(data)
+    intake_nodes = list(
+        (
+            await session.scalars(
+                select(WorkflowNode).where(
+                    WorkflowNode.role == "INTAKE",
+                    WorkflowNode.enabled.is_(True),
+                    WorkflowNode.integration_mode.in_(["webhook", "hybrid"]),
+                )
+            )
+        ).all()
+    )
+    configured_nodes = [
+        node
+        for node in intake_nodes
+        if integration is not None and str(integration.id) in (node.integration_ids or [])
+    ]
+    assignee_id = str((data.get("assignee") or {}).get("id") or "")
+    state_id = str((data.get("state") or {}).get("id") or "")
+    triggered = (
+        any(
+            (not node.filter_assignee_id or node.filter_assignee_id == assignee_id)
+            and (not node.filter_state_ids or state_id in node.filter_state_ids)
+            for node in configured_nodes
+        )
+        if configured_nodes
+        else trigger_label in issue_labels(data)
+    )
     if task is None and not triggered:
         delivery.status = "IGNORED"
         return
@@ -84,6 +122,7 @@ async def process_linear_delivery(session: AsyncSession, delivery: WebhookDelive
         )
         session.add(task)
         await session.flush()
+        await assign_routed_team(session, task, reason="linear-webhook")
         await record_event(
             session,
             task.id,
@@ -113,6 +152,30 @@ async def process_linear_delivery(session: AsyncSession, delivery: WebhookDelive
             {"action": payload.get("action")},
             source="linear",
         )
+    linear_issue_id = str(data.get("id") or "")
+    task.due_at = linear_datetime(data.get("dueDate"))
+    task.started_at = linear_datetime(data.get("startedAt"))
+    task.completed_at = linear_datetime(data.get("completedAt"))
+    if linear_issue_id:
+        snapshot = await session.scalar(
+            select(ExternalTaskSnapshot).where(
+                ExternalTaskSnapshot.provider == "linear",
+                ExternalTaskSnapshot.external_id == linear_issue_id,
+            )
+        )
+        if snapshot is None:
+            snapshot = ExternalTaskSnapshot(
+                task_id=task.id,
+                provider="linear",
+                external_id=linear_issue_id,
+                identifier=str(identifier),
+            )
+            session.add(snapshot)
+        snapshot.task_id = task.id
+        snapshot.assignee_id = assignee_id or None
+        snapshot.state_id = state_id or None
+        snapshot.raw_payload = dict(data)
+        snapshot.synchronized_at = datetime.now(UTC)
     delivery.status = "PROCESSED"
 
 

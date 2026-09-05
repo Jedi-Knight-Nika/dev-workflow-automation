@@ -1,5 +1,6 @@
 import uuid
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.application.ports.pull_request_publication import (
@@ -8,8 +9,9 @@ from app.application.ports.pull_request_publication import (
     PublishTaskNotFound,
     PublishUnavailable,
 )
-from app.db.models import Repository, Task
+from app.db.models import Integration, Repository, Task
 from app.infrastructure.git.workspaces import GitCommandError
+from app.infrastructure.integration_access import role_allows_integration
 from app.infrastructure.pull_requests.operations import publish_pull_request
 
 
@@ -26,6 +28,13 @@ class SqlAlchemyGitHubPublicationWorkflow:
         repository = await self._session.get(Repository, task.repository_id)
         if repository is None:
             raise PublishConflict("Repository is unavailable")
+        integration = await self._session.scalar(
+            select(Integration).where(Integration.provider_name == "github")
+        )
+        if integration is None or not await role_allows_integration(
+            self._session, "DELIVERER", integration.id
+        ):
+            raise PublishConflict("GitHub is not enabled on the Deliverer node")
         try:
             result = await publish_pull_request(self._session, task, repository)
         except (GitCommandError, RuntimeError) as exc:

@@ -8,6 +8,9 @@ class ProviderRequest:
     system: str
     prompt: str
     max_output_tokens: int = 4096
+    temperature: float | None = None
+    reasoning_effort: str = "default"
+    timeout_seconds: int = 120
 
 
 @dataclass(frozen=True)

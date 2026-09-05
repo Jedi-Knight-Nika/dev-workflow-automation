@@ -1,14 +1,15 @@
 <script lang="ts">
   import ShowMore from '$lib/components/ShowMore.svelte';
   import type { ValidationRecord } from '$lib/types';
+  import { t } from '$lib/i18n/index.svelte';
 
   let { validations }: { validations: ValidationRecord[] } = $props();
 </script>
 
 <section class="border-line rounded-xl border p-5 xl:col-span-2">
-  <h2 class="mb-4 font-semibold">GitHub validation</h2>
+  <h2 class="mb-4 font-semibold">{t('taskDetail.githubValidation')}</h2>
   {#if validations.length === 0}
-    <p class="text-muted text-sm">No check or review evidence received.</p>
+    <p class="text-muted text-sm">{t('taskDetail.noValidationEvidence')}</p>
   {:else}
     <ShowMore items={validations}>
       {#snippet children(visibleValidations: ValidationRecord[])}
@@ -27,7 +28,7 @@
                 class="ml-3 text-xs text-brand underline"
                 href={validation.details_url}
                 target="_blank"
-                rel="noreferrer">Open evidence</a
+                rel="noreferrer">{t('taskDetail.openEvidence')}</a
               ><!-- eslint-enable svelte/no-navigation-without-resolve -->{/if}
           </div>
         {/each}

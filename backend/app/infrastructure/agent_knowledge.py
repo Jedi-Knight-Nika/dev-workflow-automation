@@ -3,6 +3,7 @@ import uuid
 from sqlalchemy import delete, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.application.ports.agent_knowledge import AgentKnowledgeView
 from app.db.models import AgentKnowledgeChunk, AgentKnowledgeSource, JobRole
 from app.domain.indexing import chunk_source, vector_literal
 from app.infrastructure.indexing import embedding_client
@@ -90,3 +91,28 @@ async def search_agent_knowledge(
         )
     ).mappings()
     return [dict(row) for row in rows]
+
+
+def _view(source: AgentKnowledgeSource) -> AgentKnowledgeView:
+    return AgentKnowledgeView(
+        source.id,
+        source.role.value,
+        source.title,
+        source.content,
+        source.chunk_count,
+        source.created_at,
+    )
+
+
+class SqlAlchemyAgentKnowledgeWorkflow:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def list(self, role: str) -> list[AgentKnowledgeView]:
+        return [_view(item) for item in await list_agent_knowledge(self._session, JobRole(role))]
+
+    async def create(self, role: str, title: str, content: str) -> AgentKnowledgeView:
+        return _view(await create_agent_knowledge(self._session, JobRole(role), title, content))
+
+    async def delete(self, role: str, source_id: uuid.UUID) -> bool:
+        return await delete_agent_knowledge(self._session, JobRole(role), source_id)

@@ -1,4 +1,5 @@
 import uuid
+from datetime import UTC, datetime
 from typing import Any
 
 
@@ -21,6 +22,18 @@ def configured_repository_id(configuration: dict[str, Any]) -> uuid.UUID | None:
         return None
     try:
         return uuid.UUID(str(value))
+    except ValueError:
+        return None
+
+
+def linear_datetime(value: object) -> datetime | None:
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=UTC)
+        return parsed
     except ValueError:
         return None
 

@@ -38,22 +38,30 @@ export function deleteAgentKnowledge(role: string, id: string): Promise<void> {
   return api<void>(`/agents/${role}/knowledge/${id}`, { method: 'DELETE' });
 }
 
-export function getWorkflow(): Promise<WorkflowGraph> {
-  return api<WorkflowGraph>('/workflow');
+export function getWorkflow(teamId?: string): Promise<WorkflowGraph> {
+  return api<WorkflowGraph>(teamId ? `/teams/${teamId}/workflow` : '/workflow');
 }
 
-export function saveWorkflow(workflow: WorkflowGraph): Promise<WorkflowGraph> {
-  return api<WorkflowGraph>('/workflow', {
+export function saveWorkflow(workflow: WorkflowGraph, teamId?: string): Promise<WorkflowGraph> {
+  return api<WorkflowGraph>(teamId ? `/teams/${teamId}/workflow` : '/workflow', {
     method: 'PUT',
     body: JSON.stringify(workflow)
   });
 }
 
-export function validateWorkflowNodeModel(nodeId: string): Promise<{
+export function validateWorkflowNodeModel(
+  nodeId: string,
+  teamId?: string
+): Promise<{
   node_id: string;
   status: string;
   message: string | null;
   validated_at: string;
 }> {
-  return api(`/workflow/nodes/${nodeId}/validate-model`, { method: 'POST' });
+  return api(
+    teamId
+      ? `/teams/${teamId}/workflow/nodes/${nodeId}/validate-model`
+      : `/workflow/nodes/${nodeId}/validate-model`,
+    { method: 'POST' }
+  );
 }
