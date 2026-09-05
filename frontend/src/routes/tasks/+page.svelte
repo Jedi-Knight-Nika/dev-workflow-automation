@@ -8,15 +8,31 @@
   import Skeleton from '$lib/components/Skeleton.svelte';
   import TeamBadge from '$lib/components/TeamBadge.svelte';
   import { t } from '$lib/i18n/index.svelte';
-  import { listTasks, type TaskFilters } from '$lib/services/tasks';
+  import { listRepositories } from '$lib/services/repositories';
+  import { createTask, listTasks, type TaskFilters } from '$lib/services/tasks';
   import { assignTaskToTeam, listTeams, unassignTask } from '$lib/services/teams';
   import { priorityLabel, tasksByColumn } from '$lib/task-board';
-  import type { Task, Team } from '$lib/types';
+  import type { Repository, Task, Team } from '$lib/types';
 
   let tasks = $state<Task[]>([]),
     selected = $state<Task | null>(null);
   let teams = $state<Team[]>([]),
     assigning = $state(false);
+  let repositories = $state<Repository[]>([]);
+  let creating = $state(false),
+    savingTask = $state(false);
+  let draft = $state({
+    title: '',
+    description: '',
+    priority: 3,
+    external_key: '',
+    repository_id: '',
+    team_id: '',
+    project_name: '',
+    labels: '',
+    estimate: '',
+    due_at: ''
+  });
   let loading = $state(true),
     error = $state(''),
     showAdvanced = $state(false);
@@ -58,6 +74,54 @@
       assigning = false;
     }
   }
+  function resetDraft() {
+    draft = {
+      title: '',
+      description: '',
+      priority: 3,
+      external_key: '',
+      repository_id: '',
+      team_id: '',
+      project_name: '',
+      labels: '',
+      estimate: '',
+      due_at: ''
+    };
+  }
+  async function submitTask() {
+    if (!draft.title.trim()) return;
+    savingTask = true;
+    error = '';
+    try {
+      const task = await createTask({
+        title: draft.title.trim(),
+        description: draft.description.trim(),
+        priority: draft.priority,
+        external_key: draft.external_key.trim() || null,
+        repository_id: draft.repository_id || null,
+        project_name: draft.project_name.trim() || null,
+        labels: [
+          ...new Set(
+            draft.labels
+              .split(',')
+              .map((label) => label.trim())
+              .filter(Boolean)
+          )
+        ],
+        estimate: draft.estimate === '' ? null : Number(draft.estimate),
+        due_at: draft.due_at ? new Date(draft.due_at).toISOString() : null,
+        enqueue_planning: false
+      });
+      if (draft.team_id) await assignTaskToTeam(draft.team_id, task.id);
+      creating = false;
+      resetDraft();
+      await refresh();
+    } catch (cause) {
+      error = cause instanceof Error ? cause.message : String(cause);
+    } finally {
+      savingTask = false;
+    }
+  }
   function date(value?: string | null, short = false) {
     if (!value) return '—';
     const parsed = new Date(value);
@@ -68,8 +132,11 @@
   }
   onMount(() => {
     void refresh();
-    void listTeams()
-      .then((result) => (teams = result))
+    void Promise.all([listTeams(), listRepositories()])
+      .then(([teamResult, repositoryResult]) => {
+        teams = teamResult;
+        repositories = repositoryResult;
+      })
       .catch((cause) => (error = String(cause)));
     const stream = new EventSource(`${API_URL}/api/v1/events/stream`);
     stream.addEventListener('update', queueRefresh);
@@ -173,10 +240,12 @@
     {/if}
   </section>
   <div class="toolbar">
-    <span>{tasks.length} {tasks.length === 1 ? 'task' : 'tasks'}</span><button
-      disabled={loading}
-      onclick={() => void refresh()}>{loading ? 'Refreshing…' : 'Refresh'}</button
-    >
+    <span>{tasks.length} {tasks.length === 1 ? 'task' : 'tasks'}</span>
+    <div>
+      <button disabled={loading} onclick={() => void refresh()}
+        >{loading ? 'Refreshing…' : 'Refresh'}</button
+      ><button class="create-button" onclick={() => (creating = true)}>+ Create manual task</button>
+    </div>
   </div>
 
   {#if loading && tasks.length === 0}
@@ -223,8 +292,9 @@
                       >Due {date(task.due_at || task.source?.due_date, true)}</span
                     >{/if}
                 </div>
-                {#if task.source?.labels.length}<div class="labels">
-                    {#each task.source.labels.slice(0, 3) as label (label)}<span>{label}</span
+                {#if task.source?.labels.length || task.labels?.length}<div class="labels">
+                    {#each (task.source?.labels || task.labels || []).slice(0, 3) as label (label)}<span
+                        >{label}</span
                       >{/each}
                   </div>{/if}
               </button>
@@ -236,6 +306,105 @@
     </section>
   {/if}
 </main>
+
+{#if creating}
+  <button class="backdrop" aria-label="Close task creation" onclick={() => (creating = false)}
+  ></button>
+  <div class="create-modal" role="dialog" aria-modal="true" aria-labelledby="create-task-title">
+    <header>
+      <div>
+        <span class="source-id">Internal task</span>
+        <h2 id="create-task-title">Create manual task</h2>
+      </div>
+      <button class="close" aria-label="Close" onclick={() => (creating = false)}>×</button>
+    </header>
+    <form
+      onsubmit={(event) => {
+        event.preventDefault();
+        void submitTask();
+      }}
+    >
+      <div class="form-grid">
+        <label class="wide"
+          ><span>Title *</span><input
+            bind:value={draft.title}
+            required
+            maxlength="500"
+            placeholder="What needs to be done?"
+          /></label
+        >
+        <label class="wide"
+          ><span>Description</span><textarea
+            bind:value={draft.description}
+            rows="6"
+            placeholder="Requirements, context, and definition of done…"
+          ></textarea></label
+        >
+        <label
+          ><span>Priority</span><select bind:value={draft.priority}
+            >{#each [0, 1, 2, 3, 4, 5] as priority (priority)}<option value={priority}
+                >{priorityLabel(priority)}</option
+              >{/each}</select
+          ></label
+        >
+        <label
+          ><span>AI team</span><select bind:value={draft.team_id}
+            ><option value="">Unassigned</option
+            >{#each teams.filter((team) => team.enabled) as team (team.id)}<option value={team.id}
+                >{team.name}</option
+              >{/each}</select
+          ></label
+        >
+        <label
+          ><span>Repository</span><select bind:value={draft.repository_id}
+            ><option value="">No repository</option
+            >{#each repositories.filter((repository) => repository.enabled) as repository (repository.id)}<option
+                value={repository.id}>{repository.owner}/{repository.name}</option
+              >{/each}</select
+          ></label
+        >
+        <label
+          ><span>Project</span><input
+            bind:value={draft.project_name}
+            maxlength="255"
+            placeholder="Optional project"
+          /></label
+        >
+        <label
+          ><span>Reference key</span><input
+            bind:value={draft.external_key}
+            maxlength="100"
+            placeholder="e.g. MAN-42"
+          /></label
+        >
+        <label
+          ><span>Estimate</span><input
+            bind:value={draft.estimate}
+            type="number"
+            min="0"
+            max="1000000"
+            step="0.5"
+            placeholder="Points or hours"
+          /></label
+        >
+        <label><span>Due date</span><input bind:value={draft.due_at} type="datetime-local" /></label
+        >
+        <label class="wide"
+          ><span>Labels</span><input
+            bind:value={draft.labels}
+            placeholder="backend, billing, urgent"
+          /><small>Separate labels with commas.</small></label
+        >
+      </div>
+      <footer>
+        <button type="button" class="secondary" onclick={() => (creating = false)}>Cancel</button
+        ><button type="submit" class="primary" disabled={savingTask || !draft.title.trim()}
+          >{savingTask ? 'Creating…' : draft.team_id ? 'Create and assign' : 'Create task'}</button
+        >
+      </footer>
+    </form>
+  </div>
+{/if}
 
 {#if selected}
   <button class="backdrop" aria-label="Close task details" onclick={() => (selected = null)}
@@ -304,7 +473,7 @@
           </div>
           <div>
             <dt>Project</dt>
-            <dd>{selected.source?.project_name || '—'}</dd>
+            <dd>{selected.source?.project_name || selected.project_name || '—'}</dd>
           </div>
           <div>
             <dt>Repository</dt>
@@ -312,7 +481,7 @@
           </div>
           <div>
             <dt>Estimate</dt>
-            <dd>{selected.source?.estimate ?? '—'}</dd>
+            <dd>{selected.source?.estimate ?? selected.estimate ?? '—'}</dd>
           </div>
           <div>
             <dt>Due</dt>
@@ -332,10 +501,12 @@
           </div>
         </dl>
       </section>
-      {#if selected.source?.labels.length}<section>
+      {#if selected.source?.labels.length || selected.labels?.length}<section>
           <h3>Labels</h3>
           <div class="labels">
-            {#each selected.source.labels as label (label)}<span>{label}</span>{/each}
+            {#each selected.source?.labels || selected.labels || [] as label (label)}<span
+                >{label}</span
+              >{/each}
           </div>
         </section>{/if}
       <details>
@@ -423,12 +594,25 @@
   }
   .toolbar {
     display: flex;
+    align-items: center;
     justify-content: space-between;
     color: var(--color-muted);
     font-size: 0.8rem;
   }
   .toolbar button {
     color: var(--color-brand);
+  }
+  .toolbar > div {
+    display: flex;
+    align-items: center;
+    gap: 0.8rem;
+  }
+  .toolbar .create-button {
+    border-radius: 0.55rem;
+    background: var(--color-brand);
+    padding: 0.6rem 0.85rem;
+    color: white;
+    font-weight: 700;
   }
   .toolbar button:disabled {
     opacity: 0.5;
@@ -604,6 +788,86 @@
     background: var(--color-bg);
     box-shadow: -20px 0 60px rgb(0 0 0/0.18);
     animation: slide-in 180ms ease-out;
+  }
+  .create-modal {
+    position: fixed;
+    inset: 50% auto auto 50%;
+    z-index: 50;
+    width: min(720px, calc(100% - 2rem));
+    max-height: calc(100vh - 2rem);
+    overflow: auto;
+    transform: translate(-50%, -50%);
+    border: 1px solid var(--color-line);
+    border-radius: 0.9rem;
+    background: var(--color-bg);
+    box-shadow: 0 24px 80px rgb(0 0 0/0.3);
+  }
+  .create-modal > header {
+    display: flex;
+    align-items: start;
+    justify-content: space-between;
+    border-bottom: 1px solid var(--color-line);
+    padding: 1.2rem 1.3rem;
+  }
+  .create-modal h2 {
+    margin-top: 0.25rem;
+    font-size: 1.2rem;
+    font-weight: 750;
+  }
+  .create-modal form {
+    padding: 1.2rem 1.3rem 0;
+  }
+  .form-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.85rem;
+  }
+  .form-grid label {
+    display: grid;
+    gap: 0.35rem;
+    color: var(--color-muted);
+    font-size: 0.72rem;
+    font-weight: 650;
+  }
+  .form-grid .wide {
+    grid-column: 1 / -1;
+  }
+  .form-grid input,
+  .form-grid select,
+  .form-grid textarea {
+    width: 100%;
+    border: 1px solid var(--color-line);
+    border-radius: 0.55rem;
+    background: var(--color-panel);
+    padding: 0.65rem 0.7rem;
+    color: var(--color-text);
+    font-size: 0.84rem;
+    font-weight: 400;
+    outline: none;
+  }
+  .form-grid textarea {
+    resize: vertical;
+  }
+  .form-grid input:focus,
+  .form-grid select:focus,
+  .form-grid textarea:focus {
+    border-color: var(--color-brand);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-brand) 18%, transparent);
+  }
+  .form-grid small {
+    font-weight: 400;
+  }
+  .create-modal footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.6rem;
+    margin-top: 1.2rem;
+    border-top: 1px solid var(--color-line);
+    padding: 1rem 0;
+  }
+  .create-modal button:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
   }
   .drawer > header {
     display: flex;

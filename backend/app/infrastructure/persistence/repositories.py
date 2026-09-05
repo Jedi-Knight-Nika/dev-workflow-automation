@@ -26,6 +26,10 @@ def task_to_domain(record: TaskRecord) -> Task:
         manual_takeover=record.manual_takeover,
         created_at=record.created_at,
         updated_at=record.updated_at,
+        project_name=record.project_name,
+        labels=tuple(record.labels or []),
+        estimate=float(record.estimate) if record.estimate is not None else None,
+        due_at=record.due_at,
     )
 
 
@@ -50,6 +54,10 @@ class SqlAlchemyTaskRepository:
             manual_takeover=task.manual_takeover,
             created_at=task.created_at,
             updated_at=task.updated_at,
+            project_name=task.project_name,
+            labels=list(task.labels),
+            estimate=task.estimate,
+            due_at=task.due_at,
         )
         self._session.add(record)
         await self._session.flush()

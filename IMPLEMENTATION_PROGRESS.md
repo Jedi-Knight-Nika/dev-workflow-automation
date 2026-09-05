@@ -820,3 +820,11 @@ This is the durable implementation ledger for the project. Update it whenever a 
 - Corrected queue reporting so the headline total is not truncated by the 25-row display limit, and added deterministic Team states for working, waiting externally, paused, failed, human-needed, and idle conditions.
 - Reordered backend Docker system-package layers so source-only rebuilds retain the expensive `apt` cache.
 - Validation: backend Ruff and strict mypy pass; all 203 backend tests pass. Frontend ESLint, Prettier, Svelte/TypeScript checking, all 23 unit tests, and production build pass.
+
+## 2026-09-06 — Manual task creation in Task Management
+
+- Added a dedicated `Create manual task` dialog to the Task Management board instead of coupling task intake to the operational dashboard.
+- Manual tasks support title, description, priority, reference key, repository, project, estimate, due date, normalized labels, and optional immediate AI-team assignment.
+- Creation is deliberately non-running while unassigned; selecting a Team uses the existing assignment workflow to create the Team-owned Intake job safely.
+- Added provider-neutral project, label, and estimate storage to Tasks through migration `0032_manual_task_properties`, preserving those fields independently of Linear/GitHub snapshots.
+- Manual properties are returned by task queries, displayed on board cards/details, and included in project/label filters alongside external-provider metadata.

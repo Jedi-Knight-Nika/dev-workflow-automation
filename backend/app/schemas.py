@@ -16,6 +16,10 @@ class TaskCreate(BaseModel):
     external_key: str | None = Field(default=None, max_length=100)
     enqueue_planning: bool = True
     repository_id: uuid.UUID | None = None
+    project_name: str | None = Field(default=None, max_length=255)
+    labels: list[str] = Field(default_factory=list, max_length=50)
+    estimate: float | None = Field(default=None, ge=0, le=1000000)
+    due_at: datetime | None = None
 
 
 class ExternalTaskRead(BaseModel):
@@ -62,6 +66,9 @@ class TaskRead(BaseModel):
     completed_at: datetime | None = None
     team_id: uuid.UUID | None = None
     team_name: str | None = None
+    project_name: str | None = None
+    labels: list[str] = Field(default_factory=list)
+    estimate: float | None = None
     created_at: datetime
     updated_at: datetime
 

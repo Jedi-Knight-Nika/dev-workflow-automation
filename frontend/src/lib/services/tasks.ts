@@ -8,6 +8,10 @@ export type CreateTaskInput = {
   repository_id: string | null;
   enqueue_planning: boolean;
   external_key?: string | null;
+  project_name?: string | null;
+  labels?: string[];
+  estimate?: number | null;
+  due_at?: string | null;
 };
 
 export type CreateJobInput = {

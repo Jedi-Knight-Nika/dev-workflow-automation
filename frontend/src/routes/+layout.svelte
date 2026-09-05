@@ -68,18 +68,23 @@
   <aside
     class="border-line bg-panel-alt relative hidden bg-[radial-gradient(circle_at_0%_0%,color-mix(in_srgb,var(--color-brand)_14%,transparent),transparent_45%),radial-gradient(circle_at_100%_100%,color-mix(in_srgb,var(--color-brand-2)_10%,transparent),transparent_50%)] md:sticky md:top-0 md:flex md:h-screen md:flex-col md:overflow-y-auto md:border-r"
   >
-    <div class="border-line flex h-[72px] items-center gap-3 border-b px-5">
-      <span
-        class="border-brand neon-glow relative flex size-9 shrink-0 overflow-hidden rounded-xl border motion-safe:animate-face-breathe"
+    <div class="border-line flex h-[72px] items-center border-b px-5">
+      <a
+        href={resolve('/')}
+        class="flex min-w-0 items-center gap-3 rounded-lg transition-opacity hover:opacity-80"
       >
-        <img src="/logo-face.png" alt="" class="absolute inset-0 h-full w-full object-cover" />
-      </span>
-      <div class="min-w-0">
-        <strong class="text-heading block truncate text-sm">{t('nav.brandName')}</strong><small
-          class="text-muted block text-[10px] tracking-widest uppercase"
-          >{t('nav.controlCenter')}</small
+        <span
+          class="border-brand neon-glow relative flex size-9 shrink-0 overflow-hidden rounded-xl border motion-safe:animate-face-breathe"
         >
-      </div>
+          <img src="/logo-face.png" alt="" class="absolute inset-0 h-full w-full object-cover" />
+        </span>
+        <div class="min-w-0">
+          <strong class="text-heading block truncate text-sm">{t('nav.brandName')}</strong><small
+            class="text-muted block text-[10px] tracking-widest uppercase"
+            >{t('nav.controlCenter')}</small
+          >
+        </div>
+      </a>
     </div>
     <nav class="flex-1 space-y-1 p-3">
       {#each NAV_ITEMS as item (item.href)}

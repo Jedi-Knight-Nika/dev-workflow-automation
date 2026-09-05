@@ -62,6 +62,19 @@ class SqlAlchemyTaskQueries:
             )
         for key, value in (("team", filters.team), ("project", filters.project)):
             if value:
+                if key == "project":
+                    statement = statement.where(
+                        or_(
+                            Task.project_name.ilike(f"%{value.strip()}%"),
+                            exists().where(
+                                ExternalTaskSnapshot.task_id == Task.id,
+                                ExternalTaskSnapshot.raw_payload[key]["name"]
+                                .as_string()
+                                .ilike(f"%{value.strip()}%"),
+                            ),
+                        )
+                    )
+                    continue
                 snapshot_filters.append(
                     ExternalTaskSnapshot.raw_payload[key]["name"]
                     .as_string()
@@ -77,9 +90,14 @@ class SqlAlchemyTaskQueries:
                 )
             )
         if filters.label:
-            snapshot_filters.append(
-                func.lower(ExternalTaskSnapshot.raw_payload.cast(String)).contains(
-                    filters.label.strip().lower()
+            label = filters.label.strip().lower()
+            statement = statement.where(
+                or_(
+                    func.lower(Task.labels.cast(String)).contains(label),
+                    exists().where(
+                        ExternalTaskSnapshot.task_id == Task.id,
+                        func.lower(ExternalTaskSnapshot.raw_payload.cast(String)).contains(label),
+                    ),
                 )
             )
         if snapshot_filters:
@@ -166,6 +184,9 @@ class SqlAlchemyTaskQueries:
                 record.completed_at,
                 record.team_id,
                 teams[record.team_id].name if record.team_id in teams else None,
+                record.project_name,
+                tuple(record.labels or []),
+                float(record.estimate) if record.estimate is not None else None,
             )
             for record in records
         ]

@@ -39,6 +39,10 @@ class Task:
     manual_takeover: bool
     created_at: datetime
     updated_at: datetime
+    project_name: str | None = None
+    labels: tuple[str, ...] = ()
+    estimate: float | None = None
+    due_at: datetime | None = None
 
     @classmethod
     def create(
@@ -49,6 +53,10 @@ class Task:
         priority: int = 3,
         external_key: str | None = None,
         repository_id: uuid.UUID | None = None,
+        project_name: str | None = None,
+        labels: tuple[str, ...] = (),
+        estimate: float | None = None,
+        due_at: datetime | None = None,
         now: datetime | None = None,
         task_id: uuid.UUID | None = None,
     ) -> "Task":
@@ -74,4 +82,8 @@ class Task:
             manual_takeover=False,
             created_at=created_at,
             updated_at=created_at,
+            project_name=project_name.strip() if project_name else None,
+            labels=tuple(dict.fromkeys(label.strip() for label in labels if label.strip())),
+            estimate=estimate,
+            due_at=due_at,
         )

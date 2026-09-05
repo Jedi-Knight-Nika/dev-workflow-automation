@@ -21,6 +21,9 @@ export type Task = {
   source?: ExternalTaskSource | null;
   team_id?: string | null;
   team_name?: string | null;
+  project_name?: string | null;
+  labels?: string[];
+  estimate?: number | null;
 };
 
 export type ExternalTaskSource = {

@@ -22,14 +22,18 @@
 <div
   class="border-line bg-panel-alt flex h-14 items-center justify-between border-b px-4 md:hidden"
 >
-  <div class="flex items-center gap-2">
+  <a
+    href={resolve('/')}
+    onclick={close}
+    class="flex items-center gap-2 rounded-lg transition-opacity hover:opacity-80"
+  >
     <span
       class="border-brand neon-glow relative flex size-7 shrink-0 overflow-hidden rounded-xl border motion-safe:animate-face-breathe"
     >
       <img src="/logo-face.png" alt="" class="absolute inset-0 h-full w-full object-cover" />
     </span>
     <strong class="text-heading text-sm">{t('nav.brandName')}</strong>
-  </div>
+  </a>
   <div class="flex items-center gap-2">
     <LanguageToggle />
     <ThemeToggle />
@@ -61,13 +65,19 @@
   <nav
     class="border-line bg-panel-alt fixed inset-y-0 left-0 z-50 flex w-64 flex-col gap-1 rounded-r-2xl border-r p-4 shadow-[8px_0_24px_rgba(0,0,0,.4)] motion-safe:animate-slide-in-left md:hidden"
   >
-    <div class="border-line mb-3 flex h-12 items-center gap-2 border-b pb-3">
-      <span
-        class="border-brand neon-glow relative flex size-8 shrink-0 overflow-hidden rounded-xl border motion-safe:animate-face-breathe"
+    <div class="border-line mb-3 flex h-12 items-center border-b pb-3">
+      <a
+        href={resolve('/')}
+        onclick={close}
+        class="flex items-center gap-2 rounded-lg transition-opacity hover:opacity-80"
       >
-        <img src="/logo-face.png" alt="" class="absolute inset-0 h-full w-full object-cover" />
-      </span>
-      <strong class="text-heading text-sm">{t('nav.brandName')}</strong>
+        <span
+          class="border-brand neon-glow relative flex size-8 shrink-0 overflow-hidden rounded-xl border motion-safe:animate-face-breathe"
+        >
+          <img src="/logo-face.png" alt="" class="absolute inset-0 h-full w-full object-cover" />
+        </span>
+        <strong class="text-heading text-sm">{t('nav.brandName')}</strong>
+      </a>
     </div>
     {#each NAV_ITEMS as item (item.href)}
       <a

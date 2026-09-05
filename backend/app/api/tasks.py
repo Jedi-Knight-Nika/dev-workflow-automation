@@ -87,6 +87,9 @@ def task_view_response(view: TaskView) -> TaskRead:
             "completed_at": view.completed_at,
             "team_id": view.team_id,
             "team_name": view.team_name,
+            "project_name": view.project_name,
+            "labels": view.labels,
+            "estimate": view.estimate,
         }
     )
 
@@ -154,6 +157,10 @@ async def create_task(
             priority=body.priority,
             repository_id=body.repository_id,
             enqueue_planning=body.enqueue_planning,
+            project_name=body.project_name,
+            labels=tuple(body.labels),
+            estimate=body.estimate,
+            due_at=body.due_at,
         )
     )
     return TaskRead.model_validate(task)

@@ -63,6 +63,9 @@ class TaskView:
     completed_at: datetime | None
     team_id: uuid.UUID | None = None
     team_name: str | None = None
+    project_name: str | None = None
+    labels: tuple[str, ...] = ()
+    estimate: float | None = None
 
 
 class TaskQueries(Protocol):

@@ -1,5 +1,6 @@
 import uuid
 from dataclasses import dataclass
+from datetime import datetime
 
 from app.application.ports import UnitOfWork
 from app.domain.tasks import Task
@@ -13,6 +14,10 @@ class CreateTaskCommand:
     external_key: str | None = None
     repository_id: uuid.UUID | None = None
     enqueue_planning: bool = True
+    project_name: str | None = None
+    labels: tuple[str, ...] = ()
+    estimate: float | None = None
+    due_at: datetime | None = None
 
 
 class CreateTask:
@@ -26,6 +31,10 @@ class CreateTask:
             priority=command.priority,
             external_key=command.external_key,
             repository_id=command.repository_id,
+            project_name=command.project_name,
+            labels=command.labels,
+            estimate=command.estimate,
+            due_at=command.due_at,
         )
         try:
             await self._unit_of_work.tasks.add(task)
