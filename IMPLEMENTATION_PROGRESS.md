@@ -737,3 +737,73 @@ This is the durable implementation ledger for the project. Update it whenever a 
 - Backend CI checks Ruff lint and formatting, strict MyPy, the complete Alembic migration chain against pgvector/PostgreSQL, and all tests.
 - Frontend CI checks ESLint, Prettier, Svelte/TypeScript typing, unit tests, and the production build.
 - Formatted three older migration files that previously caused the repository-wide Ruff format gate to fail; all backend CI commands now pass locally with 193 tests.
+
+## 2026-09-05 — Scheduled Linear task intake
+
+- Added Intake-node trigger configuration for webhook-only, scheduled polling, hybrid webhook-plus-reconciliation, or manual operation.
+- Added configurable polling intervals, discoverable Linear assignee selection, accepted Linear workflow-state filters, and visible reconciliation status/error/timestamp in the workflow graph inspector.
+- Added a clean application reconciliation port/use case and a PostgreSQL-backed Linear adapter. Due schedules are claimed with row locks, retrieve matching assigned issues, idempotently create or update internal tasks, and queue Intake work only for newly imported tasks.
+- Added durable external task snapshots containing the provider issue ID, identifier, assignee, state, synchronization timestamp, and complete provider payload for auditing and future field synchronization.
+- Extended webhook intake to honor graph-owned assignee/state filters when configured while retaining the existing label-based fallback for unconfigured workflows.
+- Added migration `0026_integration_schedules`; integration runtime status remains server-owned and is preserved across graph edits unless its schedule configuration changes.
+
+## 2026-09-05 — Provider-aware task management board
+
+- Replaced the flat task inventory with a responsive Linear-style workflow board covering backlog, active work, review, merge readiness, completed work, and attention-required states.
+- Added compact provider-aware task cards and a rich slide-over detail view with description, assignee, creator, team, project, repository, estimate, due/created/updated/completed dates, labels, source status/link, and auditable raw provider data.
+- Extended the clean task-query application port and PostgreSQL adapter with server-side title/ID, state, provider, repository, priority, created/updated/due date, assignee, team, project, label, and provider-state filtering plus deterministic sorting.
+- Persisted provider-neutral due, started, and completed timestamps on tasks and populated them from both scheduled Linear reconciliation and webhook deliveries through migration `0027_task_management_fields`.
+- Preserved the concurrently developed frontend localization and navigation work by limiting the task-board implementation to task-owned UI/service/type files.
+- Backend Ruff, strict MyPy, and all 194 tests pass. Frontend ESLint, Svelte/TypeScript checking, all 23 unit tests, and the production build pass.
+
+## 2026-09-05 — Backend transport dependency inversion
+
+- Removed concrete SQLAlchemy, encrypted-provider, GitHub, Linear, repository, workflow, and worker adapter types from HTTP route signatures; routes now depend exclusively on application-layer protocols wired by the bootstrap composition root.
+- Moved manual agent-knowledge list/create/delete operations out of the control-plane route's raw database session and behind a dedicated application use case, framework-free port, and SQLAlchemy adapter.
+- Added an enforced architecture test preventing HTTP routes from importing SQLAlchemy, database models/sessions, integration clients, or persistence adapters, complementing the existing domain and application boundary checks.
+- Preserved all endpoints and runtime behavior while establishing replaceable boundaries suitable for future team-scoped workflows, storage adapters, and queues.
+- Backend Ruff, strict MyPy, and all 196 tests pass.
+
+## 2026-09-06 — Multi-team execution foundation
+
+- Added durable named teams with enable/pause state, per-team task concurrency, project/repository scope, timestamps, safe archival, and token/cost/queue/completion metrics.
+- Added auditable task assignments with queue position, assignment reason, running/completed timestamps, safe reassignment checks, and a database-enforced terminal-state release invariant.
+- Added load-aware task dispatching for dashboard and Linear webhook/polling intake. Eligible teams are selected by repository scope and normalized active queue load.
+- Made workflow definitions team-owned while migrating the existing graph and all existing tasks into a backward-compatible Default team. Every new team receives an independent valid graph with collision-free node and edge identities.
+- Enforced sequential work by default (`max_concurrent_tasks = 1`) with PostgreSQL-safe job claims, while allowing independent teams to claim and execute tasks in parallel.
+- Workers now resolve provider, exact model, system prompt, and repository permission from the assigned team's workflow node, retaining the legacy agent configuration only as a compatibility fallback.
+- Added clean-architecture team domain objects, application ports/use cases, persistence adapters, REST CRUD/assignment/graph/model-validation APIs, and team-domain tests.
+- Added a Teams UI with queue/activity/token/cost visibility, team creation/editing/archival, concurrency policy, repository/RAG scope, and links into the existing drag-and-drop workflow editor in team context.
+- Migration `0028_teams` applied successfully to Dockerized PostgreSQL; the existing workflow was preserved at version 11 under Default team.
+- Backend Ruff, strict MyPy, and all 199 tests pass. Frontend ESLint, Svelte/TypeScript checking, all 23 unit tests, and production build pass.
+
+## 2026-09-06 — Team assignment and manual-task UX
+
+- Dashboard creation now produces explicitly manual, unassigned tasks without starting agents.
+- Task management displays the assigned AI team with a stable visual identity, filters by a specific team or Unassigned, and supports assignment, reassignment, and safe unassignment.
+- Assigning an idle manual task creates its Intake job; moving or removing it cancels stale queue ownership while refusing to interrupt a running agent.
+- External tracker teams remain separate from internal AI-team assignees in filters and task details.
+- Team cards and configuration actions were visually tightened, including clearer edit and save/cancel controls.
+- Default and newly created workflow graphs include Tester between Reviewer and Deliverer; migration `0029_default_team_tester` upgrades existing installations.
+
+## 2026-09-06 — Per-agent advanced execution controls
+
+- Added persisted node-level reasoning effort, optional output-token limit, capability-aware temperature, timeout, retry limit, review/fix-cycle limit, context depth, RAG retrieval depth, and optional fallback provider/model configuration.
+- Added an Advanced execution settings panel to every graph agent, with role-relevant controls and an Enabled switch.
+- Disabled nodes are visibly muted and excluded from runtime model resolution and integration intake queries.
+- Worker execution now applies output limits, temperature, reasoning effort, provider-request timeout, structured-output retries, context-size presets, and RAG retrieval-count presets.
+- Added migration `0030_agent_execution_settings` and validation bounds across the domain and API schemas.
+# 2026-09-06 — Reusable Role contracts and concrete team agents
+
+- Added a framework-free Role domain with normalized categories, capabilities, permission catalogues, validation, and role/job compatibility rules.
+- Added application ports/use cases plus SQLAlchemy adapters for listing, reading, creating, editing, cloning, disabling, and soft-deleting Roles.
+- Added immutable built-in templates for Orchestrator, Intake, Thinker, Executor, Reviewer, Tester, and Deliverer. Built-ins can be cloned but not silently mutated or removed.
+- Added concrete `ai_agents` records scoped to Teams and linked workflow nodes to those agents without breaking existing workflow behavior.
+- Added migration `0031_roles_and_agents`, including backfill of existing team workflow nodes into concrete agents.
+- Worker configuration now resolves platform instructions + current Role version + concrete Agent instructions/model settings, records that immutable identity/configuration on every worker run, and rejects incompatible Role capabilities.
+- Enforced Role permissions at runtime boundaries for repository reading, repository writes, test execution, and RAG retrieval. Agent overrides can remove inherited permissions but cannot grant permissions absent from the Role.
+- Added the `/api/v1/roles` management API and permission/capability catalogues.
+- Added a dedicated Roles UI with reusable templates, custom Role creation/editing/cloning/deletion, prompts, capabilities, permissions, allowed structured results, and advanced model defaults.
+- Added Roles to desktop/mobile navigation and English/Georgian navigation labels.
+- Verified migration `0030 -> 0031` against the live Docker PostgreSQL database; the Role API and `/roles` page both return successfully.
+- Validation: backend Ruff and mypy pass; backend test suite has 203 passing tests. Frontend lint, Prettier, Svelte typecheck, 23 unit tests, and production build pass.

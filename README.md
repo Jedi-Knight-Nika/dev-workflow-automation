@@ -1,5 +1,9 @@
 # Autonomous Engineering Worker
 
+<p align="center">
+  <img src="docs/logo.png" alt="Autonomous Engineering Worker logo" width="220" />
+</p>
+
 > Automate the nine-to-five job hell. As one wise man said, if they don't give you a salary raise, promote yourself by working less.
 
 An engineering workflow automation system that coordinates planning, code execution,
