@@ -49,6 +49,7 @@ class Settings(BaseSettings):
     github_app_private_key_file: Path | None = None
     github_app_return_url: str = "http://localhost:3000/repositories"
     linear_webhook_secret: str = ""
+    application_base_url: str = "http://localhost:3000"
 
     @model_validator(mode="after")
     def validate_production_secrets(self) -> "Settings":

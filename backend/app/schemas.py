@@ -40,6 +40,11 @@ class ApprovalResolution(BaseModel):
     scope: str = Field(default="ONCE", pattern="^(ONCE|TASK)$")
 
 
+class TelegramConfigure(BaseModel):
+    bot_token: SecretStr
+    webhook_base_url: str | None = Field(default=None, max_length=2000)
+
+
 class ExternalTaskRead(BaseModel):
     provider: str
     external_id: str

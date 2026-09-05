@@ -15,10 +15,13 @@ import psutil
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.application.ports.notifications import RaiseIncident
 from app.db.models import ApprovalRequest, ToolExecutionEvent
+from app.domain.notifications import NotificationSeverity
 from app.domain.security import ActionRequest, Decision, TeamExecutionPolicy
 from app.domain.security.paths import resolve_workspace_path
 from app.domain.security.policy import evaluate
+from app.infrastructure.persistence.notifications import SqlAlchemyNotificationStore
 
 SECRET = re.compile(r"(?i)(token|secret|password|api[_-]?key)(\s*[=:]\s*)([^\s]+)")
 PROTECTED_ENVIRONMENT_KEYS = frozenset({"HOME", "PATH", "USERPROFILE"})
@@ -235,6 +238,20 @@ class ToolGateway:
             )
             self._session.add(approval)
             await self._session.commit()
+            await SqlAlchemyNotificationStore(self._session).raise_incident(
+                RaiseIncident(
+                    fingerprint=f"approval_required:{approval.id}",
+                    type="APPROVAL_REQUIRED",
+                    severity=NotificationSeverity.ACTION_REQUIRED,
+                    title="Execution approval required",
+                    summary=decision.reason,
+                    team_id=self._context.team_id,
+                    task_id=self._context.task_id,
+                    job_id=self._context.job_id,
+                    action_target="/",
+                    metadata={"approval_id": str(approval.id), "tool": tool, "action": action},
+                )
+            )
             raise ToolNeedsApproval(approval.id)
 
     async def _audit(

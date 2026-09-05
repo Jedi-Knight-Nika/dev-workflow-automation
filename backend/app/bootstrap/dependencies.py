@@ -18,6 +18,7 @@ from app.infrastructure.persistence.dashboard_queries import SqlAlchemyDashboard
 from app.infrastructure.persistence.event_queries import SqlAlchemyEventQueries
 from app.infrastructure.persistence.execution_policy import SqlAlchemyExecutionPolicyStore
 from app.infrastructure.persistence.job_enqueueing import SqlAlchemyJobEnqueueWorkflow
+from app.infrastructure.persistence.notifications import SqlAlchemyNotificationStore
 from app.infrastructure.persistence.operations_queries import SqlAlchemyOperationsQueries
 from app.infrastructure.persistence.readiness import SqlAlchemyReadinessProbe
 from app.infrastructure.persistence.repository_management import (
@@ -120,6 +121,12 @@ def get_execution_policy_store(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> SqlAlchemyExecutionPolicyStore:
     return SqlAlchemyExecutionPolicyStore(session)
+
+
+def get_notification_store(
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> SqlAlchemyNotificationStore:
+    return SqlAlchemyNotificationStore(session)
 
 
 def get_telemetry_collector() -> PsutilHostTelemetryCollector:
