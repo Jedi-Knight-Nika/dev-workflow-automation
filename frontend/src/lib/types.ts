@@ -120,6 +120,14 @@ export type WorkflowNode = {
   enabled: boolean;
   activation_policy: string;
   batch_window_seconds: number;
+  integration_ids: string[];
+  repository_ids: string[];
+  provider: string;
+  model: string;
+  system_prompt: string;
+  model_validation_status: string;
+  model_validation_message: string | null;
+  model_validated_at: string | null;
 };
 
 export type WorkflowEdge = {

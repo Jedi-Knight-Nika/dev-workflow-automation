@@ -1,10 +1,14 @@
 from dataclasses import dataclass
+from datetime import datetime
 
 SYSTEM_ROLES = frozenset({"ORCHESTRATOR", "DELIVERER"})
 AGENT_ROLES = frozenset({"INTAKE", "THINKER", "EXECUTOR", "REVIEWER", "TESTER"})
 ALLOWED_ROLES = SYSTEM_ROLES | AGENT_ROLES
 ALLOWED_OUTCOMES = frozenset({"success", "failure", "changes_requested", "always"})
 ALLOWED_ACTIVATION_POLICIES = frozenset({"any", "all", "required", "manual", "batch"})
+ALLOWED_MODEL_STATUSES = frozenset(
+    {"NOT_CONFIGURED", "UNVERIFIED", "AVAILABLE", "MODEL_NOT_FOUND", "UNAUTHORIZED", "ERROR"}
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -17,6 +21,14 @@ class WorkflowNodeData:
     enabled: bool = True
     activation_policy: str = "any"
     batch_window_seconds: int = 0
+    integration_ids: tuple[str, ...] = ()
+    repository_ids: tuple[str, ...] = ()
+    provider: str = "openai"
+    model: str = ""
+    system_prompt: str = ""
+    model_validation_status: str = "NOT_CONFIGURED"
+    model_validation_message: str | None = None
+    model_validated_at: datetime | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,6 +64,20 @@ def validate_workflow_graph(graph: WorkflowGraphData) -> None:
         if roles.count(protected) != 1:
             raise ValueError(f"Workflow requires exactly one {protected} node")
     for node in graph.nodes:
+        if not node.label.strip():
+            raise ValueError("Workflow node nickname cannot be blank")
+        if len(node.integration_ids) != len(set(node.integration_ids)):
+            raise ValueError("Workflow node integrations must be unique")
+        if len(node.repository_ids) != len(set(node.repository_ids)):
+            raise ValueError("Workflow node repositories must be unique")
+        if node.provider not in {"openai", "anthropic", "google"}:
+            raise ValueError(f"Unsupported AI provider: {node.provider}")
+        if len(node.model) > 255:
+            raise ValueError("Workflow node model ID is too long")
+        if len(node.system_prompt) > 100_000:
+            raise ValueError("Workflow node system prompt is too long")
+        if node.model_validation_status not in ALLOWED_MODEL_STATUSES:
+            raise ValueError("Unsupported model validation status")
         if node.activation_policy not in ALLOWED_ACTIVATION_POLICIES:
             raise ValueError(f"Unsupported activation policy: {node.activation_policy}")
         if not 0 <= node.batch_window_seconds <= 300:

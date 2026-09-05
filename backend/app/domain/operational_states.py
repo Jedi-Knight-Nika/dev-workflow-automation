@@ -13,11 +13,13 @@ class JobState(StrEnum):
 
 
 class JobRole(StrEnum):
+    ORCHESTRATOR = "ORCHESTRATOR"
     INTAKE = "INTAKE"
     THINKER = "THINKER"
     EXECUTOR = "EXECUTOR"
     REVIEWER = "REVIEWER"
     TESTER = "TESTER"
+    DELIVERER = "DELIVERER"
 
 
 class IntegrationStatus(StrEnum):

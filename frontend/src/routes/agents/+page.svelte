@@ -17,7 +17,16 @@
     saveAgent,
     saveWorkflow
   } from '$lib/services/agents';
-  import type { AgentConfig, AgentKnowledge, ProviderCatalog, WorkflowGraph } from '$lib/types';
+  import { listIntegrations } from '$lib/services/integrations';
+  import { listRepositories } from '$lib/services/repositories';
+  import type {
+    AgentConfig,
+    AgentKnowledge,
+    Integration,
+    ProviderCatalog,
+    Repository,
+    WorkflowGraph
+  } from '$lib/types';
   let agents: AgentConfig[] = [];
   let error = '';
   let saved = '';
@@ -29,6 +38,8 @@
   let knowledgeContent = '';
   let preparingKnowledge = false;
   let workflow: WorkflowGraph | null = null;
+  let integrations: Integration[] = [];
+  let repositories: Repository[] = [];
   let selectedNodeId = '';
   let consoleAgent: AgentConfig | null = null;
   let inspectorTab = 'instructions';
@@ -57,7 +68,12 @@
     ).checked;
   }
   async function load() {
-    [agents, workflow] = await Promise.all([listAgents(), getWorkflow()]);
+    [agents, workflow, integrations, repositories] = await Promise.all([
+      listAgents(),
+      getWorkflow(),
+      listIntegrations(),
+      listRepositories()
+    ]);
     const entries = await Promise.all(
       agents.map(async (agent) => [agent.role, await listAgentKnowledge(agent.role)] as const)
     );
@@ -152,6 +168,8 @@
     <WorkflowCanvas
       {workflow}
       {agents}
+      {integrations}
+      {repositories}
       {selectedRole}
       onselect={(role, nodeId) => {
         selectedRole = role;

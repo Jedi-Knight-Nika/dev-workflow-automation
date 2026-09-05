@@ -202,6 +202,14 @@ class WorkflowNode(Base):
     enabled: Mapped[bool] = mapped_column(default=True)
     activation_policy: Mapped[str] = mapped_column(String(20), default="any")
     batch_window_seconds: Mapped[int] = mapped_column(Integer, default=0)
+    integration_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
+    repository_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
+    provider: Mapped[str] = mapped_column(String(50), default="openai")
+    model: Mapped[str] = mapped_column(String(255), default="")
+    system_prompt: Mapped[str] = mapped_column(Text, default="")
+    model_validation_status: Mapped[str] = mapped_column(String(30), default="NOT_CONFIGURED")
+    model_validation_message: Mapped[str | None] = mapped_column(Text)
+    model_validated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class WorkflowEdge(Base):

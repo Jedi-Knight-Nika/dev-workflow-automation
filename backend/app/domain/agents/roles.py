@@ -2,8 +2,10 @@ from enum import StrEnum
 
 
 class AgentRole(StrEnum):
+    ORCHESTRATOR = "ORCHESTRATOR"
     INTAKE = "INTAKE"
     THINKER = "THINKER"
     EXECUTOR = "EXECUTOR"
     REVIEWER = "REVIEWER"
     TESTER = "TESTER"
+    DELIVERER = "DELIVERER"

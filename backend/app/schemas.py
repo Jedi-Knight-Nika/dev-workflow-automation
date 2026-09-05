@@ -185,6 +185,8 @@ class AgentKnowledgeRead(BaseModel):
 
 
 class WorkflowNodeRead(BaseModel):
+    model_config = ConfigDict(protected_namespaces=("model_dump",))
+
     id: uuid.UUID
     role: str
     label: str = Field(min_length=1, max_length=100)
@@ -193,6 +195,21 @@ class WorkflowNodeRead(BaseModel):
     enabled: bool = True
     activation_policy: str = "any"
     batch_window_seconds: int = Field(default=0, ge=0, le=300)
+    integration_ids: list[uuid.UUID] = Field(default_factory=list)
+    repository_ids: list[uuid.UUID] = Field(default_factory=list)
+    provider: str = Field(default="openai", pattern="^(openai|anthropic|google)$")
+    model: str = Field(default="", max_length=255)
+    system_prompt: str = Field(default="", max_length=100_000)
+    model_validation_status: str = "NOT_CONFIGURED"
+    model_validation_message: str | None = None
+    model_validated_at: datetime | None = None
+
+
+class WorkflowNodeModelValidationRead(BaseModel):
+    node_id: uuid.UUID
+    status: str
+    message: str | None = None
+    validated_at: datetime
 
 
 class WorkflowEdgeRead(BaseModel):

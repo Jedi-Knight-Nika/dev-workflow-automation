@@ -1,6 +1,8 @@
+import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.application.ports.model_validation import ModelValidationResult
 from app.application.ports.provider_catalog import (
     ProviderCatalogView,
     ProviderModelView,
@@ -34,3 +36,22 @@ class EncryptedProviderCatalogWorkflow:
             provider.capabilities(),
             [ProviderModelView(model.id, model.display_name) for model in models],
         )
+
+    async def validate(self, provider_name: str, model: str) -> ModelValidationResult:
+        try:
+            catalog = await self.discover(provider_name)
+        except ProviderNotConfigured as exc:
+            return ModelValidationResult("UNAUTHORIZED", str(exc))
+        except ProviderNotSupported as exc:
+            return ModelValidationResult("ERROR", str(exc))
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code in {401, 403}:
+                return ModelValidationResult("UNAUTHORIZED", "Provider rejected this credential")
+            return ModelValidationResult(
+                "ERROR", f"Provider returned HTTP {exc.response.status_code}"
+            )
+        except httpx.HTTPError as exc:
+            return ModelValidationResult("ERROR", f"Provider check failed: {exc}")
+        if any(item.id == model for item in catalog.models):
+            return ModelValidationResult("AVAILABLE", "Model is available for this credential")
+        return ModelValidationResult("MODEL_NOT_FOUND", "Provider did not return this model ID")

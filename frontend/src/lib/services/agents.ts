@@ -48,3 +48,12 @@ export function saveWorkflow(workflow: WorkflowGraph): Promise<WorkflowGraph> {
     body: JSON.stringify(workflow)
   });
 }
+
+export function validateWorkflowNodeModel(nodeId: string): Promise<{
+  node_id: string;
+  status: string;
+  message: string | null;
+  validated_at: string;
+}> {
+  return api(`/workflow/nodes/${nodeId}/validate-model`, { method: 'POST' });
+}

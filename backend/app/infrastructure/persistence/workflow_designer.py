@@ -1,9 +1,11 @@
 import uuid
+from datetime import datetime
 from itertools import pairwise
 
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.application.ports.model_validation import ModelValidationResult
 from app.application.ports.workflow_designer import WorkflowVersionConflict
 from app.db.models import WorkflowDefinition, WorkflowEdge, WorkflowNode
 from app.domain.workflows import WorkflowEdgeData, WorkflowGraphData, WorkflowNodeData
@@ -69,6 +71,23 @@ class SqlAlchemyWorkflowDesigner:
         await self._session.commit()
         return WorkflowGraphData(definition.version, graph.nodes, graph.edges)
 
+    async def node_model(self, node_id: str) -> tuple[str, str] | None:
+        node = await self._session.get(WorkflowNode, uuid.UUID(node_id))
+        if node is None or node.workflow_id != WORKFLOW_ID:
+            return None
+        return node.provider, node.model
+
+    async def record_model_validation(
+        self, node_id: str, result: ModelValidationResult, validated_at: datetime
+    ) -> None:
+        node = await self._session.get(WorkflowNode, uuid.UUID(node_id))
+        if node is None or node.workflow_id != WORKFLOW_ID:
+            raise ValueError("Workflow node not found")
+        node.model_validation_status = result.status
+        node.model_validation_message = result.message
+        node.model_validated_at = validated_at
+        await self._session.commit()
+
     async def _persist_new(self, graph: WorkflowGraphData) -> None:
         self._session.add(WorkflowDefinition(id=WORKFLOW_ID, version=graph.version))
         await self._session.flush()
@@ -87,6 +106,14 @@ class SqlAlchemyWorkflowDesigner:
                 enabled=node.enabled,
                 activation_policy=node.activation_policy,
                 batch_window_seconds=node.batch_window_seconds,
+                integration_ids=list(node.integration_ids),
+                repository_ids=list(node.repository_ids),
+                provider=node.provider,
+                model=node.model,
+                system_prompt=node.system_prompt,
+                model_validation_status=node.model_validation_status,
+                model_validation_message=node.model_validation_message,
+                model_validated_at=node.model_validated_at,
             )
             for node in graph.nodes
         )
@@ -130,6 +157,14 @@ class SqlAlchemyWorkflowDesigner:
                     node.enabled,
                     node.activation_policy,
                     node.batch_window_seconds,
+                    tuple(node.integration_ids or []),
+                    tuple(node.repository_ids or []),
+                    node.provider,
+                    node.model,
+                    node.system_prompt,
+                    node.model_validation_status,
+                    node.model_validation_message,
+                    node.model_validated_at,
                 )
                 for node in nodes
             ),

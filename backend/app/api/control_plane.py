@@ -28,6 +28,7 @@ from app.application.ports.repository_management import (
 from app.application.ports.workflow_designer import WorkflowVersionConflict
 from app.application.query_workers import QueryWorkers
 from app.application.search_knowledge import SearchKnowledge
+from app.application.validate_node_model import ValidateNodeModel
 from app.bootstrap.dependencies import (
     get_agent_configuration_workflow,
     get_github_installation_workflow,
@@ -79,6 +80,7 @@ from app.schemas import (
     WebhookHealthRead,
     WorkerNodeRead,
     WorkflowGraphRead,
+    WorkflowNodeModelValidationRead,
 )
 
 router = APIRouter(tags=["control-plane"])
@@ -408,6 +410,14 @@ async def replace_workflow(
                 node.enabled,
                 node.activation_policy,
                 node.batch_window_seconds,
+                tuple(str(item) for item in node.integration_ids),
+                tuple(str(item) for item in node.repository_ids),
+                node.provider,
+                node.model,
+                node.system_prompt,
+                node.model_validation_status,
+                node.model_validation_message,
+                node.model_validated_at,
             )
             for node in body.nodes
         ),
@@ -428,6 +438,22 @@ async def replace_workflow(
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post(
+    "/workflow/nodes/{node_id}/validate-model",
+    response_model=WorkflowNodeModelValidationRead,
+)
+async def validate_workflow_node_model(
+    node_id: uuid.UUID,
+    designer: SqlAlchemyWorkflowDesigner = Depends(get_workflow_designer),
+    gateway: EncryptedProviderCatalogWorkflow = Depends(get_provider_catalog_workflow),
+) -> WorkflowNodeModelValidationRead:
+    try:
+        result = await ValidateNodeModel(designer, gateway).execute(str(node_id))
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return WorkflowNodeModelValidationRead.model_validate(result, from_attributes=True)
 
 
 from app.application.manage_github_installation import ManageGitHubInstallation
