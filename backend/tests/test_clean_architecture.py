@@ -158,16 +158,16 @@ def test_legacy_service_namespace_stays_empty() -> None:
 
 
 def test_transport_schemas_do_not_import_persistence_models() -> None:
-    schemas_path = Path(__file__).parents[1] / "app" / "schemas.py"
-    tree = ast.parse(schemas_path.read_text())
-    imports = [
-        alias.name
-        for node in ast.walk(tree)
-        if isinstance(node, (ast.Import, ast.ImportFrom))
-        for alias in node.names
-    ]
-
-    assert not any(name == "app.db" or name.startswith("app.db.") for name in imports)
+    schemas_root = Path(__file__).parents[1] / "app" / "schemas"
+    for schema_path in schemas_root.rglob("*.py"):
+        tree = ast.parse(schema_path.read_text())
+        imports = [
+            alias.name
+            for node in ast.walk(tree)
+            if isinstance(node, (ast.Import, ast.ImportFrom))
+            for alias in node.names
+        ]
+        assert not any(name == "app.db" or name.startswith("app.db.") for name in imports)
 
 
 def test_http_routes_depend_on_application_ports_not_persistence_adapters() -> None:
