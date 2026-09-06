@@ -1,5 +1,12 @@
 import { api } from '$lib/api';
-import type { AgentConfig, AgentKnowledge, ProviderCatalog, WorkflowGraph } from '$lib/types';
+import type {
+  AgentConfig,
+  AgentKnowledge,
+  AgentRuntimeView,
+  ModelCapabilities,
+  ProviderCatalog,
+  WorkflowGraph
+} from '$lib/types';
 
 export type SaveAgentInput = {
   enabled: boolean;
@@ -47,6 +54,30 @@ export function saveWorkflow(workflow: WorkflowGraph, teamId?: string): Promise<
     method: 'PUT',
     body: JSON.stringify(workflow)
   });
+}
+
+export function getAgentRuntime(agentId: string): Promise<AgentRuntimeView> {
+  return api<AgentRuntimeView>(`/agent-runtime/${agentId}`);
+}
+
+export function updateAgentRuntime(
+  agentId: string,
+  overrides: Record<string, unknown>
+): Promise<AgentRuntimeView> {
+  return api<AgentRuntimeView>(`/agent-runtime/${agentId}/overrides`, {
+    method: 'PUT',
+    body: JSON.stringify(overrides)
+  });
+}
+
+export function resetAgentRuntime(agentId: string): Promise<AgentRuntimeView> {
+  return api<AgentRuntimeView>(`/agent-runtime/${agentId}/overrides`, { method: 'DELETE' });
+}
+
+export function getModelCapabilities(provider: string, model: string): Promise<ModelCapabilities> {
+  return api<ModelCapabilities>(
+    `/ai/providers/${encodeURIComponent(provider)}/models/${encodeURIComponent(model)}/capabilities`
+  );
 }
 
 export function validateWorkflowNodeModel(

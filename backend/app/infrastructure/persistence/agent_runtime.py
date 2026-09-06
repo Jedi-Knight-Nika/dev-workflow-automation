@@ -80,6 +80,7 @@ class SqlAlchemyAgentRuntimeStore:
             "role_name": role.name,
             "config_version": agent.config_version,
             "overrides": dict(agent.runtime_overrides or {}),
+            "override_policy": dict(role.override_policy or {}),
             "effective": runtime.snapshot(),
             "effective_hash": runtime.fingerprint(),
             "sources": {

@@ -638,6 +638,46 @@ export type RoleRuntimeProfile = {
   structured_output_mode: 'REQUIRED' | 'PREFERRED' | 'NONE';
 };
 
+export type AgentRuntimeView = {
+  agent_id: string;
+  role_id: string;
+  role_name: string;
+  config_version: number;
+  overrides: Record<string, unknown>;
+  override_policy: Record<string, string>;
+  effective: {
+    provider: string;
+    model: string;
+    reasoning_level: string;
+    max_output_tokens: number;
+    temperature: number | null;
+    context_strategy: string;
+    max_tool_calls: number;
+    job_timeout_seconds: number;
+    max_job_attempts: number;
+    max_model_turns: number;
+    structured_output_mode: string;
+    capability_version: string;
+    strategy_version: string;
+  };
+  effective_hash: string;
+  sources: Record<string, 'ROLE' | 'AGENT'>;
+};
+
+export type ModelCapabilities = {
+  provider: string;
+  model: string;
+  context_window: number | null;
+  max_output_tokens: number | null;
+  reasoning_supported: boolean;
+  reasoning_levels: string[];
+  temperature_supported: boolean;
+  structured_output_supported: boolean;
+  tools_supported: boolean;
+  parallel_tool_calls_supported: boolean;
+  capability_version: string;
+};
+
 export type TaskAssignment = {
   id: string;
   task_id: string;

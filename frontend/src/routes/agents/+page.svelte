@@ -8,16 +8,21 @@
   import TextArea from '$lib/components/TextArea.svelte';
   import Skeleton from '$lib/components/Skeleton.svelte';
   import TerminalConsole from '$lib/components/workflow/TerminalConsole.svelte';
+  import AgentRuntimePanel from '$lib/components/workflow/AgentRuntimePanel.svelte';
   import type { default as WorkflowCanvasComponent } from '$lib/components/workflow/WorkflowCanvas.svelte';
   import {
     addAgentKnowledge,
     deleteAgentKnowledge,
     discoverProviderModels,
+    getAgentRuntime,
+    getModelCapabilities,
     getWorkflow,
     listAgentKnowledge,
     listAgents,
     saveAgent,
-    saveWorkflow
+    saveWorkflow,
+    resetAgentRuntime,
+    updateAgentRuntime
   } from '$lib/services/agents';
   import { listIntegrations } from '$lib/services/integrations';
   import { listRepositories } from '$lib/services/repositories';
@@ -25,7 +30,9 @@
   import type {
     AgentConfig,
     AgentKnowledge,
+    AgentRuntimeView,
     Integration,
+    ModelCapabilities,
     ProviderCatalog,
     Repository,
     WorkflowGraph
@@ -46,6 +53,9 @@
   let selectedNodeId = '';
   let consoleAgent: AgentConfig | null = null;
   let inspectorTab = 'instructions';
+  let agentRuntime: AgentRuntimeView | null = null;
+  let modelCapabilities: ModelCapabilities | null = null;
+  let runtimeLoading = false;
   let WorkflowCanvas: typeof WorkflowCanvasComponent | null = null;
   const number = new Intl.NumberFormat();
   const teamId = page.url.searchParams.get('team') || undefined;
@@ -98,6 +108,48 @@
     } catch (cause) {
       error = String(cause);
       throw cause;
+    }
+  }
+  async function selectAgent(role: string, nodeId: string) {
+    selectedRole = role;
+    selectedNodeId = nodeId;
+    agentRuntime = null;
+    modelCapabilities = null;
+    const agentId = workflow?.nodes.find((node) => node.id === nodeId)?.agent_id;
+    if (!agentId) return;
+    runtimeLoading = true;
+    try {
+      agentRuntime = await getAgentRuntime(agentId);
+      modelCapabilities = await getModelCapabilities(
+        agentRuntime.effective.provider,
+        agentRuntime.effective.model
+      );
+    } catch (cause) {
+      error = String(cause);
+    } finally {
+      runtimeLoading = false;
+    }
+  }
+  async function saveRuntime(overrides: Record<string, unknown>) {
+    if (!agentRuntime) return;
+    error = '';
+    try {
+      agentRuntime = await updateAgentRuntime(agentRuntime.agent_id, overrides);
+      saved = 'RUNTIME';
+      setTimeout(() => (saved = ''), 1500);
+    } catch (cause) {
+      error = String(cause);
+    }
+  }
+  async function resetRuntime() {
+    if (!agentRuntime) return;
+    error = '';
+    try {
+      agentRuntime = await resetAgentRuntime(agentRuntime.agent_id);
+      saved = 'RUNTIME';
+      setTimeout(() => (saved = ''), 1500);
+    } catch (cause) {
+      error = String(cause);
     }
   }
   async function prepareKnowledge() {
@@ -185,8 +237,7 @@
       {selectedRole}
       {teamId}
       onSelect={(role, nodeId) => {
-        selectedRole = role;
-        selectedNodeId = nodeId;
+        void selectAgent(role, nodeId);
       }}
       onConsole={(role, nodeId) => {
         selectedNodeId = nodeId;
@@ -279,7 +330,7 @@
       </div>
 
       <nav class="inspector-tabs" aria-label="Agent settings">
-        {#each [['instructions', t('workflow.tabInstructions')], ['model', t('workflow.tabModel')], ['knowledge', t('workflow.tabKnowledge')]] as tab (tab[0])}
+        {#each [['instructions', t('workflow.tabInstructions')], ['model', t('workflow.tabModel')], ['runtime', 'Runtime'], ['knowledge', t('workflow.tabKnowledge')]] as tab (tab[0])}
           <button
             class:active={inspectorTab === tab[0]}
             type="button"
@@ -394,6 +445,26 @@
                 })}{:else}{t('workflow.noModelRunRecorded')}{/if}
             </p>
           </div>
+        {:else if inspectorTab === 'runtime'}
+          {#if runtimeLoading}
+            <div class="mx-auto max-w-4xl space-y-3" aria-busy="true">
+              <Skeleton class="h-36 w-full" />
+              <Skeleton class="h-12 w-full" />
+            </div>
+          {:else if agentRuntime}
+            {#key agentRuntime.agent_id}
+              <AgentRuntimePanel
+                runtime={agentRuntime}
+                capabilities={modelCapabilities}
+                onSave={saveRuntime}
+                onReset={resetRuntime}
+              />
+            {/key}
+          {:else}
+            <p class="text-muted mx-auto max-w-4xl text-sm">
+              Select a concrete workflow Agent to configure runtime inheritance.
+            </p>
+          {/if}
         {:else}
           <div class="mx-auto grid max-w-5xl gap-5 lg:grid-cols-[0.8fr_1.2fr]">
             <div class="setting-card h-fit">
