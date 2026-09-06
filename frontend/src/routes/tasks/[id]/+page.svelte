@@ -11,9 +11,11 @@
   import ValidationList from '$lib/components/task-detail/ValidationList.svelte';
   import FindingList from '$lib/components/task-detail/FindingList.svelte';
   import TaskMemoryPanel from '$lib/components/task-detail/TaskMemoryPanel.svelte';
+  import GenerationProgress from '$lib/components/task-detail/GenerationProgress.svelte';
   import { API_URL } from '$lib/api';
   import { debounce } from '$lib/debounce';
   import { planFromJobs, latestThinkerJob } from '$lib/task-plan';
+  import { taskGenerationProgress } from '$lib/task-generation';
   import {
     getTask,
     listTaskJobs,
@@ -49,8 +51,10 @@
   let error = $state('');
   let preparing = $state(false);
   let commanding = $state(false);
+  let eventStreamConnected = $state(false);
   let latestThinker = $derived(latestThinkerJob(jobs));
   let latestPlan = $derived(planFromJobs(jobs));
+  let generationProgress = $derived(taskGenerationProgress(events, jobs));
   async function refresh() {
     const taskId = page.params.id ?? '';
     [task, jobs, events, validations, findings, memory, checkpoints] = await Promise.all([
@@ -69,13 +73,32 @@
     });
   }, 350);
 
+  function handleStreamUpdate(event: MessageEvent<string>) {
+    try {
+      const message = JSON.parse(event.data) as { task_id?: unknown };
+      if (message.task_id !== page.params.id) return;
+    } catch {
+      return;
+    }
+    refreshOnUpdate();
+  }
+
   onMount(() => {
     void refresh().catch((cause) => {
       error = String(cause);
     });
     const stream = new EventSource(`${API_URL}/api/v1/events/stream`);
-    stream.addEventListener('update', refreshOnUpdate);
-    return () => stream.close();
+    stream.onopen = () => {
+      eventStreamConnected = true;
+    };
+    stream.onerror = () => {
+      eventStreamConnected = false;
+    };
+    stream.addEventListener('update', handleStreamUpdate);
+    return () => {
+      eventStreamConnected = false;
+      stream.close();
+    };
   });
   async function prepareWorkspace() {
     if (!task) return;
@@ -180,6 +203,7 @@
       onMergePullRequest={mergePullRequest}
       onRetryLinearSync={retryLinearSync}
     />
+    <GenerationProgress progress={generationProgress} connected={eventStreamConnected} />
     <TaskWorkspacePanel {task} {preparing} onPrepareWorkspace={prepareWorkspace} />
     <TaskPlanPanel {latestPlan} {latestThinker} />
     <TaskMemoryPanel {memory} {checkpoints} />

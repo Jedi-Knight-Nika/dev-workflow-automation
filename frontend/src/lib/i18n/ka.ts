@@ -428,6 +428,8 @@ export const ka: Record<TranslationKey, string> = {
   'taskDetail.retryScheduledFor': 'გამეორება დაგეგმილია',
   'taskDetail.timeline': 'ქრონოლოგია',
   'taskDetail.noEventsRecorded': 'მოვლენები არ დაფიქსირებულა.',
+  'taskDetail.aiGenerating': 'AI პასუხი მუშავდება',
+  'taskDetail.charactersReceived': 'მიღებულია {count} სიმბოლო',
   'taskDetail.githubValidation': 'GitHub-ის ვალიდაცია',
   'taskDetail.openEvidence': 'მტკიცებულების ნახვა',
   'taskDetail.noValidationEvidence': 'შემოწმების ან განხილვის მტკიცებულება არ მიღებულა.',
