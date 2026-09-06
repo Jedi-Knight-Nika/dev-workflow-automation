@@ -17,8 +17,29 @@ from app.db.models import (
     WorkflowRevision,
 )
 from app.domain.workflows import WorkflowEdgeData, WorkflowGraphData, WorkflowNodeData
+from app.infrastructure.persistence.agent_runtime import resolve_agent_runtime_config
 
 WORKFLOW_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
+
+
+def _runtime_overrides(node: WorkflowNodeData) -> dict[str, object]:
+    overrides: dict[str, object] = {}
+    if node.reasoning_effort != "default":
+        overrides["reasoning_level"] = node.reasoning_effort.upper()
+    if node.max_output_tokens is not None:
+        overrides["max_output_tokens"] = node.max_output_tokens
+    if node.temperature is not None:
+        overrides["temperature"] = float(node.temperature)
+    return overrides
+
+
+def _validate_agent_runtime(node: WorkflowNodeData, agent: AIAgent, role: Role) -> None:
+    if not node.enabled or not (agent.model or role.default_model):
+        return
+    try:
+        resolve_agent_runtime_config(agent, role)
+    except ValueError as exc:
+        raise ValueError(f"Agent {agent.name} runtime is invalid: {exc}") from exc
 
 
 def default_graph(team_id: uuid.UUID = WORKFLOW_ID) -> WorkflowGraphData:
@@ -213,6 +234,7 @@ class SqlAlchemyWorkflowDesigner:
                 await self._session.scalars(select(Role).where(Role.archived_at.is_(None)))
             ).all()
         }
+        roles_by_id = {item.id: item for item in roles.values()}
         existing_agents = {
             item.id: item
             for item in (
@@ -222,6 +244,7 @@ class SqlAlchemyWorkflowDesigner:
         agent_ids: dict[str, uuid.UUID | None] = {}
         for node in graph.nodes:
             agent = existing_agents.get(uuid.UUID(node.agent_id)) if node.agent_id else None
+            runtime_overrides = _runtime_overrides(node)
             if agent is None and node.role in roles:
                 agent = AIAgent(
                     team_id=self._team_id,
@@ -230,6 +253,7 @@ class SqlAlchemyWorkflowDesigner:
                     provider=node.provider or None,
                     model=node.model or None,
                     custom_instructions=node.system_prompt,
+                    runtime_overrides=runtime_overrides,
                     enabled=node.enabled,
                 )
                 self._session.add(agent)
@@ -240,16 +264,14 @@ class SqlAlchemyWorkflowDesigner:
                 agent.model = node.model or None
                 agent.custom_instructions = node.system_prompt
                 agent.enabled = node.enabled
-                runtime_overrides: dict[str, object] = {}
-                if node.reasoning_effort != "default":
-                    runtime_overrides["reasoning_level"] = node.reasoning_effort.upper()
-                if node.max_output_tokens is not None:
-                    runtime_overrides["max_output_tokens"] = node.max_output_tokens
-                if node.temperature is not None:
-                    runtime_overrides["temperature"] = float(node.temperature)
                 if agent.runtime_overrides != runtime_overrides:
                     agent.runtime_overrides = runtime_overrides
                     agent.config_version += 1
+            if agent is not None and node.enabled:
+                role = roles_by_id.get(agent.role_id)
+                if role is None:
+                    raise ValueError(f"Agent {agent.name} has no active Role")
+                _validate_agent_runtime(node, agent, role)
             agent_ids[node.id] = agent.id if agent else None
         self._session.add_all(
             WorkflowNode(
