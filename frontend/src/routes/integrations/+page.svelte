@@ -309,9 +309,8 @@
           {group.label}
         </h2>
         <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {#each providers.filter((provider) => provider.type === group.type) as provider, index (provider.name)}<article
-              class="border-line bg-panel rounded-xl border p-5 card-hover motion-safe:animate-fade-in-up"
-              style="animation-delay: {index * 40}ms"
+          {#each providers.filter((provider) => provider.type === group.type) as provider (provider.name)}<article
+              class="border-line bg-panel rounded-xl border p-5 transition-colors hover:border-brand"
             >
               <p class="text-muted font-mono text-[10px] tracking-widest uppercase">
                 {provider.type.replaceAll('_', ' ')}
