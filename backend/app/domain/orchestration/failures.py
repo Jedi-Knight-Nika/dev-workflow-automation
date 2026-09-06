@@ -141,12 +141,14 @@ def classify_failure_details(
     if failure_class in {
         FailureClass.PROVIDER_AUTH_ERROR,
         FailureClass.MODEL_UNAVAILABLE,
+        FailureClass.MODEL_POLICY_ERROR,
         FailureClass.GITHUB_AUTH_ERROR,
         FailureClass.LINEAR_AUTH_ERROR,
     }:
         provider_failure = failure_class in {
             FailureClass.PROVIDER_AUTH_ERROR,
             FailureClass.MODEL_UNAVAILABLE,
+            FailureClass.MODEL_POLICY_ERROR,
         }
         return FailureClassification(
             failure_class,
@@ -273,6 +275,8 @@ def _class_from_text(value: str) -> FailureClass:
         token in value for token in ("MODEL_NOT_FOUND", "MODEL UNAVAILABLE", "DEPRECATED MODEL")
     ):
         return FailureClass.MODEL_UNAVAILABLE
+    if "MODEL_POLICY_ERROR" in value or "UNSUPPORTED_PARAMETER" in value:
+        return FailureClass.MODEL_POLICY_ERROR
     if any(token in value for token in ("CONTEXT_LENGTH", "CONTEXT LIMIT", "TOO MANY TOKENS")):
         return FailureClass.MODEL_CONTEXT_LIMIT
     if any(token in value for token in ("429", "RATE_LIMIT", "RATE LIMIT")):

@@ -126,3 +126,25 @@ async def test_open_provider_circuit_waits_without_consuming_more_attempts() -> 
     assert unit.waiting_state == "WAITING_PROVIDER"
     assert unit.incident_raised
     assert unit.retry is None
+
+
+@pytest.mark.asyncio
+async def test_model_configuration_failure_waits_for_user_action() -> None:
+    context = FailedJobContext(
+        uuid.uuid4(),
+        uuid.uuid4(),
+        1,
+        False,
+        failure_class="MODEL_UNAVAILABLE",
+        recovery_action="WAIT_CONFIGURATION",
+        fingerprint="model-fingerprint",
+        resource_type="PROVIDER",
+        resource_id="anthropic:removed-model",
+    )
+    unit = FakeFailureUnitOfWork(context)
+    handler = CompleteFailedJob(lambda: unit, RetryPolicy(3, 5))  # type: ignore[arg-type]
+
+    assert await handler.execute(command())
+    assert unit.waiting_state == "WAITING_CONFIGURATION"
+    assert unit.incident_raised
+    assert unit.retry is None

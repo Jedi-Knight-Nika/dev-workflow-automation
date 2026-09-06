@@ -90,7 +90,7 @@ class OpenAIProvider(AIProvider):
             headers={"authorization": f"Bearer {self.api_key}"},
             json=payload,
         ) as response:
-            response.raise_for_status()
+            await self.ensure_stream_success(response)
             async for event in _normalized_events("openai", response):
                 yield event
 
@@ -204,7 +204,7 @@ class AnthropicProvider(AIProvider):
             },
             json=payload,
         ) as response:
-            response.raise_for_status()
+            await self.ensure_stream_success(response)
             async for event in _normalized_events("anthropic", response):
                 yield event
 
@@ -276,6 +276,6 @@ class GoogleProvider(AIProvider):
                 "stream": True,
             },
         ) as response:
-            response.raise_for_status()
+            await self.ensure_stream_success(response)
             async for event in _normalized_events("google", response):
                 yield event

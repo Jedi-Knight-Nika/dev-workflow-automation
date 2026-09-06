@@ -33,6 +33,14 @@ def test_authentication_failure_requires_configuration_without_retry() -> None:
     assert result.severity == "ACTION_REQUIRED"
 
 
+def test_model_policy_failure_requires_configuration_without_retry() -> None:
+    result = classify_failure_details(code="MODEL_POLICY_ERROR", outcome="HTTP 400")
+
+    assert result.failure_class is FailureClass.MODEL_POLICY_ERROR
+    assert result.action is RecoveryAction.WAIT_CONFIGURATION
+    assert not result.retryable
+
+
 def test_engineering_failure_remains_workflow_outcome() -> None:
     result = classify_failure_details(code=None, outcome="TEST_FAILED")
 

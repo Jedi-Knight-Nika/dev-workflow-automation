@@ -36,6 +36,15 @@ class ProviderModel:
     display_name: str
 
 
+class ProviderRequestError(RuntimeError):
+    """Safe, typed provider failure suitable for worker-to-scheduler transport."""
+
+    def __init__(self, code: str, status_code: int) -> None:
+        self.code = code
+        self.status_code = status_code
+        super().__init__(f"{code}: provider request failed with HTTP {status_code}")
+
+
 class AIProvider(ABC):
     def __init__(self, api_key: str) -> None:
         self.api_key = api_key
@@ -67,27 +76,55 @@ class AIProvider(ABC):
                     headers=headers,
                     json=json,
                 )
-                if response.status_code not in {429, 500, 502, 503, 504}:
-                    response.raise_for_status()
+                if response.is_success:
                     return response
-                response.raise_for_status()
-            except (httpx.TransportError, httpx.HTTPStatusError) as exc:
-                retryable = not isinstance(exc, httpx.HTTPStatusError) or (
-                    exc.response.status_code in {429, 500, 502, 503, 504}
-                )
-                if not retryable or attempt >= len(delays):
-                    raise
+                error = self.provider_error(response)
+                if response.status_code not in {429, 500, 502, 503, 504}:
+                    raise error
+                if attempt >= len(delays):
+                    raise error
                 retry_after = (
-                    exc.response.headers.get("retry-after")
-                    if isinstance(exc, httpx.HTTPStatusError)
-                    else None
+                    response.headers.get("retry-after") if response.status_code == 429 else None
                 )
                 try:
                     delay = min(float(retry_after), 10.0) if retry_after else delays[attempt]
                 except ValueError:
                     delay = delays[attempt]
                 await asyncio.sleep(delay)
+            except httpx.TransportError:
+                if attempt >= len(delays):
+                    raise RuntimeError("PROVIDER_UNAVAILABLE: provider transport failed") from None
+                await asyncio.sleep(delays[attempt])
         raise RuntimeError("Provider request retry loop exited unexpectedly")
+
+    @staticmethod
+    def provider_error(response: httpx.Response) -> ProviderRequestError:
+        body = response.text.upper()
+        status = response.status_code
+        if status in {401, 403}:
+            code = "PROVIDER_AUTH_ERROR"
+        elif status == 404 or any(
+            marker in body
+            for marker in ("MODEL_NOT_FOUND", "MODEL NOT FOUND", "UNKNOWN MODEL", "DEPRECATED")
+        ):
+            code = "MODEL_UNAVAILABLE"
+        elif any(
+            marker in body for marker in ("CONTEXT_LENGTH", "CONTEXT LIMIT", "TOO MANY TOKENS")
+        ):
+            code = "MODEL_CONTEXT_LIMIT"
+        elif status == 429:
+            code = "PROVIDER_RATE_LIMIT"
+        elif status in {500, 502, 503, 504}:
+            code = "PROVIDER_UNAVAILABLE"
+        else:
+            code = "MODEL_POLICY_ERROR"
+        return ProviderRequestError(code, status)
+
+    async def ensure_stream_success(self, response: httpx.Response) -> None:
+        if response.is_success:
+            return
+        await response.aread()
+        raise self.provider_error(response)
 
     async def aclose(self) -> None:
         if self._client is not None:

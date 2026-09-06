@@ -10,7 +10,13 @@ from app.infrastructure.workers.structured_output import (
     parse_model_data,
     run_with_structured_repair,
 )
-from app.providers import AIProvider, ProviderModel, ProviderRequest, ProviderResponse
+from app.providers import (
+    AIProvider,
+    ProviderModel,
+    ProviderRequest,
+    ProviderRequestError,
+    ProviderResponse,
+)
 from app.providers.http import AnthropicProvider, GoogleProvider, OpenAIProvider
 
 
@@ -116,6 +122,46 @@ async def test_transient_provider_failures_are_retried(
     finally:
         await provider.aclose()
     assert attempts == 3
+
+
+@pytest.mark.asyncio
+async def test_missing_model_is_normalized_without_leaking_provider_body() -> None:
+    async def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            404,
+            json={"error": {"message": "Model private-model-name was not found"}},
+        )
+
+    provider = OpenAIProvider("secret")
+    provider._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    try:
+        with pytest.raises(ProviderRequestError) as raised:
+            await provider.run(ProviderRequest(model="missing", system="system", prompt="prompt"))
+    finally:
+        await provider.aclose()
+
+    assert raised.value.code == "MODEL_UNAVAILABLE"
+    assert raised.value.status_code == 404
+    assert "private-model-name" not in str(raised.value)
+
+
+@pytest.mark.asyncio
+async def test_streaming_configuration_error_is_normalized() -> None:
+    async def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(400, json={"error": {"message": "Unsupported parameter"}})
+
+    provider = AnthropicProvider("secret")
+    provider._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    try:
+        with pytest.raises(ProviderRequestError) as raised:
+            async for _event in provider.stream(
+                ProviderRequest(model="claude-test", system="system", prompt="prompt")
+            ):
+                pass
+    finally:
+        await provider.aclose()
+
+    assert raised.value.code == "MODEL_POLICY_ERROR"
 
 
 @pytest.mark.asyncio
