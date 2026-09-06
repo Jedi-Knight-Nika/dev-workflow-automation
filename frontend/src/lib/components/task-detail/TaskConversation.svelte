@@ -6,6 +6,7 @@
 
   let {
     messages,
+    resumeOnSend,
     hasOlder,
     loadingOlder,
     sending,
@@ -13,6 +14,7 @@
     onSend
   }: {
     messages: TaskMessage[];
+    resumeOnSend: boolean;
     hasOlder: boolean;
     loadingOlder: boolean;
     sending: boolean;
@@ -23,6 +25,11 @@
   let draft = $state('');
   let feed: HTMLDivElement;
   let previousLastId = $state<number | null>(null);
+
+  function needsResponse(message: TaskMessage): boolean {
+    const result = String(message.context.result ?? '');
+    return ['BLOCKED', 'NEEDS_HUMAN', 'NEEDS_CONTEXT'].includes(result);
+  }
 
   $effect(() => {
     const lastId = messages.at(-1)?.id ?? null;
@@ -108,13 +115,22 @@
                 <time>{new Date(message.created_at).toLocaleString()}</time>
               </div>
               <div
-                class="border-line whitespace-pre-wrap rounded-2xl border px-4 py-3 text-sm leading-relaxed shadow-sm {message.author_type ===
-                'USER'
-                  ? 'bg-brand/12 rounded-tr-sm'
-                  : 'bg-panel rounded-tl-sm'}"
+                class="whitespace-pre-wrap rounded-2xl border px-4 py-3 text-sm leading-relaxed shadow-sm {needsResponse(
+                  message
+                )
+                  ? 'border-warning/50 bg-warning/10 rounded-tl-sm'
+                  : message.author_type === 'USER'
+                    ? 'border-line bg-brand/12 rounded-tr-sm'
+                    : 'border-line bg-panel rounded-tl-sm'}"
               >
                 {message.body}
               </div>
+              {#if needsResponse(message)}
+                <span
+                  class="mt-1.5 rounded-full bg-warning/15 px-2 py-1 text-[10px] font-bold text-warning"
+                  >REPLY NEEDED · {String(message.context.result).replaceAll('_', ' ')}</span
+                >
+              {/if}
               {#if message.context.task_state}
                 <span class="text-muted mt-1.5 text-[10px]"
                   >Task state · {String(message.context.task_state).replaceAll('_', ' ')}</span
@@ -145,10 +161,12 @@
     ></textarea>
     <div class="mt-2 flex items-center justify-between gap-3">
       <span class="text-muted text-[10px]"
-        >Ctrl/⌘ + Enter to send · Not synced to Trello or Linear</span
+        >Ctrl/⌘ + Enter to send · {resumeOnSend
+          ? 'Your reply will resume this task'
+          : 'Not synced to Trello or Linear'}</span
       >
       <Button variant="primary" size="sm" type="submit" disabled={sending || !draft.trim()}
-        >{sending ? 'Sending…' : 'Send message'}</Button
+        >{sending ? 'Sending…' : resumeOnSend ? 'Send & resume' : 'Send message'}</Button
       >
     </div>
   </form>

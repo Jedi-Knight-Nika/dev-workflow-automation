@@ -224,6 +224,10 @@
     try {
       const message = await addTaskMessage(task.id, body);
       messages = [...messages, message];
+      if (task.state === 'NEEDS_HUMAN' || task.state === 'CONTEXT_PENDING') {
+        task = await runTaskCommand(task.id, 'resume');
+        await refresh();
+      }
     } catch (cause) {
       error = String(cause);
       throw cause;
@@ -258,17 +262,18 @@
       onRetryLinearSync={retryLinearSync}
     />
     <GenerationProgress progress={generationProgress} connected={eventStreamConnected} />
-    <TaskWorkspacePanel {task} {preparing} onPrepareWorkspace={prepareWorkspace} />
-    <TaskPlanPanel {latestPlan} {latestThinker} />
-    <TaskMemoryPanel {memory} {checkpoints} />
     <TaskConversation
       {messages}
+      resumeOnSend={task.state === 'NEEDS_HUMAN' || task.state === 'CONTEXT_PENDING'}
       hasOlder={nextMessageCursor !== null}
       loadingOlder={loadingOlderMessages}
       sending={sendingMessage}
       onLoadOlder={loadOlderMessages}
       onSend={sendMessage}
     />
+    <TaskWorkspacePanel {task} {preparing} onPrepareWorkspace={prepareWorkspace} />
+    <TaskPlanPanel {latestPlan} {latestThinker} />
+    <TaskMemoryPanel {memory} {checkpoints} />
     <JobList {jobs} />
     <TimelineList {events} />
     <ValidationList {validations} />

@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+from collections.abc import Mapping
 
 import httpx
 from cryptography.fernet import InvalidToken
@@ -29,6 +30,15 @@ STATE_CONFIGURATION: dict[TaskState, tuple[str, str]] = {
 }
 
 PROVIDER_TARGET_SUFFIX = {"linear": "state_id", "trello": "list_id"}
+
+EXTERNAL_STATUS_ALIASES: dict[str, tuple[str, ...]] = {
+    "todo": ("todo", "to do", "backlog", "ready for ai"),
+    "in_progress": ("in progress", "doing", "working"),
+    "in_review": ("in review", "review", "ready for review"),
+    "blocked": ("blocked", "needs attention", "needs human"),
+    "ready_for_testing": ("ready for testing", "testing", "ready to test"),
+    "done": ("done", "complete", "completed"),
+}
 
 
 def external_status_configuration_key(provider: str, state: TaskState) -> str | None:
@@ -70,16 +80,39 @@ async def sync_external_task_state(session: AsyncSession, task: Task) -> bool:
     ):
         source_lists = integration.configuration.get("list_ids") or []
         target_id = source_lists[0] if source_lists else None
-    if integration is None or integration.encrypted_credentials is None or not target_id:
+    if integration is None or integration.encrypted_credentials is None:
         await _record_skipped(session, task, snapshot.provider, status_label, configuration_key)
         return False
-    target_id = str(target_id)
-    if snapshot.state_id == target_id:
-        return True
-    if await _already_synchronized(session, task, snapshot.provider, task.state, target_id):
-        return True
     try:
         credential = cipher.decrypt(integration.encrypted_credentials)
+        if not target_id and snapshot.provider in {"trello", "linear"}:
+            semantic_status = mapping[0]
+            aliases = EXTERNAL_STATUS_ALIASES.get(semantic_status, ())
+            statuses: list[Mapping[str, object]] = []
+            if snapshot.provider == "trello":
+                board_id = str(integration.configuration.get("board_id") or "")
+                if board_id:
+                    statuses.extend(await TrelloClient(credential).list_lists(board_id))
+            else:
+                statuses.extend(await LinearClient(credential).list_workflow_states())
+            matching = next(
+                (item for item in statuses if str(item["name"]).strip().casefold() in aliases),
+                None,
+            )
+            if matching:
+                target_id = str(matching["id"])
+                integration.configuration = {
+                    **integration.configuration,
+                    configuration_key: target_id,
+                }
+        if not target_id:
+            await _record_skipped(session, task, snapshot.provider, status_label, configuration_key)
+            return False
+        target_id = str(target_id)
+        if snapshot.state_id == target_id:
+            return True
+        if await _already_synchronized(session, task, snapshot.provider, task.state, target_id):
+            return True
         if snapshot.provider == "linear":
             await LinearClient(credential).update_issue_state(snapshot.external_id, target_id)
         else:
