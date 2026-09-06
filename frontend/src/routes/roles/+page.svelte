@@ -19,7 +19,9 @@
     'INTAKE',
     'PLANNING',
     'EXECUTION',
+    'VALIDATION',
     'REVIEW',
+    'DELIVERY',
     'COORDINATION',
     'SPECIALIST',
     'CUSTOM'
@@ -35,14 +37,23 @@
     'REPLAN_READY',
     'NEEDS_CONTEXT',
     'IMPLEMENTED',
+    'PARTIALLY_IMPLEMENTED',
+    'TEST_PASS',
     'TEST_FAILED',
+    'TEST_ENVIRONMENT_FAILURE',
+    'TEST_INCOMPLETE',
     'PLAN_MISMATCH',
-    'NEEDS_REPLAN'
+    'NEEDS_REPLAN',
+    'REVIEW_PASS',
+    'DELIVERY_READY',
+    'DELIVERY_FAILED',
+    'DELIVERY_BLOCKED'
   ];
   let roles = $state<Role[]>([]),
     permissions = $state<string[]>([]),
     capabilities = $state<string[]>([]);
   let editing = $state<Role | null>(null),
+    details = $state<Role | null>(null),
     open = $state(false),
     advanced = $state(false),
     busy = $state(false),
@@ -82,6 +93,7 @@
     }
   }
   function edit(role?: Role) {
+    details = null;
     editing = role ?? null;
     form = role
       ? {
@@ -103,6 +115,26 @@
       : blank();
     advanced = false;
     open = true;
+  }
+  function openDetails(role: Role) {
+    details = role;
+  }
+  function handleCardKeydown(event: KeyboardEvent, role: Role) {
+    if (event.target !== event.currentTarget || !['Enter', ' '].includes(event.key)) return;
+    event.preventDefault();
+    openDetails(role);
+  }
+  function formatDate(value: string) {
+    return new Intl.DateTimeFormat(undefined, {
+      dateStyle: 'medium',
+      timeStyle: 'short'
+    }).format(new Date(value));
+  }
+  function cloneDetails() {
+    if (details) void copy(details);
+  }
+  function editDetails() {
+    if (details) edit(details);
   }
   function toggle(field: 'capabilities' | 'permissions' | 'allowed_results', value: string) {
     const values = form[field];
@@ -146,6 +178,14 @@
   onMount(load);
 </script>
 
+<svelte:window
+  onkeydown={(event) => {
+    if (event.key !== 'Escape') return;
+    if (open) open = false;
+    else details = null;
+  }}
+/>
+
 <PageHeader
   eyebrow="WORKFORCE DESIGN"
   title="Roles"
@@ -176,7 +216,15 @@
       {/each}
     {/if}
     {#each roles as role (role.id)}
-      <article class:disabled={!role.enabled} class="role-card">
+      <div
+        class:disabled={!role.enabled}
+        class="role-card"
+        role="button"
+        tabindex="0"
+        aria-label={`View ${role.name} role details`}
+        onclick={() => openDetails(role)}
+        onkeydown={(event) => handleCardKeydown(event, role)}
+      >
         <header>
           <span class="category">{role.category}</span><span
             class:built-in={role.built_in}
@@ -188,9 +236,11 @@
           <p>{role.description || 'No description supplied.'}</p>
         </div>
         <div class="counts">
-          <span><strong>{role.active_agents}</strong> agents</span><span
+          <span><strong>{role.total_agents}</strong> total agents</span><span
+            ><strong>{role.active_agents}</strong> active</span
+          ><span><strong>{role.inactive_agents}</strong> inactive</span><span
             ><strong>{role.capabilities.length}</strong> capabilities</span
-          ><span><strong>{role.permissions.length}</strong> permissions</span>
+          >
         </div>
         <div class="chips">
           {#each role.capabilities.slice(0, 3) as capability (capability)}<span
@@ -198,18 +248,163 @@
             >{/each}
         </div>
         <footer>
-          {#if !role.built_in}<button onclick={() => edit(role)}>Edit</button>{/if}
-          <button onclick={() => void copy(role)}>Clone</button>
+          <button
+            onclick={(event) => {
+              event.stopPropagation();
+              openDetails(role);
+            }}>Details</button
+          >
+          {#if !role.built_in}<button
+              onclick={(event) => {
+                event.stopPropagation();
+                edit(role);
+              }}>Edit</button
+            >{/if}
+          <button
+            onclick={(event) => {
+              event.stopPropagation();
+              void copy(role);
+            }}>Clone</button
+          >
           {#if !role.built_in}<button
               class="danger"
-              disabled={role.active_agents > 0}
-              onclick={() => void remove(role)}>Delete</button
+              disabled={role.total_agents > 0}
+              onclick={(event) => {
+                event.stopPropagation();
+                void remove(role);
+              }}>Delete</button
             >{/if}
         </footer>
-      </article>
+      </div>
     {/each}
   </section>
 </main>
+
+{#if details}
+  <button class="backdrop" aria-label="Close role details" onclick={() => (details = null)}
+  ></button>
+  <dialog open class="details-dialog" aria-labelledby="role-title">
+    <header class="details-header">
+      <div>
+        <div class="details-badges">
+          <span class="category">{details.category}</span>
+          <span class:enabled={details.enabled} class="status">
+            {details.enabled ? 'ENABLED' : 'DISABLED'}
+          </span>
+          <span class:built-in={details.built_in} class="kind">
+            {details.built_in ? 'SYSTEM TEMPLATE' : 'CUSTOM ROLE'}
+          </span>
+        </div>
+        <h2 id="role-title">{details.name}</h2>
+        <p>{details.description || 'No description supplied.'}</p>
+      </div>
+      <button class="icon-button" aria-label="Close role details" onclick={() => (details = null)}
+        >×</button
+      >
+    </header>
+
+    <div class="details-body">
+      <section class="agent-summary" aria-label="Assigned AI agents">
+        <div><strong>{details.total_agents}</strong><span>Total agents</span></div>
+        <div class="active-count"><strong>{details.active_agents}</strong><span>Active</span></div>
+        <div><strong>{details.inactive_agents}</strong><span>Inactive</span></div>
+      </section>
+
+      <section class="detail-section">
+        <h3>Execution defaults</h3>
+        <dl class="facts">
+          <div>
+            <dt>Provider</dt>
+            <dd>{details.default_provider || 'Agent decides'}</dd>
+          </div>
+          <div>
+            <dt>Model</dt>
+            <dd>{details.default_model || 'Provider default'}</dd>
+          </div>
+          <div>
+            <dt>Reasoning</dt>
+            <dd>{details.default_reasoning_effort}</dd>
+          </div>
+          <div>
+            <dt>Timeout</dt>
+            <dd>{details.default_timeout_minutes} minutes</dd>
+          </div>
+          <div>
+            <dt>Retries</dt>
+            <dd>{details.default_max_retries}</dd>
+          </div>
+          <div>
+            <dt>Version</dt>
+            <dd>{details.version}</dd>
+          </div>
+        </dl>
+      </section>
+
+      <section class="detail-section detail-grid">
+        <div>
+          <h3>Capabilities <span>{details.capabilities.length}</span></h3>
+          <div class="detail-chips">
+            {#each details.capabilities as item (item)}
+              <span>{item.replaceAll('_', ' ')}</span>
+            {:else}
+              <em>None configured</em>
+            {/each}
+          </div>
+        </div>
+        <div>
+          <h3>Permissions <span>{details.permissions.length}</span></h3>
+          <div class="detail-chips">
+            {#each details.permissions as item (item)}
+              <span>{item.replaceAll('_', ' ')}</span>
+            {:else}
+              <em>None configured</em>
+            {/each}
+          </div>
+        </div>
+      </section>
+
+      <section class="detail-section">
+        <h3>Allowed outcomes <span>{details.allowed_results.length}</span></h3>
+        <div class="detail-chips outcomes">
+          {#each details.allowed_results as item (item)}
+            <span>{item.replaceAll('_', ' ')}</span>
+          {:else}
+            <em>No outcomes configured</em>
+          {/each}
+        </div>
+      </section>
+
+      <section class="detail-section">
+        <h3>Knowledge defaults <span>{details.knowledge_collection_ids.length}</span></h3>
+        {#if details.knowledge_collection_ids.length}
+          <ul class="knowledge-list">
+            {#each details.knowledge_collection_ids as collectionId (collectionId)}
+              <li>{collectionId}</li>
+            {/each}
+          </ul>
+        {:else}
+          <p>No knowledge collections are assigned by default.</p>
+        {/if}
+      </section>
+
+      <section class="detail-section">
+        <h3>System instructions</h3>
+        <pre>{details.system_instructions || 'No role-specific instructions supplied.'}</pre>
+      </section>
+
+      <section class="role-meta">
+        <span>Created {formatDate(details.created_at)}</span>
+        <span>Updated {formatDate(details.updated_at)}</span>
+      </section>
+    </div>
+
+    <footer class="details-actions">
+      <button onclick={() => (details = null)}>Close</button>
+      <button onclick={cloneDetails}>Clone</button>
+      {#if !details.built_in}<button class="primary" onclick={editDetails}>Edit role</button>{/if}
+    </footer>
+  </dialog>
+{/if}
 
 {#if open}
   <button class="backdrop" aria-label="Close role editor" onclick={() => (open = false)}></button>
@@ -387,6 +582,16 @@
     border-radius: 1rem;
     background: var(--color-panel);
     padding: 1rem;
+    cursor: pointer;
+    transition:
+      border-color 140ms ease,
+      transform 140ms ease;
+  }
+  .role-card:hover,
+  .role-card:focus-visible {
+    border-color: color-mix(in srgb, var(--color-brand) 55%, var(--color-line));
+    transform: translateY(-1px);
+    outline: none;
   }
   .role-card.disabled {
     opacity: 0.55;
@@ -415,7 +620,7 @@
   }
   .counts {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(4, 1fr);
     gap: 0.5rem;
     font-size: 0.7rem;
     color: var(--color-muted);
@@ -457,6 +662,172 @@
     inset: 0;
     z-index: 40;
     background: rgb(0 0 0 / 0.44);
+  }
+  .details-dialog {
+    position: fixed;
+    inset: 50% auto auto 50%;
+    z-index: 50;
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    width: min(860px, calc(100% - 2rem));
+    max-height: min(880px, calc(100vh - 2rem));
+    margin: 0;
+    padding: 0;
+    transform: translate(-50%, -50%);
+    overflow: hidden;
+    border: 1px solid var(--color-line);
+    border-radius: 1rem;
+    background: var(--color-bg);
+    box-shadow: 0 24px 80px rgb(0 0 0 / 0.3);
+  }
+  .details-header,
+  .details-actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 1.25rem;
+  }
+  .details-header {
+    border-bottom: 1px solid var(--color-line);
+  }
+  .details-header p,
+  .detail-section p {
+    margin-top: 0.35rem;
+    color: var(--color-muted);
+    font-size: 0.8rem;
+  }
+  .details-badges {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.7rem;
+    margin-bottom: 0.45rem;
+  }
+  .status {
+    font: 700 0.65rem/1 var(--font-mono);
+    color: var(--color-muted);
+  }
+  .status.enabled {
+    color: #2d9d68;
+  }
+  .icon-button {
+    align-self: start;
+    padding: 0.1rem 0.35rem;
+    font-size: 1.5rem;
+  }
+  .details-body {
+    overflow: auto;
+    display: grid;
+    gap: 1rem;
+    padding: 1.25rem;
+  }
+  .agent-summary {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 0.65rem;
+  }
+  .agent-summary div {
+    display: grid;
+    gap: 0.2rem;
+    border: 1px solid var(--color-line);
+    border-radius: 0.75rem;
+    background: var(--color-panel);
+    padding: 0.9rem;
+  }
+  .agent-summary strong {
+    font-size: 1.4rem;
+  }
+  .agent-summary span,
+  dt,
+  .role-meta {
+    color: var(--color-muted);
+    font-size: 0.7rem;
+  }
+  .agent-summary .active-count {
+    border-color: color-mix(in srgb, #2d9d68 50%, var(--color-line));
+  }
+  .detail-section {
+    border: 1px solid var(--color-line);
+    border-radius: 0.8rem;
+    padding: 1rem;
+  }
+  .detail-section h3 {
+    margin-bottom: 0.7rem;
+    font-size: 0.82rem;
+    font-weight: 800;
+  }
+  .detail-section h3 span {
+    color: var(--color-muted);
+    font-family: var(--font-mono);
+  }
+  .detail-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1.25rem;
+  }
+  .facts {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 0.75rem;
+  }
+  .facts div {
+    min-width: 0;
+  }
+  .facts dd {
+    overflow-wrap: anywhere;
+    font-size: 0.78rem;
+    font-weight: 700;
+    text-transform: capitalize;
+  }
+  .detail-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+  }
+  .detail-chips span {
+    border-radius: 999px;
+    background: var(--color-soft);
+    padding: 0.35rem 0.55rem;
+    font-size: 0.65rem;
+  }
+  .detail-chips em {
+    color: var(--color-muted);
+    font-size: 0.75rem;
+    font-style: normal;
+  }
+  .outcomes span {
+    font-family: var(--font-mono);
+  }
+  .knowledge-list {
+    display: grid;
+    gap: 0.3rem;
+    color: var(--color-muted);
+    font: 0.68rem var(--font-mono);
+  }
+  .detail-section pre {
+    max-height: 260px;
+    overflow: auto;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    color: var(--color-muted);
+    font: 0.74rem/1.55 var(--font-mono);
+  }
+  .role-meta {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: 0.5rem;
+  }
+  .details-actions {
+    justify-content: flex-end;
+    border-top: 1px solid var(--color-line);
+  }
+  .details-actions button {
+    border: 1px solid var(--color-line);
+    border-radius: 0.5rem;
+    padding: 0.55rem 0.8rem;
+    font-size: 0.75rem;
   }
   .drawer {
     position: fixed;
@@ -561,8 +932,13 @@
   }
   @media (max-width: 600px) {
     .two,
-    .options {
+    .options,
+    .detail-grid {
       grid-template-columns: 1fr;
+    }
+    .counts,
+    .facts {
+      grid-template-columns: repeat(2, 1fr);
     }
     .intro {
       align-items: start;

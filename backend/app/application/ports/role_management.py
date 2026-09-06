@@ -50,6 +50,8 @@ class RoleView:
     built_in: bool
     version: int
     active_agents: int
+    inactive_agents: int
+    total_agents: int
     created_at: datetime
     updated_at: datetime
 

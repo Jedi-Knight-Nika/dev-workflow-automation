@@ -29,11 +29,15 @@ class SqlAlchemyRoleManagementWorkflow:
                 )
             ).all()
         )
-        return [await self._view(item) for item in items]
+        counts = await self._agent_counts(tuple(item.id for item in items))
+        return [self._view(item, counts.get(item.id, (0, 0))) for item in items]
 
     async def get(self, role_id: uuid.UUID) -> RoleView | None:
         item = await self.session.get(Role, role_id)
-        return None if item is None or item.archived_at else await self._view(item)
+        if item is None or item.archived_at:
+            return None
+        counts = await self._agent_counts((item.id,))
+        return self._view(item, counts.get(item.id, (0, 0)))
 
     async def create(self, command: SaveRoleCommand, *, built_in: bool = False) -> RoleView:
         self._validate(command)
@@ -44,7 +48,7 @@ class SqlAlchemyRoleManagementWorkflow:
         except IntegrityError as exc:
             await self.session.rollback()
             raise RoleConflict("A role with this name already exists") from exc
-        return await self._view(item)
+        return self._view(item, (0, 0))
 
     async def update(self, role_id: uuid.UUID, command: SaveRoleCommand) -> RoleView:
         item = await self.session.get(Role, role_id)
@@ -61,7 +65,8 @@ class SqlAlchemyRoleManagementWorkflow:
         except IntegrityError as exc:
             await self.session.rollback()
             raise RoleConflict("A role with this name already exists") from exc
-        return await self._view(item)
+        counts = await self._agent_counts((item.id,))
+        return self._view(item, counts.get(item.id, (0, 0)))
 
     async def clone(self, role_id: uuid.UUID, name: str) -> RoleView:
         source = await self.session.get(Role, role_id)
@@ -92,7 +97,8 @@ class SqlAlchemyRoleManagementWorkflow:
         item.enabled = False
         item.version += 1
         await self.session.commit()
-        return await self._view(item)
+        counts = await self._agent_counts((item.id,))
+        return self._view(item, counts.get(item.id, (0, 0)))
 
     async def delete(self, role_id: uuid.UUID) -> None:
         item = await self.session.get(Role, role_id)
@@ -108,13 +114,30 @@ class SqlAlchemyRoleManagementWorkflow:
         item.archived_at = datetime.now(UTC)
         await self.session.commit()
 
-    async def _view(self, item: Role) -> RoleView:
-        count = int(
-            await self.session.scalar(
-                select(func.count()).select_from(AIAgent).where(AIAgent.role_id == item.id)
+    async def _agent_counts(
+        self, role_ids: tuple[uuid.UUID, ...]
+    ) -> dict[uuid.UUID, tuple[int, int]]:
+        if not role_ids:
+            return {}
+        rows = (
+            await self.session.execute(
+                select(
+                    AIAgent.role_id,
+                    func.count().filter(AIAgent.enabled.is_(True)),
+                    func.count().filter(AIAgent.enabled.is_(False)),
+                )
+                .where(AIAgent.role_id.in_(role_ids))
+                .group_by(AIAgent.role_id)
             )
-            or 0
-        )
+        ).all()
+        return {
+            role_id: (int(active_count), int(inactive_count))
+            for role_id, active_count, inactive_count in rows
+        }
+
+    @staticmethod
+    def _view(item: Role, agent_counts: tuple[int, int]) -> RoleView:
+        active_agents, inactive_agents = agent_counts
         return RoleView(
             item.id,
             item.name,
@@ -133,7 +156,9 @@ class SqlAlchemyRoleManagementWorkflow:
             item.enabled,
             item.built_in,
             item.version,
-            count,
+            active_agents,
+            inactive_agents,
+            active_agents + inactive_agents,
             item.created_at,
             item.updated_at,
         )

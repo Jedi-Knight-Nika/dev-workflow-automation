@@ -45,6 +45,8 @@ def view(role_id: uuid.UUID) -> RoleView:
         False,
         1,
         0,
+        0,
+        0,
         now,
         now,
     )

@@ -530,6 +530,8 @@ export type Role = {
   built_in: boolean;
   version: number;
   active_agents: number;
+  inactive_agents: number;
+  total_agents: number;
   created_at: string;
   updated_at: string;
 };

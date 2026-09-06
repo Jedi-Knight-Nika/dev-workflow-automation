@@ -3,7 +3,14 @@ import type { Role } from '$lib/types';
 
 export type RoleInput = Omit<
   Role,
-  'id' | 'built_in' | 'version' | 'active_agents' | 'created_at' | 'updated_at'
+  | 'id'
+  | 'built_in'
+  | 'version'
+  | 'active_agents'
+  | 'inactive_agents'
+  | 'total_agents'
+  | 'created_at'
+  | 'updated_at'
 >;
 
 export const listRoles = () => api<Role[]>('/roles');
