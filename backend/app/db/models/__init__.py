@@ -36,6 +36,7 @@ from .notifications import (
 )
 from .resilience import FailureEvent, HealthState, JobRetryState
 from .settings import AccountSettings, SettingsAuditEvent
+from .task_messages import TaskMessage
 from .tasks import (
     AgentCheckpoint,
     ExternalTaskSnapshot,
@@ -96,6 +97,7 @@ __all__ = [
     "TaskAssignment",
     "TaskEvent",
     "TaskMemory",
+    "TaskMessage",
     "TaskRepositoryScope",
     "TaskState",
     "Team",

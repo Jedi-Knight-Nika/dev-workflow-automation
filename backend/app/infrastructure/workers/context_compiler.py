@@ -14,6 +14,7 @@ from app.db.models import (
     Repository,
     ReviewFinding,
     Task,
+    TaskMessage,
     TaskRepositoryScope,
     Team,
 )
@@ -90,6 +91,42 @@ class ContextCompiler:
             },
             "job": {"id": str(job.id), "action": job.action, "payload": job.payload},
         }
+
+    async def _conversation(self, task: Task) -> list[dict[str, Any]]:
+        messages = list(
+            (
+                await self.session.scalars(
+                    select(TaskMessage)
+                    .where(TaskMessage.task_id == task.id)
+                    .order_by(TaskMessage.id.desc())
+                    .limit(30)
+                )
+            ).all()
+        )
+        selected: list[TaskMessage] = []
+        remaining_chars = 16_000
+        for message in messages:
+            if remaining_chars <= 0:
+                break
+            selected.append(message)
+            remaining_chars -= len(message.body)
+        selected.reverse()
+        return [
+            {
+                "author": message.author_name,
+                "author_type": message.author_type,
+                "role": message.author_role,
+                "body": message.body,
+                "created_at": message.created_at.isoformat(),
+            }
+            for message in selected
+        ]
+
+    async def _include_conversation(self, task: Task, context: dict[str, Any]) -> dict[str, Any]:
+        messages = await self._conversation(task)
+        if messages:
+            context["internal_task_conversation"] = messages
+        return context
 
     async def _persistent_memory(self, task: Task, role: JobRole) -> dict[str, Any]:
         return render_memory(await TaskMemoryService(self.session).load(task), role)
@@ -210,6 +247,7 @@ class ContextCompiler:
     async def compile_for_intake(self, task: Task, job: Job) -> dict[str, Any]:
         started = time.monotonic()
         context = self._base(task, job)
+        await self._include_conversation(task, context)
         repositories = await self._team_repositories(task)
         context["repository_candidates"] = [
             {
@@ -276,6 +314,7 @@ class ContextCompiler:
     ) -> dict[str, Any]:
         started = time.monotonic()
         context = self._base(task, job)
+        await self._include_conversation(task, context)
         context["task_memory"] = await self._persistent_memory(task, JobRole.THINKER)
         context["previous_role_checkpoint"] = await self._previous_checkpoint(task, JobRole.THINKER)
         context["retrieved_knowledge"] = await self._knowledge(task, repository, JobRole.THINKER)
@@ -284,6 +323,7 @@ class ContextCompiler:
     async def compile_for_scoped_thinker(self, task: Task, job: Job) -> dict[str, Any]:
         started = time.monotonic()
         context = self._base(task, job)
+        await self._include_conversation(task, context)
         context["task_memory"] = await self._persistent_memory(task, JobRole.THINKER)
         context["previous_role_checkpoint"] = await self._previous_checkpoint(task, JobRole.THINKER)
         scope_rows = (
@@ -312,6 +352,7 @@ class ContextCompiler:
     ) -> dict[str, Any]:
         started = time.monotonic()
         context = self._base(task, job)
+        await self._include_conversation(task, context)
         context["task_memory"] = await self._persistent_memory(task, JobRole.EXECUTOR)
         previous_checkpoint = await self._previous_checkpoint(task, JobRole.EXECUTOR)
         context["previous_role_checkpoint"] = previous_checkpoint
@@ -352,6 +393,7 @@ class ContextCompiler:
     ) -> dict[str, Any]:
         started = time.monotonic()
         context = self._base(task, job)
+        await self._include_conversation(task, context)
         context["task_memory"] = await self._persistent_memory(task, JobRole.EXECUTOR)
         context["previous_role_checkpoint"] = await self._previous_checkpoint(
             task, JobRole.EXECUTOR
@@ -388,6 +430,7 @@ class ContextCompiler:
     ) -> dict[str, Any]:
         started = time.monotonic()
         context = self._base(task, job)
+        await self._include_conversation(task, context)
         context["task_memory"] = await self._persistent_memory(task, role)
         context["technical_plan"] = await self._plan(task)
         context["open_findings"] = await self._findings(task)
@@ -409,6 +452,7 @@ class ContextCompiler:
     ) -> dict[str, Any]:
         started = time.monotonic()
         context = self._base(task, job)
+        await self._include_conversation(task, context)
         context["task_memory"] = await self._persistent_memory(task, JobRole.REVIEWER)
         context["technical_plan"] = await self._plan(task)
         context["retrieved_knowledge"] = await self._knowledge(task, repository, JobRole.REVIEWER)
@@ -430,6 +474,7 @@ class ContextCompiler:
     ) -> dict[str, Any]:
         started = time.monotonic()
         context = self._base(task, job)
+        await self._include_conversation(task, context)
         context["task_memory"] = await self._persistent_memory(task, JobRole.TESTER)
         context["technical_plan"] = await self._plan(task)
         context["open_findings"] = await self._findings(task)

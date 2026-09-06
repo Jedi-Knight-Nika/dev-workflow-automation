@@ -454,6 +454,25 @@ export type TaskEvent = {
   created_at: string;
 };
 
+export type TaskMessage = {
+  id: number;
+  task_id: string;
+  job_id: string | null;
+  agent_id: string | null;
+  author_type: 'USER' | 'AGENT' | 'SYSTEM';
+  author_name: string;
+  author_role: string | null;
+  kind: 'COMMENT' | 'STATUS_UPDATE' | string;
+  body: string;
+  context: Record<string, unknown>;
+  created_at: string;
+};
+
+export type TaskMessagePage = {
+  items: TaskMessage[];
+  next_before_id: number | null;
+};
+
 export type ValidationRecord = {
   id: string;
   provider: string;

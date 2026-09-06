@@ -18,6 +18,7 @@ from app.db.models import (
     Task,
     TaskAssignment,
     TaskEvent,
+    TaskMessage,
     TaskState,
     Team,
     WorkflowDefinition,
@@ -46,7 +47,48 @@ async def record_event(
 ) -> TaskEvent:
     event = TaskEvent(task_id=task_id, source=source, event_type=event_type, payload=payload)
     session.add(event)
+    if event_type == "JOB_SUCCEEDED":
+        await _record_agent_summary(session, task_id, payload)
     return event
+
+
+async def _record_agent_summary(
+    session: AsyncSession, task_id: uuid.UUID, payload: dict[str, Any]
+) -> None:
+    raw_job_id = payload.get("job_id")
+    if not raw_job_id:
+        return
+    try:
+        job_id = uuid.UUID(str(raw_job_id))
+    except ValueError:
+        return
+    existing = await session.scalar(select(TaskMessage.id).where(TaskMessage.job_id == job_id))
+    if existing is not None:
+        return
+    job = await session.get(Job, job_id)
+    if job is None or not job.result:
+        return
+    summary = str(job.result.get("summary") or "").strip()
+    if not summary:
+        return
+    agent = await session.get(AIAgent, job.agent_id) if job.agent_id else None
+    task = await session.get(Task, task_id)
+    session.add(
+        TaskMessage(
+            task_id=task_id,
+            job_id=job.id,
+            agent_id=agent.id if agent else None,
+            author_type="AGENT",
+            author_name=agent.name if agent else job.role.value.title(),
+            author_role=job.role.value,
+            kind="STATUS_UPDATE",
+            body=summary[:8_000],
+            context={
+                "result": job.result.get("result"),
+                "task_state": task.state.value if task else None,
+            },
+        )
+    )
 
 
 async def enqueue_job(

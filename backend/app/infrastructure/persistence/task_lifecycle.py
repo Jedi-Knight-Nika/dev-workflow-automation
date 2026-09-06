@@ -11,7 +11,7 @@ from app.application.ports.task_lifecycle import (
     TaskLifecycleContext,
     WorkspaceRefreshUnavailable,
 )
-from app.db.models import Job, JobState
+from app.db.models import Job, JobState, TaskAssignment
 from app.db.models import Task as TaskRecord
 from app.db.models import TaskState as TaskRecordState
 from app.domain.tasks import LifecycleDirective, Task, TaskState
@@ -94,7 +94,17 @@ class SqlAlchemyTaskLifecycleUnitOfWork:
                 (
                     await session.scalars(
                         select(Job).where(
-                            Job.task_id == self._task.id, Job.state == JobState.QUEUED
+                            Job.task_id == self._task.id,
+                            Job.state.in_(
+                                [
+                                    JobState.QUEUED,
+                                    JobState.RETRY_WAIT,
+                                    JobState.WAITING_PROVIDER,
+                                    JobState.WAITING_INTEGRATION,
+                                    JobState.WAITING_CONFIGURATION,
+                                    JobState.WAITING_HUMAN,
+                                ]
+                            ),
                         )
                     )
                 ).all()
@@ -102,6 +112,13 @@ class SqlAlchemyTaskLifecycleUnitOfWork:
             for job in queued:
                 job.state = JobState.CANCELLED
             cancelled_jobs = len(queued)
+        if directive.state == TaskState.NEW:
+            assignment = await session.scalar(
+                select(TaskAssignment).where(TaskAssignment.task_id == self._task.id)
+            )
+            if assignment is not None:
+                assignment.status = "QUEUED"
+                assignment.started_at = None
         payload: dict[str, Any]
         if directive.archive:
             event_type, payload = "TASK_ARCHIVED", {}

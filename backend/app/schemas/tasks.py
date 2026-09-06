@@ -126,3 +126,27 @@ class EventRead(BaseModel):
     event_type: str
     payload: dict[str, Any]
     created_at: datetime
+
+
+class TaskMessageCreate(BaseModel):
+    body: str = Field(min_length=1, max_length=8_000)
+
+
+class TaskMessageRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    task_id: uuid.UUID
+    job_id: uuid.UUID | None
+    agent_id: uuid.UUID | None
+    author_type: str
+    author_name: str
+    author_role: str | None
+    kind: str
+    body: str
+    context: dict[str, Any]
+    created_at: datetime
+
+
+class TaskMessagePageRead(BaseModel):
+    items: list[TaskMessageRead]
+    next_before_id: int | None

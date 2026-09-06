@@ -7,7 +7,27 @@ import pytest
 
 from app.application.ports.job_dispatch import ClaimedJob
 from app.domain.operational_states import JobRole
-from app.infrastructure.scheduler import Scheduler
+from app.infrastructure.scheduler import Scheduler, parse_worker_result
+from app.schemas import WorkerResult
+
+
+def test_worker_result_parser_uses_final_json_line_after_process_logs() -> None:
+    job_id = uuid.uuid4()
+    task_id = uuid.uuid4()
+    worker_result = WorkerResult(
+        job_id=job_id,
+        task_id=task_id,
+        role=JobRole.INTAKE,
+        result="INTAKE_COMPLETE",
+        summary="ready",
+    )
+    stdout = b"HTTP Request: POST https://api.openai.com/v1/responses 200 OK\n"
+    stdout += worker_result.model_dump_json().encode()
+
+    result = parse_worker_result(stdout)
+
+    assert result.job_id == job_id
+    assert result.task_id == task_id
 
 
 class PreparedDispatch:

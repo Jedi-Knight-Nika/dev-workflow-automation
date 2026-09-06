@@ -12,6 +12,7 @@
   import FindingList from '$lib/components/task-detail/FindingList.svelte';
   import TaskMemoryPanel from '$lib/components/task-detail/TaskMemoryPanel.svelte';
   import GenerationProgress from '$lib/components/task-detail/GenerationProgress.svelte';
+  import TaskConversation from '$lib/components/task-detail/TaskConversation.svelte';
   import { API_URL } from '$lib/api';
   import { debounce } from '$lib/debounce';
   import { planFromJobs, latestThinkerJob } from '$lib/task-plan';
@@ -29,7 +30,9 @@
     mergeTaskPullRequest,
     retryTaskLinearSync,
     getTaskMemory,
-    listTaskCheckpoints
+    listTaskCheckpoints,
+    listTaskMessages,
+    addTaskMessage
   } from '$lib/services/tasks';
   import type {
     AgentCheckpoint,
@@ -38,6 +41,7 @@
     Task,
     TaskEvent,
     TaskMemory,
+    TaskMessage,
     ValidationRecord
   } from '$lib/types';
   import { t } from '$lib/i18n/index.svelte';
@@ -48,6 +52,10 @@
   let findings = $state<ReviewFinding[]>([]);
   let memory = $state<TaskMemory | null>(null);
   let checkpoints = $state<AgentCheckpoint[]>([]);
+  let messages = $state<TaskMessage[]>([]);
+  let nextMessageCursor = $state<number | null>(null);
+  let loadingOlderMessages = $state(false);
+  let sendingMessage = $state(false);
   let error = $state('');
   let preparing = $state(false);
   let commanding = $state(false);
@@ -57,15 +65,34 @@
   let generationProgress = $derived(taskGenerationProgress(events, jobs));
   async function refresh() {
     const taskId = page.params.id ?? '';
-    [task, jobs, events, validations, findings, memory, checkpoints] = await Promise.all([
+    const [
+      nextTask,
+      nextJobs,
+      nextEvents,
+      nextValidations,
+      nextFindings,
+      nextMemory,
+      nextCheckpoints,
+      messagePage
+    ] = await Promise.all([
       getTask(taskId),
       listTaskJobs(taskId),
       listTaskEvents(taskId),
       listTaskValidations(taskId),
       listTaskFindings(taskId),
       getTaskMemory(taskId),
-      listTaskCheckpoints(taskId)
+      listTaskCheckpoints(taskId),
+      listTaskMessages(taskId)
     ]);
+    task = nextTask;
+    jobs = nextJobs;
+    events = nextEvents;
+    validations = nextValidations;
+    findings = nextFindings;
+    memory = nextMemory;
+    checkpoints = nextCheckpoints;
+    messages = messagePage.items;
+    nextMessageCursor = messagePage.next_before_id;
   }
   const refreshOnUpdate = debounce(() => {
     void refresh().catch((cause) => {
@@ -177,6 +204,33 @@
       commanding = false;
     }
   }
+
+  async function loadOlderMessages() {
+    if (!task || !nextMessageCursor || loadingOlderMessages) return;
+    loadingOlderMessages = true;
+    try {
+      const page = await listTaskMessages(task.id, nextMessageCursor);
+      messages = [...page.items, ...messages];
+      nextMessageCursor = page.next_before_id;
+    } finally {
+      loadingOlderMessages = false;
+    }
+  }
+
+  async function sendMessage(body: string) {
+    if (!task || sendingMessage) return;
+    sendingMessage = true;
+    error = '';
+    try {
+      const message = await addTaskMessage(task.id, body);
+      messages = [...messages, message];
+    } catch (cause) {
+      error = String(cause);
+      throw cause;
+    } finally {
+      sendingMessage = false;
+    }
+  }
 </script>
 
 <PageHeader
@@ -207,6 +261,14 @@
     <TaskWorkspacePanel {task} {preparing} onPrepareWorkspace={prepareWorkspace} />
     <TaskPlanPanel {latestPlan} {latestThinker} />
     <TaskMemoryPanel {memory} {checkpoints} />
+    <TaskConversation
+      {messages}
+      hasOlder={nextMessageCursor !== null}
+      loadingOlder={loadingOlderMessages}
+      sending={sendingMessage}
+      onLoadOlder={loadOlderMessages}
+      onSend={sendMessage}
+    />
     <JobList {jobs} />
     <TimelineList {events} />
     <ValidationList {validations} />

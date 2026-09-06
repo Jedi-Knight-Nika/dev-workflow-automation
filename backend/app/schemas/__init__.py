@@ -48,6 +48,9 @@ from .tasks import (
     JobCreate,
     JobRead,
     TaskCreate,
+    TaskMessageCreate,
+    TaskMessagePageRead,
+    TaskMessageRead,
     TaskRead,
 )
 from .teams import (
@@ -117,6 +120,9 @@ __all__ = [
     "TaskAssignmentCreate",
     "TaskAssignmentRead",
     "TaskCreate",
+    "TaskMessageCreate",
+    "TaskMessagePageRead",
+    "TaskMessageRead",
     "TaskRead",
     "TeamRead",
     "TeamWrite",

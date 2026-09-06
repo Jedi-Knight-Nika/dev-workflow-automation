@@ -37,6 +37,13 @@ from app.schemas import WorkerResult
 log = structlog.get_logger()
 
 
+def parse_worker_result(stdout: bytes) -> WorkerResult:
+    """Parse the worker's final JSON line while tolerating preceding process logs."""
+    lines = [line.strip() for line in stdout.splitlines() if line.strip()]
+    payload = lines[-1] if lines else stdout
+    return WorkerResult.model_validate_json(payload)
+
+
 class Scheduler:
     def __init__(
         self,
@@ -235,7 +242,7 @@ class Scheduler:
             )
             return
         try:
-            result = WorkerResult.model_validate_json(execution.stdout)
+            result = parse_worker_result(execution.stdout)
         except ValidationError as exc:
             await self._finish(
                 job_id,

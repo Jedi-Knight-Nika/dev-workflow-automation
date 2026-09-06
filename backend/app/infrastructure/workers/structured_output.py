@@ -99,6 +99,20 @@ def validate_role_output(role: JobRole, text: str) -> dict[str, Any]:
     return model.model_validate(data).model_dump(mode="json")
 
 
+def role_output_schema(role: JobRole) -> dict[str, Any]:
+    models: dict[JobRole, type[BaseModel]] = {
+        JobRole.INTAKE: IntakeProposal,
+        JobRole.THINKER: ThinkerProposal,
+        JobRole.EXECUTOR: ExecutorProposal,
+        JobRole.REVIEWER: ReviewerProposal,
+        JobRole.TESTER: TesterProposal,
+    }
+    try:
+        return models[role].model_json_schema()
+    except KeyError as exc:
+        raise ValueError(f"Unsupported role {role.value}") from exc
+
+
 async def run_with_structured_repair(
     provider: AIProvider,
     request: ProviderRequest,
@@ -127,6 +141,7 @@ async def run_with_structured_repair(
                 reasoning_effort=request.reasoning_effort,
                 timeout_seconds=request.timeout_seconds,
                 cacheable_prompt_prefix=cacheable_prefix,
+                response_schema=request.response_schema,
             ),
             on_text_delta,
             is_cancelled,

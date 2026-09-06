@@ -88,6 +88,26 @@ def test_normalized_runtime_fields_map_to_provider_specific_parameters() -> None
     }
 
 
+def test_openai_receives_structured_job_result_schema() -> None:
+    schema = {"type": "object", "properties": {"result": {"type": "string"}}}
+
+    payload = OpenAIProvider._payload(
+        ProviderRequest(
+            model="test-model",
+            system="system",
+            prompt="prompt",
+            response_schema=schema,
+        )
+    )
+
+    assert payload["text"]["format"] == {
+        "type": "json_schema",
+        "name": "job_result",
+        "strict": False,
+        "schema": schema,
+    }
+
+
 def test_model_json_is_parsed() -> None:
     assert parse_model_data('```json\n{"result": "PASS"}\n```') == {"result": "PASS"}
 

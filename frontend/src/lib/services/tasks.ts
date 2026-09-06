@@ -6,6 +6,8 @@ import type {
   Task,
   TaskEvent,
   TaskMemory,
+  TaskMessage,
+  TaskMessagePage,
   ValidationRecord
 } from '$lib/types';
 
@@ -81,6 +83,19 @@ export function createTaskJob(taskId: string, input: CreateJobInput): Promise<Jo
 
 export function listTaskEvents(taskId: string): Promise<TaskEvent[]> {
   return api<TaskEvent[]>(`/tasks/${taskId}/events`);
+}
+
+export function listTaskMessages(taskId: string, beforeId?: number): Promise<TaskMessagePage> {
+  const query = new URLSearchParams({ limit: '50' });
+  if (beforeId) query.set('before_id', String(beforeId));
+  return api<TaskMessagePage>(`/tasks/${taskId}/messages?${query.toString()}`);
+}
+
+export function addTaskMessage(taskId: string, body: string): Promise<TaskMessage> {
+  return api<TaskMessage>(`/tasks/${taskId}/messages`, {
+    method: 'POST',
+    body: JSON.stringify({ body })
+  });
 }
 
 export function listTaskValidations(taskId: string): Promise<ValidationRecord[]> {

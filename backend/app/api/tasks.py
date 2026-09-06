@@ -6,6 +6,7 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.application.jobs import EnqueueTaskJob
+from app.application.manage_task_conversation import AddTaskMessage, QueryTaskConversation
 from app.application.ports.job_enqueueing import (
     EnqueueJobCommand,
     EnqueueTaskConflict,
@@ -19,6 +20,7 @@ from app.application.ports.pull_request_publication import (
     PublishUnavailable,
     PullRequestPublicationWorkflow,
 )
+from app.application.ports.task_conversation import TaskConversationStore
 from app.application.ports.task_history import TaskHistoryQueries
 from app.application.ports.task_lifecycle import (
     TaskLifecycleUnitOfWorkFactory,
@@ -59,6 +61,7 @@ from app.bootstrap.dependencies import (
     get_job_enqueue_workflow,
     get_merge_workflow,
     get_pull_request_publication_workflow,
+    get_task_conversation_store,
     get_task_history_queries,
     get_task_lifecycle_factory,
     get_task_queries,
@@ -75,6 +78,9 @@ from app.schemas import (
     PullRequestRead,
     ReviewFindingRead,
     TaskCreate,
+    TaskMessageCreate,
+    TaskMessagePageRead,
+    TaskMessageRead,
     TaskRead,
     ValidationRead,
 )
@@ -304,6 +310,34 @@ async def list_task_events(
 ) -> list[EventRead]:
     items = await QueryTaskHistory(queries).events(task_id)
     return [EventRead.model_validate(item) for item in items]
+
+
+@router.get("/{task_id}/messages", response_model=TaskMessagePageRead)
+async def list_task_messages(
+    task_id: uuid.UUID,
+    limit: int = Query(default=50, ge=1, le=100),
+    before_id: int | None = Query(default=None, ge=1),
+    store: TaskConversationStore = Depends(get_task_conversation_store),
+) -> TaskMessagePageRead:
+    page = await QueryTaskConversation(store).execute(task_id, limit, before_id)
+    return TaskMessagePageRead.model_validate(asdict(page))
+
+
+@router.post(
+    "/{task_id}/messages", response_model=TaskMessageRead, status_code=status.HTTP_201_CREATED
+)
+async def add_task_message(
+    task_id: uuid.UUID,
+    body: TaskMessageCreate,
+    store: TaskConversationStore = Depends(get_task_conversation_store),
+) -> TaskMessageRead:
+    try:
+        message = await AddTaskMessage(store).execute(task_id, body.body)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return TaskMessageRead.model_validate(message)
 
 
 @router.post("/{task_id}/pause", response_model=TaskRead)

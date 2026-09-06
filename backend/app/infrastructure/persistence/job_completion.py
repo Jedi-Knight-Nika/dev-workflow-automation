@@ -173,15 +173,15 @@ class SqlAlchemyFailedCompletionUnitOfWork:
     @staticmethod
     def _increment_retry_counter(retry_state: JobRetryState, scope: FailureScope) -> None:
         if scope is FailureScope.PROVIDER:
-            retry_state.provider_retry_count += 1
+            retry_state.provider_retry_count = (retry_state.provider_retry_count or 0) + 1
         elif scope is FailureScope.INTEGRATION:
-            retry_state.integration_retry_count += 1
+            retry_state.integration_retry_count = (retry_state.integration_retry_count or 0) + 1
         elif scope is FailureScope.WORKER_RUNTIME:
-            retry_state.worker_retry_count += 1
+            retry_state.worker_retry_count = (retry_state.worker_retry_count or 0) + 1
         elif scope is FailureScope.REQUEST:
-            retry_state.protocol_retry_count += 1
+            retry_state.protocol_retry_count = (retry_state.protocol_retry_count or 0) + 1
         elif scope is FailureScope.TASK:
-            retry_state.engineering_retry_count += 1
+            retry_state.engineering_retry_count = (retry_state.engineering_retry_count or 0) + 1
 
     async def schedule_retry(
         self, context: FailedJobContext, delay_seconds: int, max_attempts: int

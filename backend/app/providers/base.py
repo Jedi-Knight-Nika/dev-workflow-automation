@@ -20,6 +20,7 @@ class ProviderRequest:
     reasoning_effort: str = "default"
     timeout_seconds: int = 120
     cacheable_prompt_prefix: str | None = None
+    response_schema: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)

@@ -43,6 +43,17 @@ def lifecycle_directive(
     if action == LifecycleAction.REOPEN:
         if current_state == TaskState.MERGED:
             raise InvalidTaskTransition("Merged tasks cannot be moved back to backlog")
+        if current_state not in {
+            TaskState.NEEDS_HUMAN,
+            TaskState.FAILED,
+            TaskState.PAUSED,
+            TaskState.CANCELLED,
+            TaskState.CONTEXT_PENDING,
+            TaskState.NEW,
+        }:
+            raise InvalidTaskTransition(
+                f"Only blocked or stopped tasks can be moved to backlog, not {current_state.value}"
+            )
         if current_state == TaskState.NEW:
             return LifecycleDirective(TaskState.NEW, False)
         return LifecycleDirective(TaskState.NEW, False, True)

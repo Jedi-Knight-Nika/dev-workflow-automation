@@ -15,7 +15,17 @@ from app.application.ports.team_management import (
     TeamView,
     WakeTeamResult,
 )
-from app.db.models import Job, JobRole, JobState, Repository, Task, TaskAssignment, Team, WorkerRun
+from app.db.models import (
+    Job,
+    JobRole,
+    JobState,
+    Repository,
+    Task,
+    TaskAssignment,
+    TaskState,
+    Team,
+    WorkerRun,
+)
 from app.infrastructure.persistence.workflow_designer import SqlAlchemyWorkflowDesigner
 
 
@@ -242,6 +252,23 @@ class SqlAlchemyTeamManagementWorkflow:
                     started_at=None,
                 )
             )
+
+        reopened_waiting_jobs = list(
+            (
+                await self._session.scalars(
+                    select(Job)
+                    .join(Task, Task.id == Job.task_id)
+                    .where(
+                        Task.team_id == team_id,
+                        Task.state == TaskState.NEW,
+                        Job.state.in_([JobState.WAITING_HUMAN, JobState.WAITING_CONFIGURATION]),
+                    )
+                    .with_for_update(skip_locked=True)
+                )
+            ).all()
+        )
+        for stale_job in reopened_waiting_jobs:
+            stale_job.state = JobState.CANCELLED
 
         assignments = list(
             (

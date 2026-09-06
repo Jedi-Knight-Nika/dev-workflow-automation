@@ -32,6 +32,15 @@ class OpenAIProvider(AIProvider):
             payload["temperature"] = request.temperature
         if request.reasoning_effort != "default":
             payload["reasoning"] = {"effort": request.reasoning_effort}
+        if request.response_schema is not None:
+            payload["text"] = {
+                "format": {
+                    "type": "json_schema",
+                    "name": "job_result",
+                    "strict": False,
+                    "schema": request.response_schema,
+                }
+            }
         return payload
 
     async def list_models(self) -> list[ProviderModel]:

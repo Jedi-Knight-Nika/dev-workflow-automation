@@ -40,6 +40,13 @@
   let columns = $derived(tasksByColumn(tasks));
   let timer: ReturnType<typeof setTimeout> | undefined;
   let requestId = 0;
+  const reopenableStates = new Set([
+    'NEEDS_HUMAN',
+    'FAILED',
+    'PAUSED',
+    'CANCELLED',
+    'CONTEXT_PENDING'
+  ]);
 
   async function refresh() {
     const thisRequest = ++requestId;
@@ -307,7 +314,7 @@
               <button
                 class="task-card"
                 class:moving={movingTaskId === task.id}
-                draggable={task.state !== 'MERGED'}
+                draggable={reopenableStates.has(task.state)}
                 ondragstart={() => {
                   draggedTaskId = task.id;
                 }}

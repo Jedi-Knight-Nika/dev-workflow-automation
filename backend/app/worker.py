@@ -49,6 +49,7 @@ from app.infrastructure.workers.executor import (
 from app.infrastructure.workers.structured_output import (
     ProviderAttempt,
     StructuredOutputError,
+    role_output_schema,
     run_with_structured_repair,
 )
 from app.logging import configure_logging
@@ -773,6 +774,7 @@ async def run(job_id: uuid.UUID) -> WorkerResult:
                             config.configuration.get("reasoning_effort", "default")
                         ),
                         timeout_seconds=int(config.configuration.get("timeout_minutes", 60)) * 60,
+                        response_schema=role_output_schema(job.role),
                     ),
                     job.role,
                     max_repairs,

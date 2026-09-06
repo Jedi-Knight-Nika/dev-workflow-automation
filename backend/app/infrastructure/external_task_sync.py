@@ -62,6 +62,14 @@ async def sync_external_task_state(session: AsyncSession, task: Task) -> bool:
     if configuration_key is None:
         return False
     target_id = integration.configuration.get(configuration_key) if integration else None
+    if (
+        not target_id
+        and integration is not None
+        and snapshot.provider == "trello"
+        and task.state == TaskState.NEW
+    ):
+        source_lists = integration.configuration.get("list_ids") or []
+        target_id = source_lists[0] if source_lists else None
     if integration is None or integration.encrypted_credentials is None or not target_id:
         await _record_skipped(session, task, snapshot.provider, status_label, configuration_key)
         return False
