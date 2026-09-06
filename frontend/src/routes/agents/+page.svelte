@@ -499,21 +499,18 @@
                   >{t('agents.model')}
                   <div class="flex items-start gap-2">
                     <div class="min-w-0 flex-1">
-                      <span class="icon-select">
-                        <BrandIcon brand={agent.provider} size={17} />
-                        <select
-                          id={`model-${agent.role}`}
-                          class="field w-full"
-                          value={usesManualModel(agent) ? '__manual__' : agent.model}
-                          onchange={(event) => changeModel(agent, event)}
-                        >
-                          <option value="">{t('workflow.selectModel')}</option>
-                          {#each availableModels(agent) as model (model.id)}
-                            <option value={model.id}>{model.display_name} · {model.id}</option>
-                          {/each}
-                          <option value="__manual__">{t('workflow.enterModelIdManually')}</option>
-                        </select>
-                      </span>
+                      <select
+                        id={`model-${agent.role}`}
+                        class="field w-full"
+                        value={usesManualModel(agent) ? '__manual__' : agent.model}
+                        onchange={(event) => changeModel(agent, event)}
+                      >
+                        <option value="">{t('workflow.selectModel')}</option>
+                        {#each availableModels(agent) as model (model.id)}
+                          <option value={model.id}>{model.display_name} · {model.id}</option>
+                        {/each}
+                        <option value="__manual__">{t('workflow.enterModelIdManually')}</option>
+                      </select>
                       {#if usesManualModel(agent)}
                         <input
                           class="field mt-2 w-full"
@@ -838,7 +835,7 @@
     pointer-events: none;
   }
   .icon-select .field {
-    padding-left: 2.4rem;
+    padding-left: 2.8rem;
   }
   .field {
     display: block;

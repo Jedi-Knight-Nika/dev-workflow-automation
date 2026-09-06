@@ -13,12 +13,31 @@
     integrationNames: string[];
     repositoryCount: number;
     modelValidationStatus: string;
+    modelValidationMessage: string | null;
     enabled: boolean;
     onMenu?: (event: MouseEvent) => void;
   };
 
   let { data }: NodeProps = $props();
   const agent = $derived(data as AgentNodeData);
+
+  const statusLabel = $derived(
+    agent.status === 'SYSTEM_READY'
+      ? 'SYSTEM READY'
+      : agent.status === 'NEEDS_VERIFICATION'
+        ? 'NEEDS MODEL TEST'
+        : agent.status.replaceAll('_', ' ')
+  );
+
+  const statusHint = $derived(
+    agent.status === 'SYSTEM_READY'
+      ? 'Deterministic workflow controller; no AI model is required.'
+      : agent.status === 'NEEDS_CONFIGURATION'
+        ? 'Choose a provider and model, then save the workflow.'
+        : agent.status === 'NEEDS_VERIFICATION'
+          ? 'Open this Agent and select Test model.'
+          : agent.modelValidationMessage || statusLabel
+  );
 </script>
 
 <Handle type="target" position={Position.Left} />
@@ -34,34 +53,46 @@
       {#if agent.system}<span class="system-pill">CORE</span>{/if}
     </div>
     <div class="flex items-center gap-1.5">
-      <span class="status-dot" class:running={agent.status === 'RUNNING'} class:off={!agent.enabled}
+      <span
+        class="status-dot"
+        class:running={agent.status === 'RUNNING'}
+        class:ready={['READY', 'SYSTEM_READY'].includes(agent.status)}
+        class:warning={['NEEDS_CONFIGURATION', 'NEEDS_VERIFICATION'].includes(agent.status)}
+        class:error={agent.status === 'CONFIGURATION_ERROR'}
+        class:off={!agent.enabled}
       ></span>
       <span class="role-name">{agent.role}</span><span class="separator">·</span>
-      <span class="text-muted text-[9px] tracking-[0.1em]"
-        >{agent.enabled ? agent.status.replaceAll('_', ' ') : 'DISABLED'}</span
+      <span class="text-muted text-[9px] tracking-[0.1em]" title={statusHint}
+        >{agent.enabled ? statusLabel : 'DISABLED'}</span
       >
     </div>
-    <div class="model-row">
-      <span class="provider-mark" title={agent.provider || 'Provider not configured'}>
-        <BrandIcon brand={agent.provider} size={13} />
-      </span>
-      <span class="model-name">{agent.model || 'Model not configured'}</span>
-      <span
-        class="validation-dot"
-        class:available={agent.modelValidationStatus === 'AVAILABLE'}
-        class:invalid={['MODEL_NOT_FOUND', 'UNAUTHORIZED', 'ERROR'].includes(
-          agent.modelValidationStatus
-        )}
-        title={agent.modelValidationStatus.replaceAll('_', ' ')}
-      ></span>
-      <span class="validation-label" title={agent.modelValidationStatus.replaceAll('_', ' ')}>
-        {agent.modelValidationStatus === 'AVAILABLE'
-          ? 'READY'
-          : agent.modelValidationStatus === 'NOT_CONFIGURED'
-            ? 'NOT SET'
-            : agent.modelValidationStatus.replaceAll('_', ' ')}
-      </span>
-    </div>
+    {#if agent.system && agent.role === 'ORCHESTRATOR'}
+      <div class="model-row" title={statusHint}>
+        <span class="system-mark">◆</span>
+        <span class="model-name">Deterministic workflow control</span>
+        <span class="validation-label ready-label">READY</span>
+      </div>
+    {:else}<div class="model-row">
+        <span class="provider-mark" title={agent.provider || 'Provider not configured'}>
+          <BrandIcon brand={agent.provider} size={13} />
+        </span>
+        <span class="model-name">{agent.model || 'Model not configured'}</span>
+        <span
+          class="validation-dot"
+          class:available={agent.modelValidationStatus === 'AVAILABLE'}
+          class:invalid={['MODEL_NOT_FOUND', 'UNAUTHORIZED', 'ERROR'].includes(
+            agent.modelValidationStatus
+          )}
+          title={agent.modelValidationMessage || agent.modelValidationStatus.replaceAll('_', ' ')}
+        ></span>
+        <span class="validation-label" title={statusHint}>
+          {agent.modelValidationStatus === 'AVAILABLE'
+            ? 'READY'
+            : agent.model
+              ? 'TEST MODEL'
+              : 'NOT SET'}
+        </span>
+      </div>{/if}
     {#if agent.integrationNames.length || agent.repositoryCount}
       <div class="access-row">
         {#each agent.integrationNames.slice(0, 3) as name (name)}
@@ -118,6 +149,15 @@
     background: var(--color-accent);
     box-shadow: 0 0 9px color-mix(in srgb, var(--color-accent) 75%, transparent);
   }
+  .status-dot.ready {
+    background: var(--color-accent);
+  }
+  .status-dot.warning {
+    background: var(--color-warning);
+  }
+  .status-dot.error {
+    background: var(--color-danger);
+  }
   .status-dot.off {
     background: var(--color-danger);
     box-shadow: none;
@@ -158,6 +198,10 @@
     font-size: 0.45rem;
     font-weight: 900;
   }
+  .system-mark {
+    color: var(--color-brand);
+    font-size: 0.7rem;
+  }
   .model-name {
     overflow: hidden;
     color: var(--color-muted);
@@ -191,6 +235,10 @@
     letter-spacing: 0.08em;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+  .ready-label {
+    margin-left: auto;
+    color: var(--color-accent);
   }
   .access-row {
     display: flex;

@@ -196,10 +196,26 @@
   const titleCase = (value: string) => value[0].toUpperCase() + value.slice(1);
   const percent = (value: number, min: number, max: number) => ((value - min) / (max - min)) * 100;
 
+  function nodeStatus(node: CanvasNode, liveStatus?: string) {
+    if (!node.data.enabled) return 'DISABLED';
+    if (liveStatus === 'RUNNING') return 'RUNNING';
+    if (node.data.role === 'ORCHESTRATOR') return 'SYSTEM_READY';
+    if (!node.data.provider || !node.data.model) return 'NEEDS_CONFIGURATION';
+    if (node.data.modelValidationStatus === 'AVAILABLE') return 'READY';
+    if (['MODEL_NOT_FOUND', 'UNAUTHORIZED', 'ERROR'].includes(node.data.modelValidationStatus)) {
+      return 'CONFIGURATION_ERROR';
+    }
+    return 'NEEDS_VERIFICATION';
+  }
+
+  function statusCount(...statuses: string[]) {
+    return nodes.filter((node) => statuses.includes(node.data.status)).length;
+  }
+
   $effect(() => {
     const statuses = new Map(agents.map((agent) => [agent.role, agent.status]));
     nodes = untrack(() => nodes).map((node) => {
-      const status = statuses.get(node.data.role) || 'UNCONFIGURED';
+      const status = nodeStatus(node, statuses.get(node.data.role));
       const integrationNames = node.data.integrationIds.flatMap((id) => {
         const integration = integrations.find((item) => item.id === id);
         return integration ? [integration.provider_name] : [];
@@ -306,7 +322,13 @@
                 field === 'systemPrompt'
                   ? node.data.modelValidationMessage
                   : 'Configuration changed; validate again',
-              modelValidatedAt: field === 'systemPrompt' ? node.data.modelValidatedAt : null
+              modelValidatedAt: field === 'systemPrompt' ? node.data.modelValidatedAt : null,
+              status:
+                field === 'systemPrompt'
+                  ? node.data.status
+                  : value || (field === 'provider' && node.data.model)
+                    ? 'NEEDS_VERIFICATION'
+                    : 'NEEDS_CONFIGURATION'
             }
           }
         : node
@@ -337,6 +359,7 @@
               ...node.data,
               provider,
               model: '',
+              status: 'NEEDS_CONFIGURATION',
               modelValidationStatus: 'NOT_CONFIGURED',
               modelValidationMessage: 'Choose a model, then test the connection',
               modelValidatedAt: null
@@ -428,7 +451,8 @@
                 ...node.data,
                 modelValidationStatus: result.status,
                 modelValidationMessage: result.message,
-                modelValidatedAt: result.validated_at
+                modelValidatedAt: result.validated_at,
+                status: result.status === 'AVAILABLE' ? 'READY' : 'CONFIGURATION_ERROR'
               }
             }
           : node
@@ -722,6 +746,15 @@
     <span class="text-muted ml-auto hidden text-[10px] md:inline"
       >{t('workflow.canvasStats', { nodes: nodes.length, edges: edges.length })}</span
     >
+    <div class="agent-health-summary" aria-label="Workflow agent status summary">
+      <span class="ready">{statusCount('READY', 'SYSTEM_READY')} ready</span>
+      <span class="running">{statusCount('RUNNING')} running</span>
+      {#if statusCount('NEEDS_CONFIGURATION', 'NEEDS_VERIFICATION', 'CONFIGURATION_ERROR')}
+        <span class="attention"
+          >{statusCount('NEEDS_CONFIGURATION', 'NEEDS_VERIFICATION', 'CONFIGURATION_ERROR')} need attention</span
+        >
+      {/if}
+    </div>
     <Button size="sm" variant="primary" disabled={saving || !dirty} onclick={persist}>
       <span class="flex items-center gap-1.5">
         {#if saving}<Spinner class="size-3" />{/if}
@@ -876,7 +909,9 @@
           <div class="details-grid">
             <div>
               <span>{t('workflow.statusLabel')}</span><b
-                >{detailsNode.data.status.replaceAll('_', ' ')}</b
+                >{detailsNode.data.status === 'SYSTEM_READY'
+                  ? 'SYSTEM READY'
+                  : detailsNode.data.status.replaceAll('_', ' ')}</b
               >
             </div>
             <div><span>{t('workflow.roleLabel')}</span><b>{detailsNode.data.role}</b></div>
@@ -889,38 +924,47 @@
             </div>
             <div>
               <span>{t('workflow.modelLabel')}</span><b
-                >{detailsNode.data.model || t('workflow.notConfigured')}</b
+                >{detailsNode.data.role === 'ORCHESTRATOR'
+                  ? 'Not required'
+                  : detailsNode.data.model || t('workflow.notConfigured')}</b
               >
             </div>
           </div>
           <div class="access-section">
-            <div class="flex items-start justify-between gap-3">
-              <div>
-                <h3>{t('workflow.aiModel')}</h3>
-                <p>{t('workflow.aiModelHint')}</p>
+            {#if detailsNode.data.role === 'ORCHESTRATOR'}
+              <div class="system-control-note">
+                <strong>System control is ready</strong>
+                <p>
+                  The Orchestrator routes Jobs deterministically from this workflow graph. It is not
+                  an AI worker and does not need a provider or model.
+                </p>
               </div>
-              <span
-                class="model-status"
-                class:available={detailsNode.data.modelValidationStatus === 'AVAILABLE'}
-                class:invalid={['MODEL_NOT_FOUND', 'UNAUTHORIZED', 'ERROR'].includes(
-                  detailsNode.data.modelValidationStatus
-                )}>{detailsNode.data.modelValidationStatus.replaceAll('_', ' ')}</span
-              >
-            </div>
-            <div class="model-controls">
-              <span class="provider-select">
-                <BrandIcon brand={detailsNode.data.provider} size={17} />
-                <select
-                  value={detailsNode.data.provider}
-                  onchange={(event) => changeNodeProvider(detailsNode.id, event)}
+            {:else}
+              <div class="flex items-start justify-between gap-3">
+                <div>
+                  <h3>{t('workflow.aiModel')}</h3>
+                  <p>{t('workflow.aiModelHint')}</p>
+                </div>
+                <span
+                  class="model-status"
+                  class:available={detailsNode.data.modelValidationStatus === 'AVAILABLE'}
+                  class:invalid={['MODEL_NOT_FOUND', 'UNAUTHORIZED', 'ERROR'].includes(
+                    detailsNode.data.modelValidationStatus
+                  )}>{detailsNode.data.modelValidationStatus.replaceAll('_', ' ')}</span
                 >
-                  <option value="openai">OpenAI</option><option value="anthropic"
-                    >Anthropic / Claude</option
-                  ><option value="google">Google / Gemini</option>
-                </select>
-              </span>
-              <span class="provider-select">
-                <BrandIcon brand={detailsNode.data.provider} size={17} />
+              </div>
+              <div class="model-controls">
+                <span class="provider-select">
+                  <BrandIcon brand={detailsNode.data.provider} size={17} />
+                  <select
+                    value={detailsNode.data.provider}
+                    onchange={(event) => changeNodeProvider(detailsNode.id, event)}
+                  >
+                    <option value="openai">OpenAI</option><option value="anthropic"
+                      >Anthropic / Claude</option
+                    ><option value="google">Google / Gemini</option>
+                  </select>
+                </span>
                 <select
                   value={usesManualNodeModel(detailsNode) ? '__manual__' : detailsNode.data.model}
                   onchange={(event) => chooseModel(detailsNode.id, event)}
@@ -931,49 +975,49 @@
                   {/each}
                   <option value="__manual__">{t('workflow.enterModelIdManually')}</option>
                 </select>
-              </span>
-              {#if usesManualNodeModel(detailsNode)}
-                <input
-                  value={detailsNode.data.model}
-                  oninput={(event) =>
-                    updateNodeModel(
-                      detailsNode.id,
-                      'model',
-                      (event.currentTarget as HTMLInputElement).value
-                    )}
-                  placeholder={t('workflow.modelIdPlaceholder')}
-                />
-              {/if}
-            </div>
-            <div class="mt-2 flex items-center gap-2">
-              <Button
-                size="sm"
-                variant="ghost"
-                disabled={discoveringModels}
-                onclick={() => discoverModels(detailsNode.data.provider)}
-              >
-                <span class="flex items-center gap-1.5">
-                  {#if discoveringModels}<Spinner class="size-3" />{/if}
-                  {discoveringModels
-                    ? t('workflow.loadingEllipsis')
-                    : t('workflow.loadAvailableModels')}
-                </span>
-              </Button>
-              <Button
-                size="sm"
-                variant="success"
-                disabled={validatingModel || !detailsNode.data.model.trim()}
-                onclick={() => validateModel(detailsNode.id)}
-              >
-                <span class="flex items-center gap-1.5">
-                  {#if validatingModel}<Spinner class="size-3" />{/if}
-                  {validatingModel ? t('workflow.checkingEllipsis') : t('workflow.testModel')}
-                </span>
-              </Button>
-              {#if detailsNode.data.modelValidationMessage}<span class="text-muted text-[10px]"
-                  >{detailsNode.data.modelValidationMessage}</span
-                >{/if}
-            </div>
+                {#if usesManualNodeModel(detailsNode)}
+                  <input
+                    value={detailsNode.data.model}
+                    oninput={(event) =>
+                      updateNodeModel(
+                        detailsNode.id,
+                        'model',
+                        (event.currentTarget as HTMLInputElement).value
+                      )}
+                    placeholder={t('workflow.modelIdPlaceholder')}
+                  />
+                {/if}
+              </div>
+              <div class="mt-2 flex items-center gap-2">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={discoveringModels}
+                  onclick={() => discoverModels(detailsNode.data.provider)}
+                >
+                  <span class="flex items-center gap-1.5">
+                    {#if discoveringModels}<Spinner class="size-3" />{/if}
+                    {discoveringModels
+                      ? t('workflow.loadingEllipsis')
+                      : t('workflow.loadAvailableModels')}
+                  </span>
+                </Button>
+                <Button
+                  size="sm"
+                  variant="success"
+                  disabled={validatingModel || !detailsNode.data.model.trim()}
+                  onclick={() => validateModel(detailsNode.id)}
+                >
+                  <span class="flex items-center gap-1.5">
+                    {#if validatingModel}<Spinner class="size-3" />{/if}
+                    {validatingModel ? t('workflow.checkingEllipsis') : t('workflow.testModel')}
+                  </span>
+                </Button>
+                {#if detailsNode.data.modelValidationMessage}<span class="text-muted text-[10px]"
+                    >{detailsNode.data.modelValidationMessage}</span
+                  >{/if}
+              </div>
+            {/if}
           </div>
           <div class="access-section">
             <div>
@@ -1912,7 +1956,44 @@
   }
   .provider-select select {
     width: 100%;
-    padding-left: 2.35rem;
+    padding-left: 2.8rem;
+  }
+  .agent-health-summary {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-size: 0.55rem;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+  .agent-health-summary span {
+    border: 1px solid var(--color-line);
+    border-radius: 999px;
+    padding: 0.25rem 0.45rem;
+  }
+  .agent-health-summary .ready,
+  .agent-health-summary .running {
+    color: var(--color-accent);
+  }
+  .agent-health-summary .attention {
+    color: var(--color-warning);
+  }
+  .system-control-note {
+    border: 1px solid color-mix(in srgb, var(--color-accent) 30%, var(--color-line));
+    border-radius: 0.7rem;
+    background: color-mix(in srgb, var(--color-accent) 7%, var(--color-panel-alt));
+    padding: 0.9rem;
+  }
+  .system-control-note strong {
+    color: var(--color-accent);
+    font-size: 0.75rem;
+  }
+  .system-control-note p {
+    margin-top: 0.25rem;
+    color: var(--color-muted);
+    font-size: 0.65rem;
+    line-height: 1.5;
   }
   .model-controls select,
   .model-controls input,
