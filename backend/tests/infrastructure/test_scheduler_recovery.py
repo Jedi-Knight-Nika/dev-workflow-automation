@@ -15,6 +15,11 @@ class PreparedDispatch:
         return True
 
 
+class InvalidConfigurationDispatch:
+    async def prepare(self, _job: ClaimedJob) -> bool:
+        raise RuntimeError("MODEL_POLICY_ERROR: Agent model is not configured")
+
+
 class ForbiddenRunner:
     def __init__(self) -> None:
         self.called = False
@@ -131,3 +136,34 @@ async def test_scheduler_runs_jobs_up_to_configured_bound() -> None:
     await asyncio.wait_for(run_task, timeout=1)
 
     assert peak == 2
+
+
+@pytest.mark.asyncio
+async def test_preflight_configuration_error_is_preserved_for_resilience_routing() -> None:
+    job = ClaimedJob(uuid.uuid4(), uuid.uuid4())
+    failed_completer = RecordingCompleter()
+    runner = ForbiddenRunner()
+    unused = cast(Any, object())
+    scheduler = Scheduler(
+        unused,
+        "test-scheduler",
+        cast(Any, InvalidConfigurationDispatch()),
+        cast(Any, runner),
+        cast(Any, failed_completer),
+        unused,
+        unused,
+        unused,
+        unused,
+        unused,
+        unused,
+        unused,
+        unused,
+        unused,
+        unused,
+    )
+
+    await scheduler._execute_safely(job)
+
+    assert not runner.called
+    command = cast(Any, failed_completer.commands[0])
+    assert command.failure == "MODEL_POLICY_ERROR: Agent model is not configured"

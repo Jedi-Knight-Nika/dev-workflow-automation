@@ -18,6 +18,32 @@ ALLOWED_RUNTIME_OVERRIDES = frozenset(
         "job_timeout_seconds",
     }
 )
+SUPPORTED_PROVIDERS = frozenset({"openai", "anthropic", "google"})
+
+
+def resolve_agent_runtime_config(
+    agent: AIAgent,
+    role: Role,
+    *,
+    strategy: dict[str, Any] | None = None,
+    overrides: dict[str, Any] | None = None,
+) -> EffectiveAgentRuntimeConfig:
+    """Resolve and validate persisted Agent configuration before execution."""
+    provider = (agent.provider or role.default_provider or "openai").casefold()
+    model = agent.model or role.default_model or ""
+    if provider not in SUPPORTED_PROVIDERS:
+        raise ValueError(f"Unsupported AI provider: {provider}")
+    if not model.strip():
+        raise ValueError("Agent model is not configured")
+    return resolve_runtime_config(
+        provider=provider,
+        model=model,
+        role_profile=dict(role.runtime_profile or {}),
+        agent_overrides=dict(agent.runtime_overrides if overrides is None else overrides),
+        override_policy=dict(role.override_policy or {}),
+        strategy=strategy,
+        capabilities=ModelCapabilityRegistry().get(provider, model),
+    )
 
 
 class SqlAlchemyAgentRuntimeStore:
@@ -60,17 +86,7 @@ class SqlAlchemyAgentRuntimeStore:
     def _resolve(
         agent: AIAgent, role: Role, overrides: dict[str, Any] | None = None
     ) -> EffectiveAgentRuntimeConfig:
-        provider = agent.provider or role.default_provider or "openai"
-        model = agent.model or role.default_model or ""
-        return resolve_runtime_config(
-            provider=provider,
-            model=model,
-            role_profile=dict(role.runtime_profile or {}),
-            agent_overrides=dict(agent.runtime_overrides if overrides is None else overrides),
-            override_policy=dict(role.override_policy or {}),
-            strategy=None,
-            capabilities=ModelCapabilityRegistry().get(provider, model),
-        )
+        return resolve_agent_runtime_config(agent, role, overrides=overrides)
 
     def _view(self, agent: AIAgent, role: Role) -> dict[str, Any]:
         runtime = self._resolve(agent, role)

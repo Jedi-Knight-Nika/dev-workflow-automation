@@ -1,7 +1,8 @@
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.application.ports.job_dispatch import ClaimedJob
-from app.db.models import Job, JobRole, JobState
+from app.db.models import AIAgent, Job, JobRole, JobState, Role, Task
+from app.infrastructure.persistence.agent_runtime import resolve_agent_runtime_config
 from app.infrastructure.persistence.job_operations import acquire_workspace_lease, claim_next_job
 
 
@@ -30,6 +31,20 @@ class SqlAlchemyJobDispatch:
             job = await session.get(Job, claimed_job.job_id)
             if job is None or job.lease_token != claimed_job.lease_token:
                 return False
+            if job.agent_id is not None:
+                agent = await session.get(AIAgent, job.agent_id)
+                role = await session.get(Role, agent.role_id) if agent else None
+                task = await session.get(Task, job.task_id)
+                if agent is None or role is None or not agent.enabled or not role.enabled:
+                    raise RuntimeError("MODEL_POLICY_ERROR: Agent or Role is unavailable")
+                try:
+                    resolve_agent_runtime_config(
+                        agent,
+                        role,
+                        strategy=dict(task.execution_strategy or {}) if task else None,
+                    )
+                except ValueError as exc:
+                    raise RuntimeError(f"MODEL_POLICY_ERROR: {exc}") from exc
             if job.role == JobRole.EXECUTOR and not await acquire_workspace_lease(
                 session, job, self._lease_seconds
             ):

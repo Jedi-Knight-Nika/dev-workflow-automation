@@ -155,12 +155,18 @@ class Scheduler:
             raise
         except Exception as exc:
             log.exception("job_execution_failed", job_id=str(claimed_job.job_id))
+            message = str(exc)
+            failure = (
+                message
+                if message.startswith(("MODEL_POLICY_ERROR:", "MODEL_UNAVAILABLE:"))
+                else f"Unknown system error: {type(exc).__name__}"
+            )
             await self._finish(
                 claimed_job.job_id,
                 claimed_job.lease_token,
                 JobExecutionState.FAILED,
                 None,
-                f"Unknown system error: {type(exc).__name__}",
+                failure,
             )
 
     async def _run_indexer(self) -> None:

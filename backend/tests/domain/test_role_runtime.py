@@ -1,6 +1,10 @@
+import uuid
+
 import pytest
 
+from app.db.models import AIAgent, Role
 from app.domain.ai_runtime import ReasoningLevel, resolve_runtime_config
+from app.infrastructure.persistence.agent_runtime import resolve_agent_runtime_config
 from app.providers.capabilities import ModelCapabilityRegistry
 
 
@@ -94,3 +98,45 @@ def test_effective_snapshot_is_stable_and_contains_no_credentials() -> None:
 
     assert runtime.fingerprint() == runtime.fingerprint()
     assert "api_key" not in runtime.snapshot()
+
+
+def test_agent_preflight_requires_a_configured_model() -> None:
+    role = Role(
+        id=uuid.uuid4(),
+        name="Reviewer",
+        category="REVIEW",
+        default_provider="anthropic",
+        default_model=None,
+    )
+    agent = AIAgent(
+        id=uuid.uuid4(),
+        team_id=uuid.uuid4(),
+        role_id=role.id,
+        name="Eve",
+        provider=None,
+        model=None,
+    )
+
+    with pytest.raises(ValueError, match="model is not configured"):
+        resolve_agent_runtime_config(agent, role)
+
+
+def test_agent_preflight_rejects_unknown_provider() -> None:
+    role = Role(
+        id=uuid.uuid4(),
+        name="Reviewer",
+        category="REVIEW",
+        default_provider="unsupported",
+        default_model="model",
+    )
+    agent = AIAgent(
+        id=uuid.uuid4(),
+        team_id=uuid.uuid4(),
+        role_id=role.id,
+        name="Eve",
+        provider=None,
+        model=None,
+    )
+
+    with pytest.raises(ValueError, match="Unsupported AI provider"):
+        resolve_agent_runtime_config(agent, role)
