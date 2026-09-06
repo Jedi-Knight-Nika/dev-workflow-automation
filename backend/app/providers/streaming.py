@@ -15,24 +15,41 @@ class ProviderStreamEvent:
     completed: bool = False
 
 
+class ProviderStreamCancelled(RuntimeError):
+    """Raised when the orchestrator revokes a Job's authority during generation."""
+
+
 async def collect_provider_stream(
     provider: AIProvider,
     request: ProviderRequest,
     on_text_delta: Callable[[str], Awaitable[None]] | None = None,
+    is_cancelled: Callable[[], Awaitable[bool]] | None = None,
 ) -> ProviderResponse:
     """Collect streamed answer text into the existing auditable response contract."""
     text_parts: list[str] = []
     request_id: str | None = None
     input_tokens: int | None = None
     output_tokens: int | None = None
-    async for event in provider.stream(request):
-        if event.text_delta:
-            text_parts.append(event.text_delta)
-            if on_text_delta is not None:
-                await on_text_delta(event.text_delta)
-        request_id = event.request_id or request_id
-        input_tokens = event.input_tokens if event.input_tokens is not None else input_tokens
-        output_tokens = event.output_tokens if event.output_tokens is not None else output_tokens
+    if is_cancelled is not None and await is_cancelled():
+        raise ProviderStreamCancelled("Provider stream cancelled before generation")
+    stream = provider.stream(request)
+    try:
+        async for event in stream:
+            if is_cancelled is not None and await is_cancelled():
+                raise ProviderStreamCancelled("Provider stream cancelled after lease revocation")
+            if event.text_delta:
+                text_parts.append(event.text_delta)
+                if on_text_delta is not None:
+                    await on_text_delta(event.text_delta)
+            request_id = event.request_id or request_id
+            input_tokens = event.input_tokens if event.input_tokens is not None else input_tokens
+            output_tokens = (
+                event.output_tokens if event.output_tokens is not None else output_tokens
+            )
+    finally:
+        close = getattr(stream, "aclose", None)
+        if close is not None:
+            await close()
     return ProviderResponse(
         text="".join(text_parts),
         request_id=request_id,

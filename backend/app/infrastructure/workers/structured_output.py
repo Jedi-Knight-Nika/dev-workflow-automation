@@ -104,6 +104,7 @@ async def run_with_structured_repair(
     max_repairs: int = 2,
     before_attempt: Callable[[list[ProviderAttempt]], Awaitable[None]] | None = None,
     on_text_delta: Callable[[str], Awaitable[None]] | None = None,
+    is_cancelled: Callable[[], Awaitable[bool]] | None = None,
 ) -> tuple[dict[str, Any], list[ProviderAttempt]]:
     attempts: list[ProviderAttempt] = []
     prompt = request.prompt
@@ -126,6 +127,7 @@ async def run_with_structured_repair(
                 cacheable_prompt_prefix=cacheable_prefix,
             ),
             on_text_delta,
+            is_cancelled,
         )
         attempts.append(ProviderAttempt(response, round((time.monotonic() - started) * 1000)))
         try:

@@ -4,6 +4,7 @@ import pytest
 
 from app.providers import AIProvider, ProviderModel, ProviderRequest, ProviderResponse
 from app.providers.streaming import (
+    ProviderStreamCancelled,
     ProviderStreamEvent,
     collect_provider_stream,
     iter_sse_json,
@@ -100,3 +101,32 @@ async def test_stream_collector_preserves_text_usage_and_progress() -> None:
 
     assert response == ProviderResponse("hello", "req-1", 4, 2)
     assert deltas == ["hel", "lo"]
+
+
+@pytest.mark.asyncio
+async def test_stream_collector_closes_stream_when_job_authority_is_revoked() -> None:
+    checks = 0
+    closed = False
+
+    class LongStreamingProvider(StreamingProvider):
+        async def stream(self, request: ProviderRequest) -> AsyncIterator[ProviderStreamEvent]:
+            nonlocal closed
+            try:
+                yield ProviderStreamEvent(text_delta="first")
+                yield ProviderStreamEvent(text_delta="second")
+            finally:
+                closed = True
+
+    async def is_cancelled() -> bool:
+        nonlocal checks
+        checks += 1
+        return checks >= 2
+
+    with pytest.raises(ProviderStreamCancelled, match="lease revocation"):
+        await collect_provider_stream(
+            LongStreamingProvider("secret"),
+            ProviderRequest(model="test", system="system", prompt="prompt"),
+            is_cancelled=is_cancelled,
+        )
+
+    assert closed is True

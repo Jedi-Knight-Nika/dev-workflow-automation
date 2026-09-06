@@ -20,6 +20,7 @@ from app.db.models import (
     Integration,
     Job,
     JobRole,
+    JobState,
     Repository,
     Role,
     Task,
@@ -423,6 +424,35 @@ def stream_progress_reporter(
     return report
 
 
+def stream_cancellation_checker(
+    job_id: uuid.UUID,
+    lease_token: uuid.UUID | None,
+    minimum_check_interval_seconds: float = 1.0,
+) -> "Callable[[], Awaitable[bool]]":
+    """Stop generation when deterministic Job ownership has been revoked."""
+    last_checked = 0.0
+    cancelled = False
+
+    async def check() -> bool:
+        nonlocal last_checked, cancelled
+        if cancelled:
+            return True
+        now = asyncio.get_running_loop().time()
+        if now - last_checked < minimum_check_interval_seconds:
+            return False
+        last_checked = now
+        async with SessionLocal() as cancellation_session:
+            current = (
+                await cancellation_session.execute(
+                    select(Job.state, Job.lease_token).where(Job.id == job_id)
+                )
+            ).one_or_none()
+        cancelled = current is None or current[0] != JobState.RUNNING or current[1] != lease_token
+        return cancelled
+
+    return check
+
+
 async def enforce_spending_budget(
     session: AsyncSession,
     job: Job,
@@ -711,6 +741,7 @@ async def run(job_id: uuid.UUID) -> WorkerResult:
                         session, job, task, settings, config.configuration, pending
                     ),
                     on_text_delta=stream_progress_reporter(task.id, job.id),
+                    is_cancelled=stream_cancellation_checker(job.id, job.lease_token),
                 )
             except StructuredOutputError as exc:
                 await persist_attempts(
