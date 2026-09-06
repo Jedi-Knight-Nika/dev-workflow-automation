@@ -396,9 +396,21 @@
           <p class="text-muted text-xs">{t('workflow.agentContext')}</p>
         </div>
         <div class="ml-auto flex items-center gap-3">
-          <Button size="sm" variant="ghost" onclick={() => (consoleAgent = agent)}
-            >{t('workflow.liveConsole')}</Button
+          <span
+            title={agent.active_task_has_workspace
+              ? 'Open the active task workspace shell'
+              : 'Available only while this Agent has an active task workspace'}
           >
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={!agent.active_task_id || !agent.active_task_has_workspace}
+              onclick={() => (consoleAgent = agent)}
+              >{agent.active_task_has_workspace
+                ? t('workflow.liveConsole')
+                : 'No active workspace'}</Button
+            >
+          </span>
           <label class="enable-control">
             <span>{agent.enabled ? t('workflow.enabled') : t('workflow.disabled')}</span>
             <input

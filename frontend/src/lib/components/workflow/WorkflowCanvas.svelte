@@ -1397,12 +1397,21 @@
             </div>
           {/if}
           <div class="mt-5 flex justify-end gap-2">
-            <Button
-              size="sm"
-              variant="ghost"
-              onclick={() => onConsole(detailsNode.data.role, detailsNode.id)}
-              >{t('workflow.liveConsoleButton')}</Button
+            <span
+              title={detailsAgent?.active_task_has_workspace
+                ? 'Open the active task workspace shell'
+                : 'Console becomes available when this Agent is running a task with a repository workspace'}
             >
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={!detailsAgent?.active_task_id || !detailsAgent.active_task_has_workspace}
+                onclick={() => onConsole(detailsNode.data.role, detailsNode.id)}
+                >{detailsAgent?.active_task_has_workspace
+                  ? t('workflow.liveConsoleButton')
+                  : 'No active workspace'}</Button
+              >
+            </span>
             <Button size="sm" variant="primary" disabled={saving || !dirty} onclick={persist}>
               <span class="flex items-center gap-1.5">
                 {#if saving}<Spinner class="size-3" />{/if}
