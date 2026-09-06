@@ -23,7 +23,7 @@ class SqlAlchemyJobDispatch:
             return None
         if job.lease_token is None:
             raise RuntimeError("Claimed job is missing its lease token")
-        return ClaimedJob(job.id, job.lease_token)
+        return ClaimedJob(job.id, job.lease_token, job.result)
 
     async def prepare(self, claimed_job: ClaimedJob) -> bool:
         async with self._session_factory() as session:

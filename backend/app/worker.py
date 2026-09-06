@@ -468,15 +468,7 @@ async def run(job_id: uuid.UUID) -> WorkerResult:
             raise RuntimeError(f"Agent role does not allow structured result {result}")
         checkpoint_data = dict(data)
         checkpoint_data["result"] = result
-        await TaskMemoryService(session).checkpoint(
-            task,
-            job,
-            checkpoint_data,
-            summary,
-            config.agent_id,
-            config.role_id,
-        )
-        return WorkerResult(
+        worker_result = WorkerResult(
             job_id=job.id,
             task_id=job.task_id,
             role=job.role,
@@ -484,6 +476,16 @@ async def run(job_id: uuid.UUID) -> WorkerResult:
             summary=summary,
             data=data,
         )
+        await TaskMemoryService(session).checkpoint(
+            task,
+            job,
+            checkpoint_data,
+            summary,
+            config.agent_id,
+            config.role_id,
+            worker_result.model_dump(mode="json"),
+        )
+        return worker_result
 
 
 if __name__ == "__main__":

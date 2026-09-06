@@ -1,12 +1,13 @@
 import uuid
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Any, Protocol
 
 
 @dataclass(frozen=True, slots=True)
 class ClaimedJob:
     job_id: uuid.UUID
     lease_token: uuid.UUID
+    durable_result: dict[str, Any] | None = None
 
 
 class JobDispatch(Protocol):

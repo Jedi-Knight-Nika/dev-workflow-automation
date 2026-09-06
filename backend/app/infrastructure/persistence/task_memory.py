@@ -37,11 +37,17 @@ class TaskMemoryService:
         summary: str,
         agent_id: uuid.UUID | None,
         role_id: uuid.UUID | None,
+        durable_result: dict[str, object],
     ) -> None:
+        # Store the complete validated handoff in the same transaction as its checkpoint.
+        # If the scheduler dies before completion, a reclaimed Job can resume without
+        # repeating the paid provider call.
+        job.result = durable_result
         existing = await self._session.scalar(
             select(AgentCheckpoint.id).where(AgentCheckpoint.job_id == job.id)
         )
         if existing is not None:
+            await self._session.commit()
             return
         structured = checkpoint_payload(job.role, result)
         self._session.add(

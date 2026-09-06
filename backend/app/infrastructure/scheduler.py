@@ -136,6 +136,28 @@ class Scheduler:
             return
         job_id = claimed_job.job_id
         lease_token = claimed_job.lease_token
+        if claimed_job.durable_result is not None:
+            try:
+                result = WorkerResult.model_validate(claimed_job.durable_result)
+                if result.job_id != job_id:
+                    raise ValueError("Durable worker result belongs to another Job")
+            except (ValidationError, ValueError) as exc:
+                await self._finish(
+                    job_id,
+                    lease_token,
+                    JobExecutionState.FAILED,
+                    None,
+                    f"Invalid durable worker result: {exc}",
+                )
+                return
+            await self._finish(
+                job_id,
+                lease_token,
+                JobExecutionState.SUCCEEDED,
+                result.model_dump(mode="json"),
+                None,
+            )
+            return
         execution = await self._worker_runner(job_id)
         if execution.timed_out:
             await self._finish(
