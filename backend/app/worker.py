@@ -694,7 +694,8 @@ async def run(job_id: uuid.UUID) -> WorkerResult:
             ):
                 if config.allowed_results and "TEST_PASS" not in config.allowed_results:
                     raise RuntimeError("Agent role does not allow structured result TEST_PASS")
-                content_revision = await workspace_fingerprint(workspace)
+                primary_workspace = scoped_workspaces[0].path
+                content_revision = await workspace_fingerprint(primary_workspace)
                 configuration_hash = hashlib.sha256(
                     json.dumps(
                         [list(check.command) for check in tester_checks], sort_keys=True
@@ -706,7 +707,7 @@ async def run(job_id: uuid.UUID) -> WorkerResult:
                     "findings": [],
                     "reason": None,
                     "checks": [check.model_dump(mode="json") for check in tester_checks],
-                    "repository_sha": await run_git("rev-parse", "HEAD", cwd=workspace),
+                    "repository_sha": await run_git("rev-parse", "HEAD", cwd=primary_workspace),
                     "content_revision": content_revision,
                     "validation_configuration_hash": configuration_hash,
                     "deterministic": True,
@@ -918,9 +919,9 @@ async def run(job_id: uuid.UUID) -> WorkerResult:
                         summary="Execution policy requires human approval",
                         data={"approval_id": str(exc.approval_id)},
                     )
-                repository_changes = []
-                files = []
-                fingerprints = []
+                repository_changes: list[dict[str, object]] = []
+                files: list[str] = []
+                fingerprints: list[str] = []
                 for item in scoped_workspaces:
                     scoped_files = await changed_files(item.path)
                     revision = await run_git("rev-parse", "HEAD", cwd=item.path)
