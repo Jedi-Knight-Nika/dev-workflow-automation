@@ -29,7 +29,7 @@ export type CreateJobInput = {
   payload: Record<string, unknown>;
 };
 
-export type TaskCommand = 'pause' | 'cancel' | 'takeover' | 'resume';
+export type TaskCommand = 'pause' | 'cancel' | 'takeover' | 'resume' | 'reopen';
 
 export type TaskFilters = {
   search?: string;

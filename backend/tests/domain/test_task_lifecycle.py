@@ -22,6 +22,7 @@ class FakeLifecycleUnitOfWork:
         self.directive: LifecycleDirective | None = None
         self.refreshed = False
         self.committed = False
+        self.synchronized = False
 
     async def __aenter__(self) -> Self:
         return self
@@ -72,6 +73,9 @@ class FakeLifecycleUnitOfWork:
     async def commit(self) -> None:
         self.committed = True
 
+    async def synchronize_tracker(self, _task_id: uuid.UUID) -> None:
+        self.synchronized = True
+
 
 def context(
     *,
@@ -99,7 +103,30 @@ async def test_task_lifecycle_applies_domain_transition(
     result = await ChangeTaskLifecycle(lambda: unit).execute(unit.context.task_id, action)  # type: ignore[union-attr,arg-type]
     assert result.state == expected_state
     assert unit.directive == LifecycleDirective(expected_state, takeover, cancel_jobs)
-    assert unit.committed
+    assert unit.committed and unit.synchronized
+
+
+@pytest.mark.asyncio
+async def test_attention_task_can_be_reopened_to_backlog() -> None:
+    unit = FakeLifecycleUnitOfWork(context(state=TaskState.NEEDS_HUMAN))
+
+    result = await ChangeTaskLifecycle(lambda: unit).execute(  # type: ignore[arg-type,union-attr]
+        unit.context.task_id, LifecycleAction.REOPEN
+    )
+
+    assert result.state == TaskState.NEW
+    assert unit.directive == LifecycleDirective(TaskState.NEW, False, True)
+    assert unit.committed and unit.synchronized
+
+
+@pytest.mark.asyncio
+async def test_merged_task_cannot_be_reopened() -> None:
+    unit = FakeLifecycleUnitOfWork(context(state=TaskState.MERGED))
+
+    with pytest.raises(InvalidTaskTransition, match="Merged tasks"):
+        await ChangeTaskLifecycle(lambda: unit).execute(  # type: ignore[arg-type,union-attr]
+            unit.context.task_id, LifecycleAction.REOPEN
+        )
 
 
 @pytest.mark.asyncio

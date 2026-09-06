@@ -15,6 +15,7 @@ from app.db.models import Job, JobState
 from app.db.models import Task as TaskRecord
 from app.db.models import TaskState as TaskRecordState
 from app.domain.tasks import LifecycleDirective, Task, TaskState
+from app.infrastructure.external_task_sync import sync_external_task_state
 from app.infrastructure.git.workspaces import GitCommandError, run_git
 from app.infrastructure.persistence.job_operations import record_event
 from app.infrastructure.persistence.repositories import task_to_domain
@@ -106,6 +107,8 @@ class SqlAlchemyTaskLifecycleUnitOfWork:
             event_type, payload = "TASK_ARCHIVED", {}
         elif directive.state == TaskState.CANCELLED:
             event_type, payload = "TASK_CANCELLED", {"cancelled_jobs": cancelled_jobs}
+        elif directive.state == TaskState.NEW and context.state != TaskState.NEW:
+            event_type, payload = "TASK_REOPENED", {"cancelled_jobs": cancelled_jobs}
         elif directive.manual_takeover:
             event_type, payload = (
                 "MANUAL_TAKEOVER_STARTED",
@@ -130,6 +133,11 @@ class SqlAlchemyTaskLifecycleUnitOfWork:
 
     async def commit(self) -> None:
         await self._active().commit()
+
+    async def synchronize_tracker(self, task_id: uuid.UUID) -> None:
+        task = await self._active().get(TaskRecord, task_id)
+        if task is not None:
+            await sync_external_task_state(self._active(), task)
 
 
 class SqlAlchemyTaskLifecycleUnitOfWorkFactory:

@@ -30,4 +30,5 @@ class ChangeTaskLifecycle:
                 context, directive, revision=revision, workspace_fingerprint=fingerprint
             )
             await unit_of_work.commit()
+            await unit_of_work.synchronize_tracker(task_id)
             return task

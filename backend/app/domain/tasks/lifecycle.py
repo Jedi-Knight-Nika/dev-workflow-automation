@@ -10,6 +10,7 @@ class LifecycleAction(StrEnum):
     TAKEOVER = "TAKEOVER"
     RESUME = "RESUME"
     ARCHIVE = "ARCHIVE"
+    REOPEN = "REOPEN"
 
 
 class InvalidTaskTransition(ValueError):
@@ -39,6 +40,12 @@ def lifecycle_directive(
         if current_state not in {TaskState.CANCELLED, TaskState.FAILED, TaskState.MERGED}:
             raise InvalidTaskTransition("Only terminal tasks can be archived")
         return LifecycleDirective(current_state, False, True, True)
+    if action == LifecycleAction.REOPEN:
+        if current_state == TaskState.MERGED:
+            raise InvalidTaskTransition("Merged tasks cannot be moved back to backlog")
+        if current_state == TaskState.NEW:
+            return LifecycleDirective(TaskState.NEW, False)
+        return LifecycleDirective(TaskState.NEW, False, True)
     if action == LifecycleAction.TAKEOVER:
         if current_state in {TaskState.CANCELLED, TaskState.MERGED}:
             raise InvalidTaskTransition(f"Cannot take over a {current_state.value} task")

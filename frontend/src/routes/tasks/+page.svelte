@@ -8,7 +8,7 @@
   import Skeleton from '$lib/components/Skeleton.svelte';
   import TeamBadge from '$lib/components/TeamBadge.svelte';
   import { t } from '$lib/i18n/index.svelte';
-  import { createTask, listTasks, type TaskFilters } from '$lib/services/tasks';
+  import { createTask, listTasks, runTaskCommand, type TaskFilters } from '$lib/services/tasks';
   import { assignTaskToTeam, listTeams, unassignTask } from '$lib/services/teams';
   import { priorityLabel, tasksByColumn } from '$lib/task-board';
   import type { Task, Team } from '$lib/types';
@@ -33,6 +33,9 @@
   let loading = $state(true),
     error = $state(''),
     showAdvanced = $state(false);
+  let draggedTaskId = $state(''),
+    dragOverColumn = $state(''),
+    movingTaskId = $state('');
   let filters = $state<TaskFilters>({ sort: 'priority', direction: 'asc' });
   let columns = $derived(tasksByColumn(tasks));
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -74,6 +77,22 @@
       error = cause instanceof Error ? cause.message : String(cause);
     } finally {
       assigning = false;
+    }
+  }
+  async function moveToBacklog(taskId: string) {
+    const task = tasks.find((item) => item.id === taskId);
+    if (!task || task.state === 'NEW' || movingTaskId) return;
+    movingTaskId = taskId;
+    error = '';
+    try {
+      await runTaskCommand(taskId, 'reopen');
+      await refresh();
+    } catch (cause) {
+      error = cause instanceof Error ? cause.message : String(cause);
+    } finally {
+      movingTaskId = '';
+      draggedTaskId = '';
+      dragOverColumn = '';
     }
   }
   function resetDraft() {
@@ -259,7 +278,23 @@
   {:else}
     <section class="board" aria-label="Task board">
       {#each columns as column (column.id)}
-        <div class="column">
+        <div
+          class="column"
+          role="group"
+          aria-label={`${column.label} tasks`}
+          class:drop-target={column.id === 'backlog' && dragOverColumn === column.id}
+          ondragover={(event) => {
+            if (column.id !== 'backlog' || !draggedTaskId) return;
+            event.preventDefault();
+            dragOverColumn = column.id;
+          }}
+          ondragleave={() => (dragOverColumn = '')}
+          ondrop={(event) => {
+            if (column.id !== 'backlog') return;
+            event.preventDefault();
+            void moveToBacklog(draggedTaskId);
+          }}
+        >
           <header>
             <span
               class:attention={column.id === 'attention'}
@@ -269,7 +304,19 @@
           </header>
           <div class="cards">
             {#each column.tasks as task (task.id)}
-              <button class="task-card" onclick={() => (selected = task)}>
+              <button
+                class="task-card"
+                class:moving={movingTaskId === task.id}
+                draggable={task.state !== 'MERGED'}
+                ondragstart={() => {
+                  draggedTaskId = task.id;
+                }}
+                ondragend={() => {
+                  draggedTaskId = '';
+                  dragOverColumn = '';
+                }}
+                onclick={() => (selected = task)}
+              >
                 <div class="card-top">
                   <span class="source-id"
                     >{task.source?.identifier || task.external_key || task.id.slice(0, 8)}</span
@@ -528,6 +575,15 @@
       </details>
     </div>
     <footer>
+      {#if ['NEEDS_HUMAN', 'FAILED', 'PAUSED', 'CANCELLED'].includes(selected.state)}
+        <button
+          class="secondary"
+          disabled={movingTaskId === selected.id}
+          onclick={() => void moveToBacklog(selected!.id)}
+        >
+          {movingTaskId === selected.id ? 'Moving…' : 'Move to backlog'}
+        </button>
+      {/if}
       {#if selected.source?.url}
         <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
         <a class="secondary" href={selected.source.url} target="_blank" rel="noreferrer"
@@ -669,6 +725,11 @@
     background: color-mix(in srgb, var(--color-panel-alt) 76%, transparent);
     scroll-snap-align: start;
   }
+  .column.drop-target {
+    border-color: var(--color-brand);
+    background: color-mix(in srgb, var(--color-brand) 8%, var(--color-panel-alt));
+    box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--color-brand) 18%, transparent);
+  }
   .column > header {
     display: flex;
     align-items: center;
@@ -724,6 +785,10 @@
     border-color: color-mix(in srgb, var(--color-brand) 48%, var(--color-line));
     box-shadow: 0 5px 14px rgb(0 0 0/0.08);
     transform: translateY(-1px);
+  }
+  .task-card.moving {
+    cursor: wait;
+    opacity: 0.55;
   }
   .task-card > strong {
     font-size: 0.88rem;

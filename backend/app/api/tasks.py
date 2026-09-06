@@ -346,6 +346,14 @@ async def archive_task(
     return await _change_lifecycle(task_id, LifecycleAction.ARCHIVE, factory)
 
 
+@router.post("/{task_id}/reopen", response_model=TaskRead)
+async def reopen_task(
+    task_id: uuid.UUID,
+    factory: TaskLifecycleUnitOfWorkFactory = Depends(get_task_lifecycle_factory),
+) -> TaskRead:
+    return await _change_lifecycle(task_id, LifecycleAction.REOPEN, factory)
+
+
 async def _change_lifecycle(
     task_id: uuid.UUID, action: LifecycleAction, factory: TaskLifecycleUnitOfWorkFactory
 ) -> TaskRead:
