@@ -17,6 +17,7 @@ edit a migration after it has been applied outside local development. Add a new 
 | `0045` | Failure state, retry categories, health registry, and circuit breakers |
 | `0046` | Provider-neutral integration synchronization state |
 | `0047` | Repository archival lifecycle |
+| `0048` | Durable notification retry scheduling |
 
 ## Adding a migration
 
