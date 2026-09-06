@@ -30,12 +30,20 @@ class FakeAgentRuntimeStore:
         return {
             "agent_id": str(agent_id),
             "role_name": "Reviewer",
+            "config_version": 2,
+            "versions": {
+                "role": 4,
+                "agent": 2,
+                "capabilities": "2026-09-06",
+                "strategy": "v1",
+            },
             "overrides": self.overrides,
             "override_policy": {"reasoning_level": "ALLOW_WITHIN_RANGE"},
             "effective": {"reasoning_level": self.overrides.get("reasoning_level", "HIGH")},
             "sources": {
                 "reasoning_level": "AGENT" if "reasoning_level" in self.overrides else "ROLE"
             },
+            "effective_hash": "abc123",
         }
 
 
@@ -59,6 +67,12 @@ def test_runtime_update_returns_effective_configuration_and_sources() -> None:
     assert response.json()["overrides"] == {"reasoning_level": "MEDIUM"}
     assert response.json()["effective"]["reasoning_level"] == "MEDIUM"
     assert response.json()["sources"]["reasoning_level"] == "AGENT"
+    assert response.json()["versions"] == {
+        "role": 4,
+        "agent": 2,
+        "capabilities": "2026-09-06",
+        "strategy": "v1",
+    }
 
 
 def test_runtime_reset_removes_explicit_overrides() -> None:

@@ -643,6 +643,12 @@ export type AgentRuntimeView = {
   role_id: string;
   role_name: string;
   config_version: number;
+  versions: {
+    role: number;
+    agent: number;
+    capabilities: string;
+    strategy: string;
+  };
   overrides: Record<string, unknown>;
   override_policy: Record<string, string>;
   effective: {

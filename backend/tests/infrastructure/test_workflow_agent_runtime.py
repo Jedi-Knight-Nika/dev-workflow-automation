@@ -4,9 +4,11 @@ from types import SimpleNamespace
 from typing import cast
 
 import pytest
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import AIAgent, Role, WorkflowNode
 from app.domain.workflows import WorkflowNodeData
+from app.infrastructure.persistence.agent_runtime import SqlAlchemyAgentRuntimeStore
 from app.infrastructure.persistence.workflow_designer import (
     _normalized_node_state,
     _runtime_overrides,
@@ -120,3 +122,21 @@ def test_unrelated_node_change_preserves_model_validation_result() -> None:
     assert normalized.model_validation_status == "VALID"
     assert normalized.model_validation_message == "Model is available"
     assert normalized.model_validated_at == current.model_validated_at
+
+
+def test_effective_runtime_exposes_complete_configuration_provenance() -> None:
+    item = node()
+    agent, role = records(item)
+    agent.config_version = 3
+    role.version = 7
+    store = SqlAlchemyAgentRuntimeStore(cast(AsyncSession, object()))
+
+    view = store._view(agent, role)
+
+    assert view["versions"] == {
+        "role": 7,
+        "agent": 3,
+        "capabilities": "2026-09-06",
+        "strategy": "v1",
+    }
+    assert view["effective_hash"]

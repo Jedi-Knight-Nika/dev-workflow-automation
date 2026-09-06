@@ -176,10 +176,16 @@
     </div>
   </div>
 
-  <div class="text-muted grid gap-2 text-xs sm:grid-cols-3">
+  <div class="text-muted grid gap-2 text-xs sm:grid-cols-2 lg:grid-cols-4">
     <span>Provider: <b class="text-heading">{runtime.effective.provider}</b></span>
     <span>Model: <b class="text-heading">{runtime.effective.model || 'Not configured'}</b></span>
-    <span>Config version: <b class="text-heading">{runtime.config_version}</b></span>
+    <span>Agent config: <b class="text-heading">v{runtime.versions.agent}</b></span>
+    <span>Role config: <b class="text-heading">v{runtime.versions.role}</b></span>
+    <span>Capabilities: <b class="text-heading">{runtime.versions.capabilities}</b></span>
+    <span>Strategy: <b class="text-heading">{runtime.versions.strategy}</b></span>
+    <span class="sm:col-span-2 lg:col-span-2"
+      >Snapshot: <b class="text-heading font-mono">{runtime.effective_hash.slice(0, 12)}</b></span
+    >
   </div>
 </div>
 

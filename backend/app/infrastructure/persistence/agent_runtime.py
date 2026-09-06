@@ -95,6 +95,12 @@ class SqlAlchemyAgentRuntimeStore:
             "role_id": str(role.id),
             "role_name": role.name,
             "config_version": agent.config_version,
+            "versions": {
+                "role": role.version,
+                "agent": agent.config_version,
+                "capabilities": runtime.capability_version,
+                "strategy": runtime.strategy_version,
+            },
             "overrides": dict(agent.runtime_overrides or {}),
             "override_policy": dict(role.override_policy or {}),
             "effective": runtime.snapshot(),
