@@ -7,6 +7,7 @@ from typing import Any
 
 import httpx
 
+from app.integrations.http import request_with_retry
 from app.schemas import DiscoveredRepository, MergeResult, PullRequestRead
 
 
@@ -37,7 +38,7 @@ class GitHubClient:
                     if self.installation
                     else "https://api.github.com/user/repos"
                 )
-                response = await client.get(endpoint, params=params)
+                response = await request_with_retry(client, "GET", endpoint, params=params)
                 response.raise_for_status()
                 body: Any = response.json()
                 batch: list[dict[str, Any]] = body["repositories"] if self.installation else body
@@ -62,7 +63,9 @@ class GitHubClient:
         self, owner: str, repository: str, head_branch: str
     ) -> PullRequestRead | None:
         async with httpx.AsyncClient(timeout=30, headers=self.headers) as client:
-            response = await client.get(
+            response = await request_with_retry(
+                client,
+                "GET",
                 f"https://api.github.com/repos/{owner}/{repository}/pulls",
                 params={"state": "open", "head": f"{owner}:{head_branch}", "per_page": 1},
             )
@@ -101,8 +104,8 @@ class GitHubClient:
 
     async def get_pull_request(self, owner: str, repository: str, number: int) -> PullRequestRead:
         async with httpx.AsyncClient(timeout=30, headers=self.headers) as client:
-            response = await client.get(
-                f"https://api.github.com/repos/{owner}/{repository}/pulls/{number}"
+            response = await request_with_retry(
+                client, "GET", f"https://api.github.com/repos/{owner}/{repository}/pulls/{number}"
             )
             response.raise_for_status()
             data: dict[str, Any] = response.json()
@@ -135,12 +138,16 @@ class GitHubClient:
         async with httpx.AsyncClient(
             timeout=30, headers=self.headers, follow_redirects=True
         ) as client:
-            check_response = await client.get(
-                f"https://api.github.com/repos/{owner}/{repository}/check-runs/{check_run_id}"
+            check_response = await request_with_retry(
+                client,
+                "GET",
+                f"https://api.github.com/repos/{owner}/{repository}/check-runs/{check_run_id}",
             )
             check_response.raise_for_status()
             check: dict[str, Any] = check_response.json()
-            annotations_response = await client.get(
+            annotations_response = await request_with_retry(
+                client,
+                "GET",
                 f"https://api.github.com/repos/{owner}/{repository}/check-runs/{check_run_id}/annotations",
                 params={"per_page": 100},
             )
@@ -149,8 +156,10 @@ class GitHubClient:
             actions_log = ""
             external_id = str(check.get("external_id") or "")
             if (check.get("app") or {}).get("slug") == "github-actions" and external_id.isdigit():
-                log_response = await client.get(
-                    f"https://api.github.com/repos/{owner}/{repository}/actions/jobs/{external_id}/logs"
+                log_response = await request_with_retry(
+                    client,
+                    "GET",
+                    f"https://api.github.com/repos/{owner}/{repository}/actions/jobs/{external_id}/logs",
                 )
                 if log_response.status_code < 400:
                     actions_log = decode_actions_log(log_response.content)
@@ -163,10 +172,30 @@ class GitHubClient:
         base = f"https://api.github.com/repos/{owner}/{repository}"
         async with httpx.AsyncClient(timeout=30, headers=self.headers) as client:
             check_runs, statuses, reviews, comments = await asyncio.gather(
-                client.get(f"{base}/commits/{revision}/check-runs", params={"per_page": 100}),
-                client.get(f"{base}/commits/{revision}/status", params={"per_page": 100}),
-                client.get(f"{base}/pulls/{number}/reviews", params={"per_page": 100}),
-                client.get(f"{base}/pulls/{number}/comments", params={"per_page": 100}),
+                request_with_retry(
+                    client,
+                    "GET",
+                    f"{base}/commits/{revision}/check-runs",
+                    params={"per_page": 100},
+                ),
+                request_with_retry(
+                    client,
+                    "GET",
+                    f"{base}/commits/{revision}/status",
+                    params={"per_page": 100},
+                ),
+                request_with_retry(
+                    client,
+                    "GET",
+                    f"{base}/pulls/{number}/reviews",
+                    params={"per_page": 100},
+                ),
+                request_with_retry(
+                    client,
+                    "GET",
+                    f"{base}/pulls/{number}/comments",
+                    params={"per_page": 100},
+                ),
             )
         for response in (check_runs, statuses, reviews, comments):
             response.raise_for_status()

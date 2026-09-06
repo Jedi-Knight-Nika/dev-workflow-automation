@@ -95,6 +95,7 @@ class NotificationDelivery(Base):
     state: Mapped[str] = mapped_column(String(30), default="PENDING")
     attempt_count: Mapped[int] = mapped_column(Integer, default=0)
     last_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     failure_code: Mapped[str | None] = mapped_column(String(100))
     failure_message: Mapped[str | None] = mapped_column(Text)

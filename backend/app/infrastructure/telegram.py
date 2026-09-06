@@ -6,7 +6,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import httpx
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
@@ -24,6 +24,24 @@ from app.infrastructure.security.crypto import cipher
 
 def token_hash(value: str) -> str:
     return hashlib.sha256(value.encode()).hexdigest()
+
+
+def telegram_retry_delay(response: httpx.Response, attempt_count: int) -> int:
+    """Return Telegram's requested delay, falling back to bounded exponential backoff."""
+    try:
+        payload = response.json()
+        retry_after = payload.get("parameters", {}).get("retry_after")
+        if isinstance(retry_after, int) and retry_after >= 0:
+            return min(3600, retry_after)
+    except ValueError:
+        pass
+    header = response.headers.get("retry-after")
+    if header:
+        try:
+            return min(3600, max(0, int(header)))
+        except ValueError:
+            pass
+    return min(300, 10 * (1 << max(0, attempt_count - 1)))
 
 
 class TelegramService:
@@ -147,6 +165,10 @@ class TelegramService:
                     NotificationDelivery.channel == "TELEGRAM",
                     NotificationDelivery.state.in_(("PENDING", "RETRY")),
                     NotificationDelivery.attempt_count < 4,
+                    or_(
+                        NotificationDelivery.next_attempt_at.is_(None),
+                        NotificationDelivery.next_attempt_at <= datetime.now(UTC),
+                    ),
                 )
                 .order_by(NotificationDelivery.created_at)
                 .limit(limit)
@@ -247,10 +269,21 @@ class TelegramService:
                 payload = response.json()
             delivery.state = "DELIVERED"
             delivery.delivered_at = datetime.now(UTC)
+            delivery.next_attempt_at = None
             delivery.external_message_id = str(payload.get("result", {}).get("message_id", ""))
             delivery.failure_code = delivery.failure_message = None
+        except httpx.HTTPStatusError as exc:
+            delivery.state = "RETRY" if delivery.attempt_count < 4 else "FAILED"
+            delivery.next_attempt_at = datetime.now(UTC) + timedelta(
+                seconds=telegram_retry_delay(exc.response, delivery.attempt_count)
+            )
+            delivery.failure_code = f"HTTP_{exc.response.status_code}"
+            delivery.failure_message = str(exc)[:1000]
         except (httpx.HTTPError, ValueError) as exc:
             delivery.state = "RETRY" if delivery.attempt_count < 4 else "FAILED"
+            delivery.next_attempt_at = datetime.now(UTC) + timedelta(
+                seconds=min(300, 10 * (1 << max(0, delivery.attempt_count - 1)))
+            )
             delivery.failure_code = type(exc).__name__
             delivery.failure_message = str(exc)[:1000]
         await self._session.commit()

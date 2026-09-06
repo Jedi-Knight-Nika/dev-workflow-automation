@@ -5,6 +5,8 @@ from typing import Any, TypedDict
 
 import httpx
 
+from app.integrations.http import request_with_retry
+
 
 class LinearWorkflowState(TypedDict):
     id: str
@@ -55,7 +57,9 @@ class LinearClient:
 
     async def _graphql(self, query: str, variables: dict[str, Any] | None = None) -> dict[str, Any]:
         async with httpx.AsyncClient(timeout=30, headers=self.headers) as client:
-            response = await client.post(
+            response = await request_with_retry(
+                client,
+                "POST",
                 "https://api.linear.app/graphql",
                 json={"query": query, "variables": variables or {}},
             )
