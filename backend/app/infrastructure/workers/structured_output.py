@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 from app.db.models import JobRole
 from app.infrastructure.workers.executor import ExecutorProposal, ReviewerProposal, TesterProposal
 from app.providers import AIProvider, ProviderRequest, ProviderResponse
+from app.providers.streaming import collect_provider_stream
 
 
 class IntakeProposal(BaseModel):
@@ -102,6 +103,7 @@ async def run_with_structured_repair(
     role: JobRole,
     max_repairs: int = 2,
     before_attempt: Callable[[list[ProviderAttempt]], Awaitable[None]] | None = None,
+    on_text_delta: Callable[[str], Awaitable[None]] | None = None,
 ) -> tuple[dict[str, Any], list[ProviderAttempt]]:
     attempts: list[ProviderAttempt] = []
     prompt = request.prompt
@@ -111,7 +113,8 @@ async def run_with_structured_repair(
         if before_attempt is not None:
             await before_attempt(attempts)
         started = time.monotonic()
-        response = await provider.run(
+        response = await collect_provider_stream(
+            provider,
             ProviderRequest(
                 model=request.model,
                 system=request.system,
@@ -121,7 +124,8 @@ async def run_with_structured_repair(
                 reasoning_effort=request.reasoning_effort,
                 timeout_seconds=request.timeout_seconds,
                 cacheable_prompt_prefix=cacheable_prefix,
-            )
+            ),
+            on_text_delta,
         )
         attempts.append(ProviderAttempt(response, round((time.monotonic() - started) * 1000)))
         try:

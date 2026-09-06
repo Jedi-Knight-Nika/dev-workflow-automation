@@ -1,7 +1,9 @@
 import json
-from collections.abc import AsyncIterable, AsyncIterator
+from collections.abc import AsyncIterable, AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
+
+from app.providers.base import AIProvider, ProviderRequest, ProviderResponse
 
 
 @dataclass(frozen=True, slots=True)
@@ -11,6 +13,32 @@ class ProviderStreamEvent:
     input_tokens: int | None = None
     output_tokens: int | None = None
     completed: bool = False
+
+
+async def collect_provider_stream(
+    provider: AIProvider,
+    request: ProviderRequest,
+    on_text_delta: Callable[[str], Awaitable[None]] | None = None,
+) -> ProviderResponse:
+    """Collect streamed answer text into the existing auditable response contract."""
+    text_parts: list[str] = []
+    request_id: str | None = None
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    async for event in provider.stream(request):
+        if event.text_delta:
+            text_parts.append(event.text_delta)
+            if on_text_delta is not None:
+                await on_text_delta(event.text_delta)
+        request_id = event.request_id or request_id
+        input_tokens = event.input_tokens if event.input_tokens is not None else input_tokens
+        output_tokens = event.output_tokens if event.output_tokens is not None else output_tokens
+    return ProviderResponse(
+        text="".join(text_parts),
+        request_id=request_id,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+    )
 
 
 async def iter_sse_json(lines: AsyncIterable[str]) -> AsyncIterator[dict[str, Any]]:

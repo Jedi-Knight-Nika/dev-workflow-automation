@@ -3,6 +3,7 @@ import hashlib
 import json
 import sys
 import uuid
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -22,6 +23,7 @@ from app.db.models import (
     Repository,
     Role,
     Task,
+    TaskEvent,
     WorkerRun,
     WorkflowDefinition,
     WorkflowNode,
@@ -393,6 +395,34 @@ async def persist_attempts(
     await session.commit()
 
 
+def stream_progress_reporter(
+    task_id: uuid.UUID,
+    job_id: uuid.UUID,
+) -> "Callable[[str], Awaitable[None]]":
+    """Publish bounded progress metadata without storing model output or reasoning."""
+    received = 0
+    last_reported = 0
+
+    async def report(delta: str) -> None:
+        nonlocal received, last_reported
+        received += len(delta)
+        if received - last_reported < 2048:
+            return
+        last_reported = received
+        async with SessionLocal() as progress_session:
+            progress_session.add(
+                TaskEvent(
+                    task_id=task_id,
+                    source="worker",
+                    event_type="MODEL_STREAM_PROGRESS",
+                    payload={"job_id": str(job_id), "characters_received": received},
+                )
+            )
+            await progress_session.commit()
+
+    return report
+
+
 async def enforce_spending_budget(
     session: AsyncSession,
     job: Job,
@@ -680,6 +710,7 @@ async def run(job_id: uuid.UUID) -> WorkerResult:
                     before_attempt=lambda pending: enforce_spending_budget(
                         session, job, task, settings, config.configuration, pending
                     ),
+                    on_text_delta=stream_progress_reporter(task.id, job.id),
                 )
             except StructuredOutputError as exc:
                 await persist_attempts(

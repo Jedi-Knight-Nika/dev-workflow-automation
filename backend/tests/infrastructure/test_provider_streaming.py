@@ -2,7 +2,25 @@ from collections.abc import AsyncIterator
 
 import pytest
 
-from app.providers.streaming import iter_sse_json, normalize_stream_event
+from app.providers import AIProvider, ProviderModel, ProviderRequest, ProviderResponse
+from app.providers.streaming import (
+    ProviderStreamEvent,
+    collect_provider_stream,
+    iter_sse_json,
+    normalize_stream_event,
+)
+
+
+class StreamingProvider(AIProvider):
+    async def run(self, request: ProviderRequest) -> ProviderResponse:
+        raise AssertionError("stream collector must not call the buffered path")
+
+    async def list_models(self) -> list[ProviderModel]:
+        return []
+
+    async def stream(self, request: ProviderRequest) -> AsyncIterator[ProviderStreamEvent]:
+        yield ProviderStreamEvent(text_delta="hel", request_id="req-1", input_tokens=4)
+        yield ProviderStreamEvent(text_delta="lo", output_tokens=2, completed=True)
 
 
 async def lines(*values: str) -> AsyncIterator[str]:
@@ -65,3 +83,20 @@ def test_completion_usage_is_normalized() -> None:
     assert event is not None
     assert event.completed is True
     assert (event.request_id, event.input_tokens, event.output_tokens) == ("resp_1", 10, 4)
+
+
+@pytest.mark.asyncio
+async def test_stream_collector_preserves_text_usage_and_progress() -> None:
+    deltas: list[str] = []
+
+    async def progress(delta: str) -> None:
+        deltas.append(delta)
+
+    response = await collect_provider_stream(
+        StreamingProvider("secret"),
+        ProviderRequest(model="test", system="system", prompt="prompt"),
+        progress,
+    )
+
+    assert response == ProviderResponse("hello", "req-1", 4, 2)
+    assert deltas == ["hel", "lo"]
