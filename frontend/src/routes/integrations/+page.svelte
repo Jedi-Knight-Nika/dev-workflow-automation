@@ -46,6 +46,47 @@
     { type: 'ai', label: 'AI providers' },
     { type: 'package_registry', label: 'Package registries' }
   ];
+  const credentialHelp: Record<
+    string,
+    { label: string; description: string; url: string; action: string }
+  > = {
+    linear: {
+      label: 'Linear personal API key',
+      description: 'Create a personal API key in Linear Settings → Security & access → API.',
+      url: 'https://linear.app/settings/api',
+      action: 'Open Linear API settings'
+    },
+    openai: {
+      label: 'OpenAI API key',
+      description: 'Use a secret API key created for your OpenAI Platform project.',
+      url: 'https://platform.openai.com/api-keys',
+      action: 'Open OpenAI API keys'
+    },
+    anthropic: {
+      label: 'Anthropic API key',
+      description: 'Use an API key created in the Anthropic Console.',
+      url: 'https://console.anthropic.com/settings/keys',
+      action: 'Open Anthropic API keys'
+    },
+    google: {
+      label: 'Google Gemini API key',
+      description: 'Create a Gemini API key in Google AI Studio.',
+      url: 'https://aistudio.google.com/apikey',
+      action: 'Open Google AI Studio'
+    },
+    npm_registry: {
+      label: 'npm access token',
+      description: 'Use a granular access token that can read the packages your workers need.',
+      url: 'https://www.npmjs.com/settings/~/tokens',
+      action: 'Open npm access tokens'
+    },
+    pypi_registry: {
+      label: 'PyPI API token',
+      description: 'Use a scoped PyPI API token for the required project or account.',
+      url: 'https://pypi.org/manage/account/token/',
+      action: 'Open PyPI API tokens'
+    }
+  };
   let error = '';
   let editing = '';
   let credential = '';
@@ -383,9 +424,23 @@
                       save(provider);
                     }}
                   >
-                    {#if provider.name !== 'trello'}<TextField
+                    {#if provider.name !== 'trello'}
+                      {@const help = credentialHelp[provider.name]}
+                      {#if help}
+                        <div class="border-line bg-panel-alt mb-4 rounded-lg border p-3 text-xs">
+                          <p class="font-semibold">Required credential: {help.label}</p>
+                          <p class="text-muted mt-1 leading-relaxed">{help.description}</p>
+                          <button
+                            type="button"
+                            class="mt-2 font-medium text-brand hover:underline"
+                            onclick={() => window.open(help.url, '_blank', 'noopener,noreferrer')}
+                            >{help.action} →</button
+                          >
+                        </div>
+                      {/if}
+                      <TextField
                         id={`credential-${provider.name}`}
-                        label={`${t('integrations.apiKeyOrToken')} ${
+                        label={`${help?.label || 'Credential'} ${
                           integrationsResource.data.find(
                             (item) => item.provider_name === provider.name
                           )?.has_credentials
@@ -398,7 +453,8 @@
                         required={!integrationsResource.data.find(
                           (item) => item.provider_name === provider.name
                         )?.has_credentials}
-                      />{/if}
+                      />
+                    {/if}
                     {#if provider.name === 'trello'}
                       <div class="space-y-3">
                         <div class="border-brand/30 bg-brand/5 rounded-lg border p-3 text-xs">
