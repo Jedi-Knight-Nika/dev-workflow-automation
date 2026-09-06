@@ -7,11 +7,19 @@
   import PageHeader from '$lib/components/PageHeader.svelte';
   import Skeleton from '$lib/components/Skeleton.svelte';
   import TeamBadge from '$lib/components/TeamBadge.svelte';
+  import TaskConversation from '$lib/components/task-detail/TaskConversation.svelte';
   import { t } from '$lib/i18n/index.svelte';
-  import { createTask, listTasks, runTaskCommand, type TaskFilters } from '$lib/services/tasks';
+  import {
+    addTaskMessage,
+    createTask,
+    listTaskMessages,
+    listTasks,
+    runTaskCommand,
+    type TaskFilters
+  } from '$lib/services/tasks';
   import { assignTaskToTeam, listTeams, unassignTask } from '$lib/services/teams';
   import { priorityLabel, tasksByColumn } from '$lib/task-board';
-  import type { Task, Team } from '$lib/types';
+  import type { Task, TaskMessage, Team } from '$lib/types';
 
   let tasks = $state<Task[]>([]),
     selected = $state<Task | null>(null);
@@ -36,6 +44,11 @@
   let draggedTaskId = $state(''),
     dragOverColumn = $state(''),
     movingTaskId = $state('');
+  let messages = $state<TaskMessage[]>([]),
+    nextMessageCursor = $state<number | null>(null),
+    loadingMessages = $state(false),
+    loadingOlderMessages = $state(false),
+    sendingMessage = $state(false);
   let filters = $state<TaskFilters>({ sort: 'priority', direction: 'asc' });
   let columns = $derived(tasksByColumn(tasks));
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -66,7 +79,62 @@
   }
   function queueRefresh() {
     clearTimeout(timer);
-    timer = setTimeout(() => void refresh(), 250);
+    timer = setTimeout(() => {
+      void refresh();
+      if (selected) void loadConversation(selected.id);
+    }, 250);
+  }
+
+  async function loadConversation(taskId: string) {
+    loadingMessages = true;
+    try {
+      const messagePage = await listTaskMessages(taskId);
+      if (selected?.id !== taskId) return;
+      messages = messagePage.items;
+      nextMessageCursor = messagePage.next_before_id;
+    } catch (cause) {
+      error = cause instanceof Error ? cause.message : String(cause);
+    } finally {
+      loadingMessages = false;
+    }
+  }
+
+  function openTask(task: Task) {
+    selected = task;
+    messages = [];
+    nextMessageCursor = null;
+    void loadConversation(task.id);
+  }
+
+  async function loadOlderMessages() {
+    if (!selected || !nextMessageCursor || loadingOlderMessages) return;
+    loadingOlderMessages = true;
+    try {
+      const page = await listTaskMessages(selected.id, nextMessageCursor);
+      messages = [...page.items, ...messages];
+      nextMessageCursor = page.next_before_id;
+    } finally {
+      loadingOlderMessages = false;
+    }
+  }
+
+  async function sendMessage(body: string) {
+    if (!selected || sendingMessage) return;
+    sendingMessage = true;
+    const taskId = selected.id;
+    try {
+      const message = await addTaskMessage(taskId, body);
+      messages = [...messages, message];
+      if (['NEEDS_HUMAN', 'CONTEXT_PENDING'].includes(selected.state)) {
+        selected = await runTaskCommand(taskId, 'resume');
+        await refresh();
+      }
+    } catch (cause) {
+      error = cause instanceof Error ? cause.message : String(cause);
+      throw cause;
+    } finally {
+      sendingMessage = false;
+    }
   }
   function resetFilters() {
     filters = { sort: 'priority', direction: 'asc' };
@@ -162,10 +230,10 @@
       .replace(/https?:\/\/\S+/g, '')
       .trim();
   }
-  function sourceLabel(task: Task) {
+  function providerLabel(task: Task) {
     const provider = task.source?.provider;
     if (!provider) return '';
-    return `Open in ${provider[0].toUpperCase()}${provider.slice(1)}`;
+    return `${provider[0].toUpperCase()}${provider.slice(1)}`;
   }
   onMount(() => {
     void refresh();
@@ -335,9 +403,9 @@
                   draggedTaskId = '';
                   dragOverColumn = '';
                 }}
-                onclick={() => (selected = task)}
+                onclick={() => openTask(task)}
                 onkeydown={(event) => {
-                  if (event.key === 'Enter' || event.key === ' ') selected = task;
+                  if (event.key === 'Enter' || event.key === ' ') openTask(task);
                 }}
               >
                 <div class="card-top">
@@ -348,7 +416,10 @@
                       onclick={(event) => {
                         event.stopPropagation();
                         window.open(task.source?.url || '', '_blank', 'noopener,noreferrer');
-                      }}>{sourceLabel(task)} ↗</button
+                      }}
+                      >{providerLabel(task)} · {task.source.identifier ||
+                        task.external_key ||
+                        'task'} ↗</button
                     >
                   {:else}<span class="source-id">{task.external_key || task.id.slice(0, 8)}</span
                     >{/if}
@@ -486,9 +557,17 @@
   <aside class="drawer" aria-label="Task details">
     <header>
       <div>
-        <span class="source-id"
-          >{selected.source?.identifier || selected.external_key || selected.id}</span
-        >
+        {#if selected.source?.url}
+          <button
+            type="button"
+            class="source-id source-link"
+            onclick={() =>
+              window.open(selected?.source?.url || '', '_blank', 'noopener,noreferrer')}
+            >{providerLabel(selected)} · {selected.source.identifier} ↗</button
+          >
+        {:else}
+          <span class="source-id">{selected.external_key || selected.id}</span>
+        {/if}
         <h2>{selected.title}</h2>
       </div>
       <button class="close" aria-label="Close" onclick={() => (selected = null)}>×</button>
@@ -499,6 +578,19 @@
           >{priorityLabel(selected.priority)}</span
         >
       </div>
+      {#if loadingMessages && messages.length === 0}
+        <Skeleton class="h-36 rounded-xl" />
+      {:else}
+        <TaskConversation
+          {messages}
+          resumeOnSend={['NEEDS_HUMAN', 'CONTEXT_PENDING'].includes(selected.state)}
+          hasOlder={nextMessageCursor !== null}
+          loadingOlder={loadingOlderMessages}
+          sending={sendingMessage}
+          onLoadOlder={loadOlderMessages}
+          onSend={sendMessage}
+        />
+      {/if}
       <section class="assignment">
         <h3>AI team assignee</h3>
         <div class="assignment-control">
@@ -616,13 +708,7 @@
           {movingTaskId === selected.id ? 'Moving…' : 'Move to backlog'}
         </button>
       {/if}
-      {#if selected.source?.url}
-        <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
-        <a class="secondary" href={selected.source.url} target="_blank" rel="noreferrer"
-          >Open in {selected.source.provider}</a
-        >{/if}<a class="primary" href={resolve('/tasks/[id]', { id: selected.id })}
-        >Open full task</a
-      >
+      <a class="primary" href={resolve('/tasks/[id]', { id: selected.id })}>Open full task</a>
     </footer>
   </aside>
 {/if}
