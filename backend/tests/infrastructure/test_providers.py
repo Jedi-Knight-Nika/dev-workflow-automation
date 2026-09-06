@@ -148,6 +148,68 @@ async def test_anthropic_marks_static_prompt_sections_cacheable() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("provider", "body", "expected_id"),
+    [
+        (
+            OpenAIProvider("secret"),
+            (
+                'data: {"type":"response.output_text.delta","delta":"hello"}\n\n'
+                'data: {"type":"response.completed","response":{"id":"resp-1",'
+                '"usage":{"input_tokens":3,"output_tokens":1}}}\n\n'
+            ),
+            "resp-1",
+        ),
+        (
+            AnthropicProvider("secret"),
+            (
+                'data: {"type":"message_start","message":{"id":"msg-1",'
+                '"usage":{"input_tokens":3}}}\n\n'
+                'data: {"type":"content_block_delta","delta":{"type":"text_delta",'
+                '"text":"hello"}}\n\n'
+                'data: {"type":"message_delta","usage":{"output_tokens":1}}\n\n'
+            ),
+            "msg-1",
+        ),
+        (
+            GoogleProvider("secret"),
+            (
+                'data: {"event_type":"step.delta","delta":{"type":"text",'
+                '"text":"hello"}}\n\n'
+                'data: {"event_type":"interaction.completed","interaction":{"id":"int-1",'
+                '"usage":{"total_input_tokens":3,"total_output_tokens":1}}}\n\n'
+            ),
+            "int-1",
+        ),
+    ],
+)
+async def test_provider_adapters_expose_normalized_streams(
+    provider: AIProvider, body: str, expected_id: str
+) -> None:
+    captured: dict[str, Any] = {}
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        captured.update(json.loads(request.content))
+        return httpx.Response(200, text=body, headers={"content-type": "text/event-stream"})
+
+    provider._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    try:
+        events = [
+            event
+            async for event in provider.stream(
+                ProviderRequest(model="test-model", system="system", prompt="prompt")
+            )
+        ]
+    finally:
+        await provider.aclose()
+
+    assert "".join(event.text_delta for event in events) == "hello"
+    assert next(event.request_id for event in events if event.request_id) == expected_id
+    assert any(event.completed for event in events)
+    assert captured["stream"] is True
+
+
+@pytest.mark.asyncio
 async def test_invalid_structured_output_is_repaired_once() -> None:
     provider = SequenceProvider(
         [

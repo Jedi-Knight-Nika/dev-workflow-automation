@@ -1,10 +1,13 @@
 import asyncio
 from abc import ABC, abstractmethod
-from collections.abc import Mapping
+from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx
+
+if TYPE_CHECKING:
+    from app.providers.streaming import ProviderStreamEvent
 
 
 @dataclass(frozen=True)
@@ -94,8 +97,25 @@ class AIProvider(ABC):
     @abstractmethod
     async def run(self, request: ProviderRequest) -> ProviderResponse: ...
 
+    async def stream(self, request: ProviderRequest) -> AsyncIterator["ProviderStreamEvent"]:
+        """Stream when supported; custom providers retain a compatible single-event fallback."""
+        from app.providers.streaming import ProviderStreamEvent
+
+        response = await self.run(request)
+        yield ProviderStreamEvent(
+            text_delta=response.text,
+            request_id=response.request_id,
+            input_tokens=response.input_tokens,
+            output_tokens=response.output_tokens,
+            completed=True,
+        )
+
     @abstractmethod
     async def list_models(self) -> list[ProviderModel]: ...
 
     def capabilities(self) -> dict[str, bool]:
-        return {"text_generation": True, "structured_output_repair": True}
+        return {
+            "text_generation": True,
+            "structured_output_repair": True,
+            "streaming": self.__class__.stream is not AIProvider.stream,
+        }
