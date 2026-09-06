@@ -129,7 +129,7 @@ class SqlAlchemyNotificationStore:
         )
 
     async def mark(self, notification_id: uuid.UUID, action: str) -> NotificationView:
-        record = await self._session.get(Notification, notification_id)
+        record = await self._session.get(Notification, notification_id, with_for_update=True)
         if record is None or record.user_id != self._user_id:
             raise LookupError("Notification not found")
         now = datetime.now(UTC)
@@ -156,7 +156,7 @@ class SqlAlchemyNotificationStore:
     async def mark_incident(
         self, incident_id: uuid.UUID, action: str, *, commit: bool = True
     ) -> dict[str, object]:
-        record = await self._session.get(Incident, incident_id)
+        record = await self._session.get(Incident, incident_id, with_for_update=True)
         if record is None:
             raise LookupError("Incident not found")
         now = datetime.now(UTC)

@@ -34,6 +34,7 @@ async def sync_task_to_linear(
     configuration_key: str,
     success_event: str,
     state_label: str,
+    success_payload: dict[str, str] | None = None,
 ) -> bool:
     if not task.external_key:
         await record_event(session, task.id, "LINEAR_SYNC_SKIPPED", {"reason": "No issue key"})
@@ -74,7 +75,11 @@ async def sync_task_to_linear(
         session,
         task.id,
         success_event,
-        {"issue": task.external_key, "state_id": str(state_id)},
+        {
+            "issue": task.external_key,
+            "state_id": str(state_id),
+            **(success_payload or {}),
+        },
         source="linear",
     )
     await session.commit()
@@ -119,14 +124,6 @@ async def sync_current_task_state_to_linear(session: AsyncSession, task: Task) -
         configuration_key=configuration_key,
         success_event="LINEAR_STATE_SYNCED",
         state_label=state_label,
+        success_payload={"internal_state": task.state.value},
     )
-    if synced:
-        event = await session.scalar(
-            select(TaskEvent)
-            .where(TaskEvent.task_id == task.id, TaskEvent.event_type == "LINEAR_STATE_SYNCED")
-            .order_by(TaskEvent.created_at.desc())
-        )
-        if event:
-            event.payload = {**event.payload, "internal_state": task.state.value}
-            await session.commit()
     return synced
