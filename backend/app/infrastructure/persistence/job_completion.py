@@ -24,10 +24,10 @@ from app.domain.notifications import NotificationSeverity
 from app.domain.orchestration import (
     CircuitSnapshot,
     CircuitState,
-    FailureClass,
     FailureScope,
     RecoveryAction,
     classify_failure_details,
+    failure_resource_id,
     record_failure,
 )
 from app.infrastructure.linear_sync import sync_current_task_state_to_linear
@@ -86,12 +86,12 @@ class SqlAlchemyFailedCompletionUnitOfWork:
             .order_by(WorkerRun.created_at.desc())
             .limit(1)
         )
-        resource_id = worker_run.provider if worker_run and classification.resource_type else None
-        if resource_id is None and job.agent_id and classification.resource_type == "PROVIDER":
+        provider = worker_run.provider if worker_run else None
+        model = worker_run.model if worker_run else None
+        if provider is None and job.agent_id and classification.resource_type == "PROVIDER":
             agent = await session.get(AIAgent, job.agent_id)
-            resource_id = agent.provider if agent else None
-        if classification.failure_class is FailureClass.MODEL_UNAVAILABLE and worker_run:
-            resource_id = f"{worker_run.provider}:{worker_run.model}"
+            provider = agent.provider if agent else None
+        resource_id = failure_resource_id(classification, provider=provider, model=model)
         fingerprint_source = f"{classification.failure_class.value}:{resource_id or job.id}"
         fingerprint = hashlib.sha256(fingerprint_source.encode()).hexdigest()[:32]
         retry_state = await session.get(JobRetryState, job.id, with_for_update=True)

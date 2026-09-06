@@ -73,6 +73,38 @@ class FailureClassification:
     safe_message: str
 
 
+def failure_resource_id(
+    classification: FailureClassification,
+    *,
+    provider: str | None = None,
+    model: str | None = None,
+) -> str | None:
+    """Resolve a stable health-resource identity without mixing integrations and providers."""
+    if classification.resource_type == "PROVIDER":
+        if classification.failure_class is FailureClass.MODEL_UNAVAILABLE and provider and model:
+            return f"{provider}:{model}"
+        return provider
+    if classification.resource_type != "INTEGRATION":
+        return None
+    if classification.failure_class in {
+        FailureClass.GITHUB_UNAVAILABLE,
+        FailureClass.GITHUB_AUTH_ERROR,
+    }:
+        return "github"
+    if classification.failure_class in {
+        FailureClass.LINEAR_UNAVAILABLE,
+        FailureClass.LINEAR_AUTH_ERROR,
+    }:
+        return "linear"
+    if classification.failure_class in {
+        FailureClass.RAG_UNAVAILABLE,
+        FailureClass.RAG_STALE,
+        FailureClass.RAG_INDEX_FAILURE,
+    }:
+        return "rag"
+    return None
+
+
 def classify_failure_details(
     *, code: str | None, outcome: str | None, component: str | None = None
 ) -> FailureClassification:

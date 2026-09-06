@@ -8,6 +8,7 @@ from app.domain.orchestration import (
     RecoveryAction,
     allow_probe,
     classify_failure_details,
+    failure_resource_id,
     record_failure,
     record_success,
 )
@@ -60,3 +61,13 @@ def test_circuit_opens_probes_and_recovers() -> None:
     probe = allow_probe(snapshot, now=now + timedelta(seconds=31))
     assert probe.state is CircuitState.HALF_OPEN
     assert record_success(probe) == CircuitSnapshot()
+
+
+def test_failure_resource_identity_keeps_integrations_separate_from_model_provider() -> None:
+    github = classify_failure_details(code="GITHUB_UNAVAILABLE", outcome="503")
+    linear = classify_failure_details(code="LINEAR_AUTH_ERROR", outcome="401")
+    provider = classify_failure_details(code="PROVIDER_UNAVAILABLE", outcome="Anthropic 503")
+
+    assert failure_resource_id(github, provider="anthropic") == "github"
+    assert failure_resource_id(linear, provider="anthropic") == "linear"
+    assert failure_resource_id(provider, provider="anthropic") == "anthropic"

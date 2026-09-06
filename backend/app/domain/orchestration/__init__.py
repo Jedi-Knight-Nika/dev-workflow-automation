@@ -12,6 +12,7 @@ from .failures import (
     RecoveryAction,
     classify_failure,
     classify_failure_details,
+    failure_resource_id,
 )
 from .progress import ProgressFingerprint, progress_made
 from .strategy import (
@@ -40,6 +41,7 @@ __all__ = [
     "classify_failure",
     "classify_failure_details",
     "evidence_is_current",
+    "failure_resource_id",
     "progress_made",
     "record_failure",
     "record_success",

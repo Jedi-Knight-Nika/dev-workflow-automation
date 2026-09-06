@@ -5,7 +5,15 @@ from typing import cast
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.db.models import HealthState, Incident, Job, JobState, Notification, TaskEvent, WorkerRun
+from app.db.models import (
+    FailureEvent,
+    HealthState,
+    Incident,
+    Job,
+    JobState,
+    Notification,
+    TaskEvent,
+)
 from app.domain.notifications import IncidentStatus, NotificationStatus
 from app.domain.orchestration import (
     CircuitSnapshot,
@@ -47,7 +55,7 @@ class SqlAlchemyResilienceStore:
                 )
                 if snapshot.state is not CircuitState.HALF_OPEN:
                     continue
-                job = await self._waiting_provider_job(session, health.resource_id)
+                job = await self._waiting_resource_job(session, health)
                 if job is None:
                     continue
                 health.circuit_state = CircuitState.HALF_OPEN.value
@@ -75,19 +83,23 @@ class SqlAlchemyResilienceStore:
     async def record_job_success(self, job_id: uuid.UUID) -> None:
         now = datetime.now(UTC)
         async with self._session_factory() as session:
-            worker_run = await session.scalar(
-                select(WorkerRun)
-                .where(WorkerRun.job_id == job_id)
-                .order_by(WorkerRun.created_at.desc())
+            failure = await session.scalar(
+                select(FailureEvent)
+                .where(
+                    FailureEvent.job_id == job_id,
+                    FailureEvent.resource_type.is_not(None),
+                    FailureEvent.resource_id.is_not(None),
+                )
+                .order_by(FailureEvent.created_at.desc())
                 .limit(1)
             )
-            if worker_run is None:
+            if failure is None or failure.resource_type is None or failure.resource_id is None:
                 return
             health = await session.scalar(
                 select(HealthState)
                 .where(
-                    HealthState.resource_type == "PROVIDER",
-                    HealthState.resource_id == worker_run.provider,
+                    HealthState.resource_type == failure.resource_type,
+                    HealthState.resource_id == failure.resource_id,
                 )
                 .with_for_update()
             )
@@ -132,22 +144,32 @@ class SqlAlchemyResilienceStore:
                         TaskEvent(
                             task_id=job.task_id,
                             source="SYSTEM",
-                            event_type="PROVIDER_RECOVERED",
-                            payload={"provider": worker_run.provider, "job_id": str(job_id)},
+                            event_type=f"{failure.resource_type}_RECOVERED",
+                            payload={
+                                "resource_type": failure.resource_type,
+                                "resource_id": failure.resource_id,
+                                "job_id": str(job_id),
+                            },
                         )
                     )
             await session.commit()
 
     @staticmethod
-    async def _waiting_provider_job(session: AsyncSession, provider: str) -> Job | None:
+    async def _waiting_resource_job(session: AsyncSession, health: HealthState) -> Job | None:
+        waiting_state = (
+            JobState.WAITING_PROVIDER
+            if health.resource_type == "PROVIDER"
+            else JobState.WAITING_INTEGRATION
+        )
         return cast(
             Job | None,
             await session.scalar(
                 select(Job)
-                .join(WorkerRun, WorkerRun.job_id == Job.id)
+                .join(FailureEvent, FailureEvent.job_id == Job.id)
                 .where(
-                    Job.state == JobState.WAITING_PROVIDER,
-                    WorkerRun.provider == provider,
+                    Job.state == waiting_state,
+                    FailureEvent.resource_type == health.resource_type,
+                    FailureEvent.resource_id == health.resource_id,
                 )
                 .order_by(Job.priority, Job.created_at)
                 .with_for_update(skip_locked=True)
