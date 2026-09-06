@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { untrack } from 'svelte';
+  import { onMount, untrack } from 'svelte';
   import { SvelteSet } from 'svelte/reactivity';
   import {
     Background,
@@ -182,6 +182,34 @@
   );
   let saving = $state(false);
   let dirty = $state(false);
+  let runningAgent = $derived(agents.find((agent) => agent.status === 'RUNNING'));
+  let canvasViewport: HTMLDivElement;
+
+  onMount(() => {
+    const storageKey = `workflow-canvas-size:${teamId || 'default'}`;
+    const saved = localStorage.getItem(storageKey);
+    if (saved) {
+      try {
+        const size = JSON.parse(saved) as { width?: number; height?: number };
+        if (size.width) canvasViewport.style.width = `${size.width}px`;
+        if (size.height) canvasViewport.style.height = `${size.height}px`;
+      } catch {
+        localStorage.removeItem(storageKey);
+      }
+    }
+    const observer = new ResizeObserver(([entry]) => {
+      if (!entry) return;
+      localStorage.setItem(
+        storageKey,
+        JSON.stringify({
+          width: Math.round(entry.contentRect.width),
+          height: Math.round(entry.contentRect.height)
+        })
+      );
+    });
+    observer.observe(canvasViewport);
+    return () => observer.disconnect();
+  });
 
   $effect(() => {
     onDirtyChange(dirty);
@@ -220,6 +248,13 @@
 
   function statusCount(...statuses: string[]) {
     return nodes.filter((node) => statuses.includes(node.data.status)).length;
+  }
+
+  function openRunningConsole() {
+    const running = agents.find((agent) => agent.status === 'RUNNING');
+    if (!running) return;
+    const node = nodes.find((item) => item.data.role === running.role);
+    if (node) onConsole(running.role, node.id);
   }
 
   $effect(() => {
@@ -772,6 +807,14 @@
         >
       {/if}
     </div>
+    <Button
+      size="sm"
+      variant="ghost"
+      disabled={!runningAgent?.active_task_has_workspace}
+      onclick={openRunningConsole}
+    >
+      {runningAgent?.active_task_has_workspace ? '⌘ Open live console' : '⌘ No active console'}
+    </Button>
     <Button size="sm" variant="primary" disabled={saving || !dirty} onclick={persist}>
       <span class="flex items-center gap-1.5">
         {#if saving}<Spinner class="size-3" />{/if}
@@ -816,7 +859,7 @@
       >
     </div>
   {/if}
-  <div class="relative h-[600px] bg-surface">
+  <div bind:this={canvasViewport} class="canvas-viewport bg-surface">
     <SvelteFlow
       bind:nodes
       bind:edges
@@ -849,6 +892,7 @@
         ><i class="processing"></i>{t('workflow.processingNow')}</span
       >
     </div>
+    <div class="resize-hint">Drag corner to resize · Node positions save with workflow</div>
   </div>
 </section>
 
@@ -1793,6 +1837,31 @@
     padding: 0.4rem 0.55rem;
     color: var(--color-muted);
     font-size: 0.55rem;
+    backdrop-filter: blur(5px);
+  }
+  .canvas-viewport {
+    position: relative;
+    width: 100%;
+    height: 600px;
+    min-width: min(420px, 100%);
+    min-height: 360px;
+    max-width: 100%;
+    max-height: 1200px;
+    overflow: hidden;
+    resize: both;
+  }
+  .resize-hint {
+    position: absolute;
+    right: 0.6rem;
+    top: 0.55rem;
+    z-index: 5;
+    border: 1px solid var(--color-line);
+    border-radius: 0.45rem;
+    background: color-mix(in srgb, var(--color-surface) 88%, transparent);
+    padding: 0.32rem 0.5rem;
+    color: var(--color-muted);
+    font-size: 0.55rem;
+    pointer-events: none;
     backdrop-filter: blur(5px);
   }
   .canvas-legend span {
