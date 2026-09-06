@@ -76,6 +76,33 @@
       default_reasoning_effort: 'default',
       default_timeout_minutes: 30,
       default_max_retries: 2,
+      runtime_profile: {
+        reasoning_default: 'PROVIDER_DEFAULT',
+        reasoning_min: 'PROVIDER_DEFAULT',
+        reasoning_max: 'MAX',
+        dynamic_reasoning_allowed: true,
+        max_output_tokens: null,
+        temperature: null,
+        context_strategy: 'BALANCED',
+        max_tool_calls: 40,
+        job_timeout_seconds: 1800,
+        max_job_attempts: 2,
+        max_model_turns: 3,
+        structured_output_mode: 'REQUIRED'
+      },
+      override_policy: {
+        provider: 'ALLOW',
+        model: 'ALLOW',
+        reasoning_level: 'ALLOW_WITHIN_RANGE',
+        max_output_tokens: 'ALLOW',
+        temperature: 'ALLOW_IF_SUPPORTED',
+        context_strategy: 'ALLOW',
+        max_tool_calls: 'ALLOW_WITHIN_RANGE',
+        job_timeout_seconds: 'ALLOW_WITHIN_RANGE',
+        permissions: 'REDUCE_ONLY',
+        system_instructions: 'ADDITIVE_ONLY',
+        allowed_results: 'LOCKED'
+      },
       enabled: true
     };
   }
@@ -110,6 +137,8 @@
           default_reasoning_effort: role.default_reasoning_effort,
           default_timeout_minutes: role.default_timeout_minutes,
           default_max_retries: role.default_max_retries,
+          runtime_profile: structuredClone(role.runtime_profile),
+          override_policy: { ...role.override_policy },
           enabled: role.enabled
         }
       : blank();
@@ -323,15 +352,15 @@
           </div>
           <div>
             <dt>Reasoning</dt>
-            <dd>{details.default_reasoning_effort}</dd>
+            <dd>{details.runtime_profile.reasoning_default.replaceAll('_', ' ')}</dd>
           </div>
           <div>
             <dt>Timeout</dt>
-            <dd>{details.default_timeout_minutes} minutes</dd>
+            <dd>{Math.round(details.runtime_profile.job_timeout_seconds / 60)} minutes</dd>
           </div>
           <div>
             <dt>Retries</dt>
-            <dd>{details.default_max_retries}</dd>
+            <dd>{details.runtime_profile.max_job_attempts}</dd>
           </div>
           <div>
             <dt>Version</dt>
@@ -488,7 +517,7 @@
             <label
               ><span>Provider</span><select bind:value={form.default_provider}
                 ><option value={null}>Agent decides</option><option value="openai">OpenAI</option
-                ><option value="anthropic">Anthropic</option><option value="gemini"
+                ><option value="anthropic">Anthropic</option><option value="google"
                   >Google Gemini</option
                 ></select
               ></label
@@ -499,28 +528,86 @@
               /></label
             >
           </div>
-          <label
-            ><span>Reasoning</span><select bind:value={form.default_reasoning_effort}
-              ><option>default</option><option>low</option><option>medium</option><option
-                >high</option
-              ><option>max</option></select
-            ></label
+          <div class="two">
+            <label
+              ><span>Default reasoning</span><select
+                bind:value={form.runtime_profile.reasoning_default}
+                ><option>PROVIDER_DEFAULT</option><option>MINIMAL</option><option>LOW</option
+                ><option>MEDIUM</option><option>HIGH</option><option>MAX</option></select
+              ></label
+            ><label
+              ><span>Context</span><select bind:value={form.runtime_profile.context_strategy}
+                ><option>MINIMAL</option><option>BALANCED</option><option>DEEP</option></select
+              ></label
+            >
+          </div>
+          <label class="toggle-runtime"
+            ><input type="checkbox" bind:checked={form.runtime_profile.dynamic_reasoning_allowed} />
+            <span>Allow strategy to tune reasoning within the Role range</span></label
           >
           <div class="two">
             <label
-              ><span>Timeout: {form.default_timeout_minutes} min</span><input
-                type="range"
-                min="5"
-                max="120"
-                step="5"
-                bind:value={form.default_timeout_minutes}
+              ><span>Minimum reasoning</span><select bind:value={form.runtime_profile.reasoning_min}
+                ><option>PROVIDER_DEFAULT</option><option>MINIMAL</option><option>LOW</option
+                ><option>MEDIUM</option><option>HIGH</option><option>MAX</option></select
+              ></label
+            ><label
+              ><span>Maximum reasoning</span><select bind:value={form.runtime_profile.reasoning_max}
+                ><option>PROVIDER_DEFAULT</option><option>MINIMAL</option><option>LOW</option
+                ><option>MEDIUM</option><option>HIGH</option><option>MAX</option></select
+              ></label
+            >
+          </div>
+          <div class="two">
+            <label
+              ><span>Timeout (seconds)</span><input
+                type="number"
+                min="60"
+                max="43200"
+                bind:value={form.runtime_profile.job_timeout_seconds}
               /></label
             ><label
-              ><span>Retries: {form.default_max_retries}</span><input
-                type="range"
+              ><span>Max attempts</span><input
+                type="number"
                 min="0"
                 max="10"
-                bind:value={form.default_max_retries}
+                bind:value={form.runtime_profile.max_job_attempts}
+              /></label
+            >
+          </div>
+          <div class="two">
+            <label
+              ><span>Max tool calls</span><input
+                type="number"
+                min="1"
+                max="200"
+                bind:value={form.runtime_profile.max_tool_calls}
+              /></label
+            ><label
+              ><span>Max model turns</span><input
+                type="number"
+                min="1"
+                max="20"
+                bind:value={form.runtime_profile.max_model_turns}
+              /></label
+            >
+          </div>
+          <div class="two">
+            <label
+              ><span>Max output tokens</span><input
+                type="number"
+                min="256"
+                bind:value={form.runtime_profile.max_output_tokens}
+                placeholder="Provider default"
+              /></label
+            ><label
+              ><span>Temperature</span><input
+                type="number"
+                min="0"
+                max="2"
+                step="0.1"
+                bind:value={form.runtime_profile.temperature}
+                placeholder="Provider default"
               /></label
             >
           </div>
@@ -925,10 +1012,6 @@
     border-radius: 0.8rem;
     background: var(--color-panel);
     padding: 1rem;
-  }
-  input[type='range'] {
-    padding: 0.3rem 0;
-    accent-color: var(--color-brand);
   }
   @media (max-width: 600px) {
     .two,

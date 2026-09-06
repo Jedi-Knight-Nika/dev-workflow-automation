@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, SecretStr
 from app.domain.agents import AgentRole
 from app.domain.operational_states import IndexStatus, IntegrationStatus, JobRole, JobState
 from app.domain.tasks import TaskState
+from app.schemas.runtime import RoleOverridePolicyWrite, RoleRuntimeProfileWrite
 
 
 class TeamWrite(BaseModel):
@@ -35,6 +36,8 @@ class RoleWrite(BaseModel):
     default_reasoning_effort: str = "default"
     default_timeout_minutes: int = Field(default=30, ge=1, le=720)
     default_max_retries: int = Field(default=2, ge=0, le=10)
+    runtime_profile: RoleRuntimeProfileWrite = Field(default_factory=RoleRuntimeProfileWrite)
+    override_policy: RoleOverridePolicyWrite = Field(default_factory=RoleOverridePolicyWrite)
     enabled: bool = True
 
 

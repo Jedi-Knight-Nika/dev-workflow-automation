@@ -1,7 +1,7 @@
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Protocol
+from typing import Any, Protocol
 
 
 class RoleNotFound(Exception):
@@ -28,6 +28,8 @@ class SaveRoleCommand:
     default_timeout_minutes: int = 30
     default_max_retries: int = 2
     enabled: bool = True
+    runtime_profile: dict[str, Any] | None = None
+    override_policy: dict[str, str] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,6 +56,8 @@ class RoleView:
     total_agents: int
     created_at: datetime
     updated_at: datetime
+    runtime_profile: dict[str, Any] = field(default_factory=dict)
+    override_policy: dict[str, str] = field(default_factory=dict)
 
 
 class RoleManagementWorkflow(Protocol):

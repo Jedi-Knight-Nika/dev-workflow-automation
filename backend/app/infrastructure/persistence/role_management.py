@@ -12,7 +12,9 @@ from app.application.ports.role_management import (
     SaveRoleCommand,
 )
 from app.db.models import AIAgent, Role
+from app.domain.ai_runtime import resolve_runtime_config
 from app.domain.roles import Role as DomainRole
+from app.providers.capabilities import ModelCapabilityRegistry
 
 
 class SqlAlchemyRoleManagementWorkflow:
@@ -59,6 +61,27 @@ class SqlAlchemyRoleManagementWorkflow:
         self._validate(command)
         for key, value in self._values(command).items():
             setattr(item, key, value)
+        agents = list(
+            (await self.session.scalars(select(AIAgent).where(AIAgent.role_id == item.id))).all()
+        )
+        try:
+            for agent in agents:
+                provider = agent.provider or item.default_provider or "openai"
+                model = agent.model or item.default_model or ""
+                resolve_runtime_config(
+                    provider=provider,
+                    model=model,
+                    role_profile=dict(item.runtime_profile or {}),
+                    agent_overrides=dict(agent.runtime_overrides or {}),
+                    override_policy=dict(item.override_policy or {}),
+                    strategy=None,
+                    capabilities=ModelCapabilityRegistry().get(provider, model),
+                )
+        except ValueError as exc:
+            await self.session.rollback()
+            raise RoleConflict(
+                f"Role update conflicts with an existing Agent override: {exc}"
+            ) from exc
         item.version += 1
         try:
             await self.session.commit()
@@ -87,6 +110,8 @@ class SqlAlchemyRoleManagementWorkflow:
             source.default_timeout_minutes,
             source.default_max_retries,
             True,
+            dict(source.runtime_profile or {}),
+            dict(source.override_policy or {}),
         )
         return await self.create(command)
 
@@ -161,6 +186,8 @@ class SqlAlchemyRoleManagementWorkflow:
             active_agents + inactive_agents,
             item.created_at,
             item.updated_at,
+            dict(item.runtime_profile or {}),
+            dict(item.override_policy or {}),
         )
 
     @staticmethod
@@ -180,6 +207,8 @@ class SqlAlchemyRoleManagementWorkflow:
             "default_timeout_minutes": c.default_timeout_minutes,
             "default_max_retries": c.default_max_retries,
             "enabled": c.enabled,
+            "runtime_profile": dict(c.runtime_profile or {}),
+            "override_policy": dict(c.override_policy or {}),
         }
 
     @staticmethod

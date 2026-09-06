@@ -32,6 +32,8 @@ def command(body: RoleWrite) -> SaveRoleCommand:
         body.default_timeout_minutes,
         body.default_max_retries,
         body.enabled,
+        body.runtime_profile.model_dump(mode="json"),
+        body.override_policy.model_dump(mode="json"),
     )
 
 

@@ -80,6 +80,8 @@ class Role(Base):
     default_reasoning_effort: Mapped[str] = mapped_column(String(20), default="default")
     default_timeout_minutes: Mapped[int] = mapped_column(Integer, default=30)
     default_max_retries: Mapped[int] = mapped_column(Integer, default=2)
+    runtime_profile: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    override_policy: Mapped[dict[str, str]] = mapped_column(JSON, default=dict)
     enabled: Mapped[bool] = mapped_column(default=True)
     built_in: Mapped[bool] = mapped_column(default=False)
     version: Mapped[int] = mapped_column(Integer, default=1)
@@ -102,6 +104,8 @@ class AIAgent(Base):
     custom_instructions: Mapped[str] = mapped_column(Text, default="")
     permission_overrides: Mapped[dict[str, str]] = mapped_column(JSON, default=dict)
     knowledge_collection_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
+    runtime_overrides: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    config_version: Mapped[int] = mapped_column(Integer, default=1)
     enabled: Mapped[bool] = mapped_column(default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(

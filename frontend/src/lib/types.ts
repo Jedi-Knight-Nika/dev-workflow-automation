@@ -590,6 +590,8 @@ export type Role = {
   default_reasoning_effort: string;
   default_timeout_minutes: number;
   default_max_retries: number;
+  runtime_profile: RoleRuntimeProfile;
+  override_policy: Record<string, string>;
   enabled: boolean;
   built_in: boolean;
   version: number;
@@ -598,6 +600,21 @@ export type Role = {
   total_agents: number;
   created_at: string;
   updated_at: string;
+};
+
+export type RoleRuntimeProfile = {
+  reasoning_default: 'PROVIDER_DEFAULT' | 'MINIMAL' | 'LOW' | 'MEDIUM' | 'HIGH' | 'MAX';
+  reasoning_min: 'PROVIDER_DEFAULT' | 'MINIMAL' | 'LOW' | 'MEDIUM' | 'HIGH' | 'MAX';
+  reasoning_max: 'PROVIDER_DEFAULT' | 'MINIMAL' | 'LOW' | 'MEDIUM' | 'HIGH' | 'MAX';
+  dynamic_reasoning_allowed: boolean;
+  max_output_tokens: number | null;
+  temperature: number | null;
+  context_strategy: 'MINIMAL' | 'BALANCED' | 'DEEP';
+  max_tool_calls: number;
+  job_timeout_seconds: number;
+  max_job_attempts: number;
+  max_model_turns: number;
+  structured_output_mode: 'REQUIRED' | 'PREFERRED' | 'NONE';
 };
 
 export type TaskAssignment = {

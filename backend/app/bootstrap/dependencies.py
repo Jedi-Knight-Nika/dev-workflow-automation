@@ -15,6 +15,7 @@ from app.infrastructure.knowledge_search import SqlAlchemyKnowledgeSearchWorkflo
 from app.infrastructure.persistence import SqlAlchemyUnitOfWork
 from app.infrastructure.persistence.account_settings import SqlAlchemyAccountSettingsStore
 from app.infrastructure.persistence.agent_configuration import SqlAlchemyAgentConfigurationWorkflow
+from app.infrastructure.persistence.agent_runtime import SqlAlchemyAgentRuntimeStore
 from app.infrastructure.persistence.dashboard_queries import SqlAlchemyDashboardQueries
 from app.infrastructure.persistence.event_queries import SqlAlchemyEventQueries
 from app.infrastructure.persistence.execution_policy import SqlAlchemyExecutionPolicyStore
@@ -55,6 +56,12 @@ def get_account_settings_store(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> SqlAlchemyAccountSettingsStore:
     return SqlAlchemyAccountSettingsStore(session)
+
+
+def get_agent_runtime_store(
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> SqlAlchemyAgentRuntimeStore:
+    return SqlAlchemyAgentRuntimeStore(session)
 
 
 def get_event_queries() -> QueryEvents:

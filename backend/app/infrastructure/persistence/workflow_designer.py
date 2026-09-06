@@ -240,6 +240,16 @@ class SqlAlchemyWorkflowDesigner:
                 agent.model = node.model or None
                 agent.custom_instructions = node.system_prompt
                 agent.enabled = node.enabled
+                runtime_overrides: dict[str, object] = {}
+                if node.reasoning_effort != "default":
+                    runtime_overrides["reasoning_level"] = node.reasoning_effort.upper()
+                if node.max_output_tokens is not None:
+                    runtime_overrides["max_output_tokens"] = node.max_output_tokens
+                if node.temperature is not None:
+                    runtime_overrides["temperature"] = float(node.temperature)
+                if agent.runtime_overrides != runtime_overrides:
+                    agent.runtime_overrides = runtime_overrides
+                    agent.config_version += 1
             agent_ids[node.id] = agent.id if agent else None
         self._session.add_all(
             WorkflowNode(

@@ -100,6 +100,9 @@ class AnthropicProvider(AIProvider):
         }
         if request.temperature is not None:
             payload["temperature"] = request.temperature
+        if request.reasoning_effort != "default":
+            payload["thinking"] = {"type": "adaptive"}
+            payload["output_config"] = {"effort": request.reasoning_effort}
         response = await self.request(
             "POST",
             "https://api.anthropic.com/v1/messages",
@@ -149,6 +152,8 @@ class GoogleProvider(AIProvider):
         generation_config: dict[str, Any] = {"max_output_tokens": request.max_output_tokens}
         if request.temperature is not None:
             generation_config["temperature"] = request.temperature
+        if request.reasoning_effort != "default":
+            generation_config["thinking_level"] = request.reasoning_effort
         response = await self.request(
             "POST",
             "https://generativelanguage.googleapis.com/v1beta/interactions",

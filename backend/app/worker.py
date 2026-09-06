@@ -27,6 +27,7 @@ from app.db.models import (
     WorkflowNode,
 )
 from app.db.session import SessionLocal
+from app.domain.ai_runtime import ReasoningLevel, resolve_runtime_config
 from app.domain.security import Decision, ExecutionMode, TeamExecutionPolicy
 from app.infrastructure.git.workspaces import prepare_workspace, run_git
 from app.infrastructure.persistence.task_memory import TaskMemoryService
@@ -49,6 +50,7 @@ from app.infrastructure.workers.structured_output import (
 )
 from app.logging import configure_logging
 from app.providers import ProviderRequest, create_provider
+from app.providers.capabilities import ModelCapabilityRegistry
 from app.schemas import WorkerResult
 
 
@@ -82,6 +84,11 @@ class ResolvedAgentConfig:
     knowledge_scope: tuple[str, ...] = ()
     capabilities: tuple[str, ...] = ()
     allowed_results: tuple[str, ...] = ()
+    effective_runtime: dict[str, Any] | None = None
+    effective_runtime_hash: str | None = None
+    model_capability_version: str | None = None
+    agent_config_version: int | None = None
+    strategy_version: str | None = None
 
 
 REQUIRED_CAPABILITY = {
@@ -164,17 +171,61 @@ async def resolve_agent_config(
             fallback_provider=node.fallback_provider,
             fallback_model=node.fallback_model,
         )
-        return ResolvedAgentConfig(
+        provider = (
             (agent.provider if agent and agent.provider else None)
             or node.provider
             or (role_record.default_provider if role_record else None)
             or (account.default_provider_id if account else None)
-            or "openai",
+            or "openai"
+        )
+        model = (
             (agent.model if agent and agent.model else None)
             or node.model
             or (role_record.default_model if role_record else None)
             or (account.default_model if account else None)
-            or "",
+            or ""
+        )
+        role_profile = dict(role_record.runtime_profile or {}) if role_record else {}
+        if role_record and not role_profile:
+            role_profile = {
+                "reasoning_default": role_record.default_reasoning_effort,
+                "job_timeout_seconds": role_record.default_timeout_minutes * 60,
+                "max_job_attempts": role_record.default_max_retries,
+            }
+        agent_overrides = dict(agent.runtime_overrides or {}) if agent else {}
+        if node.reasoning_effort != "default":
+            agent_overrides.setdefault("reasoning_level", node.reasoning_effort)
+        if node.max_output_tokens is not None:
+            agent_overrides.setdefault("max_output_tokens", node.max_output_tokens)
+        if node.temperature is not None:
+            agent_overrides.setdefault("temperature", float(node.temperature))
+        capabilities = ModelCapabilityRegistry().get(provider, model)
+        runtime = resolve_runtime_config(
+            provider=provider,
+            model=model,
+            role_profile=role_profile,
+            agent_overrides=agent_overrides,
+            override_policy=dict(role_record.override_policy or {}) if role_record else {},
+            strategy=task.execution_strategy,
+            capabilities=capabilities,
+        )
+        runtime_snapshot = runtime.snapshot()
+        node_configuration.update(
+            reasoning_effort=(
+                "default"
+                if runtime.reasoning_level is ReasoningLevel.PROVIDER_DEFAULT
+                else runtime.reasoning_level.value.casefold()
+            ),
+            max_output_tokens=runtime.max_output_tokens,
+            temperature=runtime.temperature,
+            timeout_minutes=max(runtime.job_timeout_seconds // 60, 1),
+            structured_output_retries=max(runtime.max_model_turns - 1, 0),
+            context_depth=runtime.context_strategy.casefold(),
+            max_tool_calls=runtime.max_tool_calls,
+        )
+        return ResolvedAgentConfig(
+            provider,
+            model,
             "\n\n".join(
                 filter(
                     None,
@@ -207,6 +258,11 @@ async def resolve_agent_config(
             ),
             tuple(role_record.capabilities if role_record else ()),
             tuple(role_record.allowed_results if role_record else ()),
+            runtime_snapshot,
+            runtime.fingerprint(),
+            runtime.capability_version,
+            agent.config_version if agent else None,
+            runtime.strategy_version,
         )
     if fallback is None or not fallback.enabled or not fallback.model:
         if account is None or not account.default_model:
@@ -327,6 +383,11 @@ async def persist_attempts(
                 role_version=configuration.get("_role_version"),
                 effective_permissions=configuration.get("_permissions", []),
                 effective_knowledge_scope=configuration.get("_knowledge_scope", []),
+                effective_runtime_config=configuration.get("_effective_runtime", {}),
+                effective_runtime_config_hash=configuration.get("_effective_runtime_hash"),
+                model_capability_version=configuration.get("_model_capability_version"),
+                agent_config_version=configuration.get("_agent_config_version"),
+                strategy_version=configuration.get("_strategy_version"),
             )
         )
     await session.commit()
@@ -431,6 +492,11 @@ async def run(job_id: uuid.UUID) -> WorkerResult:
             _role_version=config.role_version,
             _permissions=list(config.permissions),
             _knowledge_scope=list(config.knowledge_scope),
+            _effective_runtime=config.effective_runtime or {},
+            _effective_runtime_hash=config.effective_runtime_hash,
+            _model_capability_version=config.model_capability_version,
+            _agent_config_version=config.agent_config_version,
+            _strategy_version=config.strategy_version,
         )
         integration = await session.scalar(
             select(Integration).where(Integration.provider_name == config.provider)
@@ -475,7 +541,9 @@ async def run(job_id: uuid.UUID) -> WorkerResult:
         )
         tester_checks = []
         execution_strategy = task.execution_strategy or {}
-        strategy_tool_limit = int(execution_strategy.get("max_tool_calls", 50))
+        strategy_tool_limit = int(
+            config.configuration.get("max_tool_calls", execution_strategy.get("max_tool_calls", 50))
+        )
         if job.role == JobRole.TESTER and workspace is not None:
             require_permission(config, "RUN_TESTS")
             if task.team_id is None:

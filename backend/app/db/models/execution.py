@@ -110,6 +110,11 @@ class WorkerRun(Base):
     role_version: Mapped[int | None] = mapped_column(Integer)
     effective_permissions: Mapped[list[str]] = mapped_column(JSON, default=list)
     effective_knowledge_scope: Mapped[list[str]] = mapped_column(JSON, default=list)
+    effective_runtime_config: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    effective_runtime_config_hash: Mapped[str | None] = mapped_column(String(64))
+    model_capability_version: Mapped[str | None] = mapped_column(String(30))
+    agent_config_version: Mapped[int | None] = mapped_column(Integer)
+    strategy_version: Mapped[str | None] = mapped_column(String(30))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 

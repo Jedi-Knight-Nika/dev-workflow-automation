@@ -11,6 +11,8 @@ from starlette.middleware.base import RequestResponseEndpoint
 from starlette.requests import Request
 from starlette.responses import Response
 
+from app.api.agent_runtime import router as agent_runtime_router
+from app.api.ai_runtime import router as ai_runtime_router
 from app.api.control_plane import router as control_plane_router
 from app.api.dashboard import router as dashboard_router
 from app.api.events import router as events_router
@@ -73,6 +75,8 @@ app.include_router(tasks_router, prefix="/api/v1")
 app.include_router(teams_router, prefix="/api/v1")
 app.include_router(roles_router, prefix="/api/v1")
 app.include_router(settings_router, prefix="/api/v1")
+app.include_router(ai_runtime_router, prefix="/api/v1")
+app.include_router(agent_runtime_router, prefix="/api/v1")
 app.include_router(terminals_router, prefix="/api/v1")
 app.include_router(control_plane_router, prefix="/api/v1")
 app.include_router(events_router, prefix="/api/v1")
