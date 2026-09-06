@@ -635,10 +635,24 @@
   }
 </script>
 
+<svelte:window
+  onclick={() => {
+    nodeMenu = null;
+    addMenuOpen = false;
+  }}
+/>
+
 <section class="border-line bg-panel mb-6 overflow-hidden rounded-xl border">
   <div class="border-line flex min-h-16 flex-wrap items-center gap-3 border-b px-4 py-3">
     <div class="relative">
-      <button class="add-button" type="button" onclick={() => (addMenuOpen = !addMenuOpen)}>
+      <button
+        class="add-button"
+        type="button"
+        onclick={(event) => {
+          event.stopPropagation();
+          addMenuOpen = !addMenuOpen;
+        }}
+      >
         <span class="text-lg leading-none">+</span>
         {t('workflow.addAgent')}
         <span class="text-[9px] opacity-60">▼</span>
@@ -944,7 +958,7 @@
               placeholder={t('workflow.systemPromptPlaceholder')}
             ></textarea>
           </div>
-          <details class="access-section advanced-settings" open>
+          <details class="access-section advanced-settings">
             <summary>Advanced execution settings</summary>
             <p>Applied by the worker each time this agent runs.</p>
             <label class="enabled-toggle">
