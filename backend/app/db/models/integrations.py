@@ -40,6 +40,8 @@ class Integration(Base):
     configuration: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     encrypted_credentials: Mapped[bytes | None] = mapped_column()
     last_error: Mapped[str | None] = mapped_column(Text)
+    sync_status: Mapped[str] = mapped_column(String(30), default="IDLE")
+    last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow

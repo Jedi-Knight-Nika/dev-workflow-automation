@@ -28,6 +28,8 @@ from .integrations import (
     RepositoryCreate,
     RepositoryRead,
     TelegramConfigure,
+    TrelloBoardRead,
+    TrelloListRead,
     WebhookHealthRead,
 )
 from .settings import (
@@ -116,6 +118,8 @@ __all__ = [
     "TelegramConfigure",
     "TerminalAccessRead",
     "TerminalOpen",
+    "TrelloBoardRead",
+    "TrelloListRead",
     "ValidationRead",
     "WebhookHealthRead",
     "WorkerNodeRead",

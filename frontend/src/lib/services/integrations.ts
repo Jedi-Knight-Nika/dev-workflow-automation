@@ -4,6 +4,8 @@ import type {
   Integration,
   LinearWorkflowState,
   LinearMember,
+  TrelloBoard,
+  TrelloList,
   WebhookHealth
 } from '$lib/types';
 
@@ -54,4 +56,12 @@ export function listLinearWorkflowStates(): Promise<LinearWorkflowState[]> {
 
 export function listLinearMembers(): Promise<LinearMember[]> {
   return api<LinearMember[]>('/linear/members');
+}
+
+export function listTrelloBoards(): Promise<TrelloBoard[]> {
+  return api<TrelloBoard[]>('/trello/boards');
+}
+
+export function listTrelloLists(boardId: string): Promise<TrelloList[]> {
+  return api<TrelloList[]>(`/trello/boards/${encodeURIComponent(boardId)}/lists`);
 }

@@ -358,6 +358,13 @@ export const en = {
   'integrations.doNotUpdateAfterPr': 'Do not update after PR publication',
   'integrations.doNotUpdateAfterMerge': 'Do not update after merge',
   'integrations.saveCredentialsThenDiscover': 'Save credentials, then discover states',
+  'integrations.trelloApiKey': 'Trello API key',
+  'integrations.trelloToken': 'Trello user token',
+  'integrations.trelloDiscoverBoards': 'Discover boards',
+  'integrations.trelloBoard': 'Source board',
+  'integrations.trelloSelectBoard': 'Select a board',
+  'integrations.trelloSourceLists': 'Lists to import (none means every open list)',
+  'integrations.trelloSaveThenDiscover': 'Save and verify credentials, then discover boards.',
 
   'settings.eyebrow': 'System',
   'settings.title': 'Settings',

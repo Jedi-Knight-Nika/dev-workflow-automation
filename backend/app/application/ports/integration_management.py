@@ -26,6 +26,8 @@ class IntegrationView:
     configuration: dict[str, Any]
     has_credentials: bool
     last_error: str | None
+    sync_status: str
+    last_synced_at: datetime | None
     updated_at: datetime
 
 

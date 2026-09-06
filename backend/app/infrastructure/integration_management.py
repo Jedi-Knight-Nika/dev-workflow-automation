@@ -12,6 +12,7 @@ from app.infrastructure.security.crypto import cipher
 from app.integrations.github import GitHubClient
 from app.integrations.github_auth import resolve_github_auth
 from app.integrations.linear import LinearClient
+from app.integrations.trello import TrelloClient
 from app.providers import create_provider
 
 
@@ -24,6 +25,8 @@ def integration_to_view(item: Integration) -> IntegrationView:
         item.configuration,
         item.encrypted_credentials is not None,
         item.last_error,
+        item.sync_status,
+        item.last_synced_at,
         item.updated_at,
     )
 
@@ -72,6 +75,8 @@ class EncryptedIntegrationManagementWorkflow:
                 await GitHubClient(auth.token, auth.installation).list_repositories()
             elif provider_name == "linear":
                 await LinearClient(credential).list_workflow_states()
+            elif provider_name == "trello":
+                await TrelloClient(credential).list_boards()
             elif provider_name in {"openai", "anthropic", "google"}:
                 await create_provider(provider_name, credential).list_models()
             elif provider_name in {"npm_registry", "pypi_registry"}:

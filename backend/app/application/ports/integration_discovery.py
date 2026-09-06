@@ -35,7 +35,23 @@ class LinearMemberView:
     active: bool
 
 
+@dataclass(frozen=True, slots=True)
+class TrelloBoardView:
+    id: str
+    name: str
+    url: str
+
+
+@dataclass(frozen=True, slots=True)
+class TrelloListView:
+    id: str
+    name: str
+    closed: bool
+
+
 class IntegrationDiscoveryWorkflow(Protocol):
     async def github_repositories(self) -> list[RepositoryDiscoveryView]: ...
     async def linear_workflow_states(self) -> list[WorkflowStateView]: ...
     async def linear_members(self) -> list[LinearMemberView]: ...
+    async def trello_boards(self) -> list[TrelloBoardView]: ...
+    async def trello_lists(self, board_id: str) -> list[TrelloListView]: ...

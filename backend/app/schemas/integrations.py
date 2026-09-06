@@ -27,6 +27,8 @@ class IntegrationRead(BaseModel):
     configuration: dict[str, Any]
     has_credentials: bool
     last_error: str | None
+    sync_status: str
+    last_synced_at: datetime | None
     updated_at: datetime
 
 
@@ -72,6 +74,18 @@ class LinearMemberRead(BaseModel):
     name: str
     email: str
     active: bool
+
+
+class TrelloBoardRead(BaseModel):
+    id: str
+    name: str
+    url: str
+
+
+class TrelloListRead(BaseModel):
+    id: str
+    name: str
+    closed: bool
 
 
 class ProviderModelRead(BaseModel):

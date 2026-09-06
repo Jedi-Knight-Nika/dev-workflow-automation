@@ -9,18 +9,26 @@
     testIntegration,
     getGithubAppInstallUrl,
     getGithubInstallationAccount,
-    listLinearWorkflowStates
+    listLinearWorkflowStates,
+    listTrelloBoards,
+    listTrelloLists
   } from '$lib/services/integrations';
   import { integrationsResource, webhookHealthResource } from '$lib/stores/integrations.svelte';
   import { repositoriesResource } from '$lib/stores/repositories.svelte';
   import LinearWorkflowFields from '$lib/components/integrations/LinearWorkflowFields.svelte';
   import TextField from '$lib/components/TextField.svelte';
   import Skeleton from '$lib/components/Skeleton.svelte';
-  import type { GitHubInstallationAccount, LinearWorkflowState } from '$lib/types';
+  import type {
+    GitHubInstallationAccount,
+    LinearWorkflowState,
+    TrelloBoard,
+    TrelloList
+  } from '$lib/types';
   import { t } from '$lib/i18n/index.svelte';
   const providers = [
     { name: 'github', type: 'source_control', label: 'GitHub', active: true },
     { name: 'linear', type: 'task_management', label: 'Linear', active: true },
+    { name: 'trello', type: 'task_management', label: 'Trello', active: true },
     { name: 'openai', type: 'ai', label: 'OpenAI', active: true },
     { name: 'anthropic', type: 'ai', label: 'Anthropic', active: true },
     { name: 'google', type: 'ai', label: 'Google', active: true },
@@ -43,6 +51,13 @@
   let doneStateId = '';
   let linearStates: LinearWorkflowState[] = [];
   let loadingLinearStates = false;
+  let trelloApiKey = '';
+  let trelloToken = '';
+  let trelloBoardId = '';
+  let trelloListIds: string[] = [];
+  let trelloBoards: TrelloBoard[] = [];
+  let trelloLists: TrelloList[] = [];
+  let loadingTrello = false;
   let refreshingStatuses = false;
   let statusesRefreshedAt: Date | null = null;
   let registryUrl = '';
@@ -100,15 +115,30 @@
                 ready_for_testing_state_id: readyForTestingStateId || null,
                 done_state_id: doneStateId || null
               }
-            : provider.name === 'npm_registry'
-              ? { registry_url: registryUrl || null }
-              : provider.name === 'pypi_registry'
-                ? { index_url: registryUrl || null }
-                : {},
-        credential: credential || null
+            : provider.name === 'trello'
+              ? {
+                  board_id: trelloBoardId || null,
+                  list_ids: trelloListIds,
+                  repository_id: repositoryId || null,
+                  sync_enabled: true,
+                  poll_interval_seconds: 60
+                }
+              : provider.name === 'npm_registry'
+                ? { registry_url: registryUrl || null }
+                : provider.name === 'pypi_registry'
+                  ? { index_url: registryUrl || null }
+                  : {},
+        credential:
+          provider.name === 'trello'
+            ? trelloApiKey && trelloToken
+              ? JSON.stringify({ api_key: trelloApiKey, token: trelloToken })
+              : null
+            : credential || null
       });
       await testIntegration(provider.name);
       credential = '';
+      trelloApiKey = '';
+      trelloToken = '';
       editing = '';
       await integrationsResource.refresh();
     } catch (cause) {
@@ -150,6 +180,35 @@
     } finally {
       loadingLinearStates = false;
     }
+  }
+  async function discoverTrelloBoards() {
+    loadingTrello = true;
+    error = '';
+    try {
+      trelloBoards = await listTrelloBoards();
+    } catch (cause) {
+      error = String(cause);
+    } finally {
+      loadingTrello = false;
+    }
+  }
+  async function discoverTrelloLists() {
+    if (!trelloBoardId) return;
+    loadingTrello = true;
+    error = '';
+    try {
+      trelloLists = await listTrelloLists(trelloBoardId);
+      trelloListIds = trelloListIds.filter((id) => trelloLists.some((item) => item.id === id));
+    } catch (cause) {
+      error = String(cause);
+    } finally {
+      loadingTrello = false;
+    }
+  }
+  function toggleTrelloList(id: string, checked: boolean) {
+    trelloListIds = checked
+      ? Array.from(new Set([...trelloListIds, id]))
+      : trelloListIds.filter((value) => value !== id);
   }
   async function refreshStatuses() {
     refreshingStatuses = true;
@@ -253,21 +312,97 @@
               save(provider);
             }}
           >
-            <TextField
-              id={`credential-${provider.name}`}
-              label={`${t('integrations.apiKeyOrToken')} ${
-                integrationsResource.data.find((item) => item.provider_name === provider.name)
-                  ?.has_credentials
-                  ? t('integrations.keepExisting')
-                  : ''
-              }`}
-              type="password"
-              bind:value={credential}
-              autocomplete="off"
-              required={!integrationsResource.data.find(
-                (item) => item.provider_name === provider.name
-              )?.has_credentials}
-            />
+            {#if provider.name !== 'trello'}<TextField
+                id={`credential-${provider.name}`}
+                label={`${t('integrations.apiKeyOrToken')} ${
+                  integrationsResource.data.find((item) => item.provider_name === provider.name)
+                    ?.has_credentials
+                    ? t('integrations.keepExisting')
+                    : ''
+                }`}
+                type="password"
+                bind:value={credential}
+                autocomplete="off"
+                required={!integrationsResource.data.find(
+                  (item) => item.provider_name === provider.name
+                )?.has_credentials}
+              />{/if}
+            {#if provider.name === 'trello'}
+              <div class="space-y-3">
+                <TextField
+                  id="trello-api-key"
+                  label={`${t('integrations.trelloApiKey')} ${integration('trello')?.has_credentials ? t('integrations.keepExisting') : ''}`}
+                  type="password"
+                  bind:value={trelloApiKey}
+                  autocomplete="off"
+                  required={!integration('trello')?.has_credentials}
+                />
+                <TextField
+                  id="trello-token"
+                  label={t('integrations.trelloToken')}
+                  type="password"
+                  bind:value={trelloToken}
+                  autocomplete="off"
+                  required={!integration('trello')?.has_credentials}
+                />
+                <Button
+                  type="button"
+                  size="sm"
+                  onclick={discoverTrelloBoards}
+                  disabled={loadingTrello || !integration('trello')?.has_credentials}
+                >
+                  {loadingTrello ? t('common.loading') : t('integrations.trelloDiscoverBoards')}
+                </Button>
+                <label class="text-muted block text-xs" for="trello-board"
+                  >{t('integrations.trelloBoard')}</label
+                >
+                <select
+                  id="trello-board"
+                  class="border-line bg-panel-alt w-full rounded-lg border p-2 text-sm"
+                  bind:value={trelloBoardId}
+                  onchange={discoverTrelloLists}
+                >
+                  <option value="">{t('integrations.trelloSelectBoard')}</option>
+                  {#each trelloBoards as board (board.id)}<option value={board.id}
+                      >{board.name}</option
+                    >{/each}
+                </select>
+                {#if trelloLists.length}
+                  <fieldset class="space-y-2">
+                    <legend class="text-muted text-xs">
+                      {t('integrations.trelloSourceLists')}
+                    </legend>
+                    {#each trelloLists as list (list.id)}
+                      <label class="flex items-center gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={trelloListIds.includes(list.id)}
+                          onchange={(event) =>
+                            toggleTrelloList(list.id, event.currentTarget.checked)}
+                        />
+                        {list.name}
+                      </label>
+                    {/each}
+                  </fieldset>
+                {/if}
+                <label class="text-muted block text-xs" for="trello-repository"
+                  >{t('integrations.repositoryForNewTasks')}</label
+                >
+                <select
+                  id="trello-repository"
+                  class="border-line bg-panel-alt w-full rounded-lg border p-2 text-sm"
+                  bind:value={repositoryId}
+                >
+                  <option value="">{t('integrations.noAutomaticRepository')}</option>
+                  {#each repositoriesResource.data as repository (repository.id)}<option
+                      value={repository.id}>{repository.owner}/{repository.name}</option
+                    >{/each}
+                </select>
+                {#if !integration('trello')?.has_credentials}<p class="text-muted text-[10px]">
+                    {t('integrations.trelloSaveThenDiscover')}
+                  </p>{/if}
+              </div>
+            {/if}
             {#if provider.name === 'linear'}
               <LinearWorkflowFields
                 bind:triggerLabel
@@ -376,6 +511,12 @@
                   inProgressStateId = String(existing?.in_progress_state_id || '');
                   blockedStateId = String(existing?.blocked_state_id || '');
                   doneStateId = String(existing?.done_state_id || '');
+                  trelloBoardId = String(existing?.board_id || '');
+                  trelloListIds = Array.isArray(existing?.list_ids)
+                    ? existing.list_ids.map(String)
+                    : [];
+                  trelloApiKey = '';
+                  trelloToken = '';
                   registryUrl = String(existing?.registry_url || existing?.index_url || '');
                 }}
                 >{provider.name === 'github' && status(provider.name) === 'DISCONNECTED'

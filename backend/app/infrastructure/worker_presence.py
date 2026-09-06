@@ -21,7 +21,7 @@ class SqlAlchemyWorkerPresence:
                     id=self._worker_id,
                     hostname=socket.gethostname(),
                     process_id=os.getpid(),
-                    capabilities=["jobs", "linear", "indexing"],
+                    capabilities=["jobs", "linear", "trello", "indexing"],
                     started_at=now,
                 )
                 session.add(worker)

@@ -463,7 +463,7 @@ class SqlAlchemyDashboardQueries:
     async def _health(self, now: datetime) -> list[HealthCheckView]:
         checks = [HealthCheckView("Database", "HEALTHY", "Connected", now)]
         integrations = list((await self._session.scalars(select(Integration))).all())
-        for provider in ("github", "linear", "openai", "anthropic", "google"):
+        for provider in ("github", "linear", "trello", "openai", "anthropic", "google"):
             item = next((entry for entry in integrations if entry.provider_name == provider), None)
             status = (
                 "HEALTHY"

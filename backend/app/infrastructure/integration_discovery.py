@@ -5,6 +5,8 @@ from app.application.ports.integration_discovery import (
     IntegrationNotConfigured,
     LinearMemberView,
     RepositoryDiscoveryView,
+    TrelloBoardView,
+    TrelloListView,
     WorkflowStateView,
 )
 from app.db.models import Integration
@@ -12,6 +14,7 @@ from app.infrastructure.security.crypto import cipher
 from app.integrations.github import GitHubClient
 from app.integrations.github_auth import resolve_github_auth
 from app.integrations.linear import LinearClient
+from app.integrations.trello import TrelloClient
 
 
 class EncryptedIntegrationDiscoveryWorkflow:
@@ -62,3 +65,11 @@ class EncryptedIntegrationDiscoveryWorkflow:
             LinearMemberView(member["id"], member["name"], member["email"], member["active"])
             for member in members
         ]
+
+    async def trello_boards(self) -> list[TrelloBoardView]:
+        boards = await TrelloClient(await self._credential("trello")).list_boards()
+        return [TrelloBoardView(item["id"], item["name"], item["url"]) for item in boards]
+
+    async def trello_lists(self, board_id: str) -> list[TrelloListView]:
+        lists = await TrelloClient(await self._credential("trello")).list_lists(board_id)
+        return [TrelloListView(item["id"], item["name"], item["closed"]) for item in lists]

@@ -40,6 +40,8 @@ from app.infrastructure.persistence.thinker_completion import (
 )
 from app.infrastructure.scheduler import Scheduler
 from app.infrastructure.startup_maintenance import SqlAlchemyStartupMaintenance
+from app.infrastructure.task_reconciliation import CompositeTaskReconciliation
+from app.infrastructure.trello_reconciliation import SqlAlchemyTrelloTaskReconciliation
 from app.infrastructure.worker_presence import SqlAlchemyWorkerPresence
 from app.infrastructure.workers import ConfiguredWorkerRunner
 
@@ -105,7 +107,12 @@ def create_scheduler(settings: Settings) -> Scheduler:
         index_processor,
         startup_maintenance,
         worker_presence,
-        ReconcileExternalTasks(SqlAlchemyLinearTaskReconciliation(SessionLocal)),
+        ReconcileExternalTasks(
+            CompositeTaskReconciliation(
+                SqlAlchemyLinearTaskReconciliation(SessionLocal),
+                SqlAlchemyTrelloTaskReconciliation(SessionLocal),
+            )
+        ),
         RecoveryManager(SqlAlchemyResilienceStore(SessionLocal)),
     )
 

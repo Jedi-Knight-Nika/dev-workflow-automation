@@ -367,6 +367,14 @@ export const ka: Record<TranslationKey, string> = {
   'integrations.doNotUpdateAfterPr': 'არ განახლდეს PR-ის გამოქვეყნების შემდეგ',
   'integrations.doNotUpdateAfterMerge': 'არ განახლდეს შერწყმის შემდეგ',
   'integrations.saveCredentialsThenDiscover': 'შეინახეთ მონაცემები, შემდეგ აღმოაჩინეთ სტატუსები',
+  'integrations.trelloApiKey': 'Trello API გასაღები',
+  'integrations.trelloToken': 'Trello მომხმარებლის ტოკენი',
+  'integrations.trelloDiscoverBoards': 'დაფების აღმოჩენა',
+  'integrations.trelloBoard': 'წყარო დაფა',
+  'integrations.trelloSelectBoard': 'აირჩიეთ დაფა',
+  'integrations.trelloSourceLists': 'ჩამოსატვირთი სიები (ცარიელი ნიშნავს ყველა ღია სიას)',
+  'integrations.trelloSaveThenDiscover':
+    'შეინახეთ და შეამოწმეთ მონაცემები, შემდეგ აღმოაჩინეთ დაფები.',
 
   'settings.eyebrow': 'სისტემა',
   'settings.title': 'პარამეტრები',

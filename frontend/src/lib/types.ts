@@ -86,8 +86,13 @@ export type Integration = {
   configuration: Record<string, unknown>;
   has_credentials: boolean;
   last_error: string | null;
+  sync_status: string;
+  last_synced_at: string | null;
   updated_at: string;
 };
+
+export type TrelloBoard = { id: string; name: string; url: string };
+export type TrelloList = { id: string; name: string; closed: boolean };
 
 export type GitHubInstallationAccount = {
   login: string;

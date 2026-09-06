@@ -85,6 +85,8 @@ from app.schemas import (
     ProviderModelRead,
     RepositoryCreate,
     RepositoryRead,
+    TrelloBoardRead,
+    TrelloListRead,
     WebhookHealthRead,
     WorkerNodeRead,
     WorkflowGraphRead,
@@ -230,6 +232,29 @@ async def discover_linear_members(
     except IntegrationNotConfigured as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return [LinearMemberRead.model_validate(item, from_attributes=True) for item in members]
+
+
+@router.get("/trello/boards", response_model=list[TrelloBoardRead])
+async def discover_trello_boards(
+    workflow: IntegrationDiscoveryWorkflow = Depends(get_integration_discovery_workflow),
+) -> list[TrelloBoardRead]:
+    try:
+        boards = await DiscoverIntegrations(workflow).trello_boards()
+    except IntegrationNotConfigured as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return [TrelloBoardRead.model_validate(item, from_attributes=True) for item in boards]
+
+
+@router.get("/trello/boards/{board_id}/lists", response_model=list[TrelloListRead])
+async def discover_trello_lists(
+    board_id: str,
+    workflow: IntegrationDiscoveryWorkflow = Depends(get_integration_discovery_workflow),
+) -> list[TrelloListRead]:
+    try:
+        lists = await DiscoverIntegrations(workflow).trello_lists(board_id)
+    except IntegrationNotConfigured as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return [TrelloListRead.model_validate(item, from_attributes=True) for item in lists]
 
 
 @router.get("/integrations", response_model=list[IntegrationRead])

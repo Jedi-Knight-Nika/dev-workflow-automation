@@ -32,7 +32,7 @@ class SqlAlchemyOperationsQueries:
 
     async def webhook_health(self) -> list[WebhookHealthView]:
         health: list[WebhookHealthView] = []
-        for provider in ("github", "linear"):
+        for provider in ("github", "linear", "trello"):
             pending = await self._session.scalar(
                 select(func.count(WebhookDelivery.id)).where(
                     WebhookDelivery.provider == provider,

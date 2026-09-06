@@ -173,8 +173,8 @@
       <label
         ><span>Source</span><select bind:value={filters.provider} onchange={() => void refresh()}
           ><option value="">All sources</option><option value="linear">Linear</option><option
-            value="internal">Manual</option
-          ><option value="github">GitHub</option></select
+            value="trello">Trello</option
+          ><option value="internal">Manual</option><option value="github">GitHub</option></select
         ></label
       >
       <label
