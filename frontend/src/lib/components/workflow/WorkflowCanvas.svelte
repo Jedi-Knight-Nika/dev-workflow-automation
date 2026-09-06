@@ -33,7 +33,8 @@
     selectedRole,
     onSelect,
     onConsole,
-    onSave
+    onSave,
+    onDirtyChange = () => undefined
   }: {
     workflow: WorkflowGraph;
     agents: AgentConfig[];
@@ -44,6 +45,7 @@
     onSelect: (role: string, nodeId: string) => void;
     onConsole: (role: string, nodeId: string) => void;
     onSave: (graph: WorkflowGraph) => Promise<void>;
+    onDirtyChange?: (dirty: boolean) => void;
   } = $props();
 
   type CanvasData = {
@@ -167,6 +169,10 @@
   );
   let saving = $state(false);
   let dirty = $state(false);
+
+  $effect(() => {
+    onDirtyChange(dirty);
+  });
   let selectedNodeId = $state('');
   let selectedEdgeId = $state('');
   let detailsNodeId = $state('');

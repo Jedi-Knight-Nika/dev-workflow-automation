@@ -1,5 +1,6 @@
 <script lang="ts">
   import { page } from '$app/state';
+  import { resolve } from '$app/paths';
   import { onMount } from 'svelte';
   import { API_URL } from '$lib/api';
   import PageHeader from '$lib/components/PageHeader.svelte';
@@ -9,6 +10,7 @@
   import Skeleton from '$lib/components/Skeleton.svelte';
   import TerminalConsole from '$lib/components/workflow/TerminalConsole.svelte';
   import AgentRuntimePanel from '$lib/components/workflow/AgentRuntimePanel.svelte';
+  import ResourceModal from '$lib/components/resources/ResourceModal.svelte';
   import type { default as WorkflowCanvasComponent } from '$lib/components/workflow/WorkflowCanvas.svelte';
   import {
     addAgentKnowledge,
@@ -26,6 +28,7 @@
   } from '$lib/services/agents';
   import { listIntegrations } from '$lib/services/integrations';
   import { listRepositories } from '$lib/services/repositories';
+  import { listTeams } from '$lib/services/teams';
   import { t } from '$lib/i18n/index.svelte';
   import type {
     AgentConfig,
@@ -35,6 +38,7 @@
     ModelCapabilities,
     ProviderCatalog,
     Repository,
+    Team,
     WorkflowGraph
   } from '$lib/types';
   let agents: AgentConfig[] = [];
@@ -57,8 +61,12 @@
   let modelCapabilities: ModelCapabilities | null = null;
   let runtimeLoading = false;
   let WorkflowCanvas: typeof WorkflowCanvasComponent | null = null;
+  let teams: Team[] = [];
+  let currentTeamId = page.url.searchParams.get('team') || '';
+  let teamId: string | undefined = currentTeamId || undefined;
+  let workflowDirty = false;
+  let pendingTeamId: string | null = null;
   const number = new Intl.NumberFormat();
-  const teamId = page.url.searchParams.get('team') || undefined;
   const date = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' });
   function configuredNumber(agent: AgentConfig, key: string): number | '' {
     const value = Number(agent.configuration[key]);
@@ -90,10 +98,11 @@
       })
     ]);
     workflow = loadedWorkflow;
-    [agents, integrations, repositories] = await Promise.all([
+    [agents, integrations, repositories, teams] = await Promise.all([
       listAgents(),
       listIntegrations(),
-      listRepositories()
+      listRepositories(),
+      listTeams()
     ]);
     const entries = await Promise.all(
       agents.map(async (agent) => [agent.role, await listAgentKnowledge(agent.role)] as const)
@@ -109,6 +118,37 @@
       error = String(cause);
       throw cause;
     }
+  }
+
+  async function switchTeam(nextTeamId: string) {
+    currentTeamId = nextTeamId;
+    teamId = nextTeamId || undefined;
+    pendingTeamId = null;
+    workflowDirty = false;
+    workflow = null;
+    selectedNodeId = '';
+    agentRuntime = null;
+    modelCapabilities = null;
+    window.history.replaceState(
+      window.history.state,
+      '',
+      nextTeamId
+        ? `${resolve('/agents')}?team=${encodeURIComponent(nextTeamId)}`
+        : resolve('/agents')
+    );
+    workflow = await getWorkflow(nextTeamId || undefined);
+  }
+
+  function requestTeamSwitch(event: Event) {
+    const nextTeamId = (event.currentTarget as HTMLSelectElement).value;
+    if (nextTeamId === currentTeamId) return;
+    if (workflowDirty) {
+      pendingTeamId = nextTeamId;
+      return;
+    }
+    void switchTeam(nextTeamId).catch((cause) => {
+      error = String(cause);
+    });
   }
   async function selectAgent(role: string, nodeId: string) {
     selectedRole = role;
@@ -216,7 +256,15 @@
         .then((items) => (agents = items))
         .catch(() => undefined);
     });
-    return () => events.close();
+    const warnBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (!workflowDirty) return;
+      event.preventDefault();
+    };
+    window.addEventListener('beforeunload', warnBeforeUnload);
+    return () => {
+      events.close();
+      window.removeEventListener('beforeunload', warnBeforeUnload);
+    };
   });
 </script>
 
@@ -227,24 +275,49 @@
 />
 <main class="p-4 sm:p-6 md:p-10">
   <ErrorBanner message={error} class="mb-4" />
+  <div class="border-line bg-panel mb-4 flex flex-wrap items-center gap-3 rounded-xl border p-4">
+    <div class="min-w-0 flex-1">
+      <label class="block text-sm font-semibold" for="workflow-team">Team workflow</label>
+      <p class="text-muted mt-1 text-xs">Choose which Team's routing graph you want to edit.</p>
+    </div>
+    <select
+      id="workflow-team"
+      class="border-line bg-panel-alt min-w-56 rounded-lg border px-3 py-2 text-sm"
+      value={currentTeamId}
+      onchange={requestTeamSwitch}
+    >
+      <option value="">Default workflow</option>
+      {#each teams as team (team.id)}
+        <option value={team.id}>{team.name}</option>
+      {/each}
+    </select>
+    {#if workflowDirty}
+      <span class="rounded-full bg-warning/10 px-3 py-1 text-xs font-medium text-warning">
+        Unsaved changes
+      </span>
+    {/if}
+  </div>
   {#if workflow && WorkflowCanvas}
-    <svelte:component
-      this={WorkflowCanvas}
-      {workflow}
-      {agents}
-      {integrations}
-      {repositories}
-      {selectedRole}
-      {teamId}
-      onSelect={(role, nodeId) => {
-        void selectAgent(role, nodeId);
-      }}
-      onConsole={(role, nodeId) => {
-        selectedNodeId = nodeId;
-        consoleAgent = agents.find((agent) => agent.role === role) || null;
-      }}
-      onSave={persistWorkflow}
-    />
+    {#key currentTeamId}
+      <svelte:component
+        this={WorkflowCanvas}
+        {workflow}
+        {agents}
+        {integrations}
+        {repositories}
+        {selectedRole}
+        {teamId}
+        onSelect={(role, nodeId) => {
+          void selectAgent(role, nodeId);
+        }}
+        onConsole={(role, nodeId) => {
+          selectedNodeId = nodeId;
+          consoleAgent = agents.find((agent) => agent.role === role) || null;
+        }}
+        onSave={persistWorkflow}
+        onDirtyChange={(dirty) => (workflowDirty = dirty)}
+      />
+    {/key}
   {:else if !error}
     <section class="border-line bg-panel mb-6 overflow-hidden rounded-xl border" aria-busy="true">
       <div class="border-line flex min-h-16 items-center gap-3 border-b px-4 py-3">
@@ -540,6 +613,32 @@
     {/each}
   </section>
 </main>
+
+{#if pendingTeamId !== null}
+  <ResourceModal
+    title="Discard unsaved workflow changes?"
+    description="The current Team workflow has changes that have not been saved."
+    onClose={() => (pendingTeamId = null)}
+  >
+    <p class="text-muted text-sm leading-relaxed">
+      Switching Teams now will discard your unsaved graph changes. Save the workflow first if you
+      want to keep them.
+    </p>
+    <div class="mt-6 flex justify-end gap-2">
+      <Button onclick={() => (pendingTeamId = null)}>Stay here</Button>
+      <Button
+        variant="primary"
+        onclick={() => {
+          const nextTeamId = pendingTeamId;
+          if (nextTeamId === null) return;
+          void switchTeam(nextTeamId).catch((cause) => {
+            error = String(cause);
+          });
+        }}>Discard and switch</Button
+      >
+    </div>
+  </ResourceModal>
+{/if}
 
 {#if consoleAgent}
   <TerminalConsole

@@ -19,7 +19,7 @@
   import LinearWorkflowFields from '$lib/components/integrations/LinearWorkflowFields.svelte';
   import TextField from '$lib/components/TextField.svelte';
   import Skeleton from '$lib/components/Skeleton.svelte';
-  import ResourceDetailDrawer from '$lib/components/resources/ResourceDetailDrawer.svelte';
+  import ResourceModal from '$lib/components/resources/ResourceModal.svelte';
   import ResourceStatus from '$lib/components/resources/ResourceStatus.svelte';
   import type {
     GitHubInstallationAccount,
@@ -372,7 +372,7 @@
                 {/if}
               {/if}
               {#if editing === provider.name && provider.name !== 'github'}
-                <ResourceDetailDrawer
+                <ResourceModal
                   title={provider.label}
                   description="Connection, health, and provider configuration"
                   onClose={() => (editing = '')}
@@ -402,6 +402,20 @@
                       />{/if}
                     {#if provider.name === 'trello'}
                       <div class="space-y-3">
+                        <div class="border-brand/30 bg-brand/5 rounded-lg border p-3 text-xs">
+                          <p class="font-semibold">Trello requires two credentials</p>
+                          <p class="text-muted mt-1 leading-relaxed">
+                            Use the API key generated for a Trello app, then generate its Trello
+                            user token. An Atlassian account API token is different and will not
+                            work here.
+                          </p>
+                          <a
+                            class="mt-2 inline-block font-medium text-brand hover:underline"
+                            href="https://trello.com/apps/admin"
+                            target="_blank"
+                            rel="noreferrer">Open Trello App Admin →</a
+                          >
+                        </div>
                         <TextField
                           id="trello-api-key"
                           label={`${t('integrations.trelloApiKey')} ${integration('trello')?.has_credentials ? t('integrations.keepExisting') : ''}`}
@@ -540,7 +554,7 @@
                       >
                     </div>
                   </form>
-                </ResourceDetailDrawer>
+                </ResourceModal>
               {/if}
               {#if integrationsResource.data.find((item) => item.provider_name === provider.name)?.last_error}
                 <p class="mt-3 text-xs text-danger">
