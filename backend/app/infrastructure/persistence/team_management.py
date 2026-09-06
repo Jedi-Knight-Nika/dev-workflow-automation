@@ -13,6 +13,7 @@ from app.application.ports.team_management import (
     TeamConflict,
     TeamNotFound,
     TeamView,
+    WakeTeamResult,
 )
 from app.db.models import Job, JobRole, JobState, Task, TaskAssignment, Team, WorkerRun
 from app.infrastructure.persistence.workflow_designer import SqlAlchemyWorkflowDesigner
@@ -206,6 +207,139 @@ class SqlAlchemyTeamManagementWorkflow:
             ).all()
         )
         return [self._assignment_view(item) for item in records]
+
+    async def wake(self, team_id: uuid.UUID) -> WakeTeamResult:
+        team = await self._session.get(Team, team_id, with_for_update=True)
+        if team is None or team.archived_at or not team.enabled:
+            raise TeamNotFound("Active team not found")
+
+        now = datetime.now(UTC)
+        expired_job_ids = list(
+            (
+                await self._session.scalars(
+                    select(Job.id)
+                    .join(Task, Task.id == Job.task_id)
+                    .where(
+                        Task.team_id == team_id,
+                        Job.state.in_([JobState.CLAIMED, JobState.RUNNING]),
+                        Job.lease_expires_at.is_not(None),
+                        Job.lease_expires_at < now,
+                    )
+                    .with_for_update(skip_locked=True)
+                )
+            ).all()
+        )
+        if expired_job_ids:
+            await self._session.execute(
+                update(Job)
+                .where(Job.id.in_(expired_job_ids))
+                .values(
+                    state=JobState.QUEUED,
+                    worker_id=None,
+                    lease_token=None,
+                    lease_expires_at=None,
+                    retry_not_before=None,
+                    started_at=None,
+                )
+            )
+
+        assignments = list(
+            (
+                await self._session.execute(
+                    select(TaskAssignment, Task)
+                    .join(Task, Task.id == TaskAssignment.task_id)
+                    .where(
+                        TaskAssignment.team_id == team_id,
+                        TaskAssignment.status.in_(["QUEUED", "RUNNING"]),
+                        Task.archived_at.is_(None),
+                    )
+                    .with_for_update()
+                )
+            ).all()
+        )
+        active_task_ids = {
+            task_id
+            for task_id in (
+                await self._session.scalars(
+                    select(Job.task_id)
+                    .join(Task, Task.id == Job.task_id)
+                    .where(
+                        Task.team_id == team_id,
+                        Job.state.in_(
+                            [
+                                JobState.QUEUED,
+                                JobState.CLAIMED,
+                                JobState.RUNNING,
+                                JobState.RETRY_WAIT,
+                                JobState.WAITING_PROVIDER,
+                                JobState.WAITING_INTEGRATION,
+                                JobState.WAITING_CONFIGURATION,
+                                JobState.WAITING_HUMAN,
+                            ]
+                        ),
+                    )
+                )
+            ).all()
+        }
+        created_jobs = 0
+        missing_repository_tasks = 0
+        for assignment, task in assignments:
+            if task.repository_id is None:
+                missing_repository_tasks += 1
+            if task.id in active_task_ids:
+                continue
+            self._session.add(
+                Job(
+                    task_id=task.id,
+                    role=JobRole.INTAKE,
+                    action="INTERPRET_TASK",
+                    priority=task.priority,
+                    payload={"source": "team_wake"},
+                )
+            )
+            assignment.status = "QUEUED"
+            assignment.started_at = None
+            created_jobs += 1
+
+        if expired_job_ids:
+            expired_task_ids = set(
+                (
+                    await self._session.scalars(
+                        select(Job.task_id).where(Job.id.in_(expired_job_ids))
+                    )
+                ).all()
+            )
+            for assignment, task in assignments:
+                if task.id in expired_task_ids:
+                    assignment.status = "QUEUED"
+                    assignment.started_at = None
+
+        await self._session.commit()
+        queued_jobs = int(
+            await self._session.scalar(
+                select(func.count())
+                .select_from(Job)
+                .join(Task, Task.id == Job.task_id)
+                .where(Task.team_id == team_id, Job.state == JobState.QUEUED)
+            )
+            or 0
+        )
+        running_jobs = int(
+            await self._session.scalar(
+                select(func.count())
+                .select_from(Job)
+                .join(Task, Task.id == Job.task_id)
+                .where(Task.team_id == team_id, Job.state.in_([JobState.CLAIMED, JobState.RUNNING]))
+            )
+            or 0
+        )
+        return WakeTeamResult(
+            recovered_jobs=len(expired_job_ids),
+            created_jobs=created_jobs,
+            queued_jobs=queued_jobs,
+            running_jobs=running_jobs,
+            missing_repository_tasks=missing_repository_tasks,
+        )
 
     async def _views(self, teams: builtins.list[Team]) -> builtins.list[TeamView]:
         if not teams:

@@ -7,7 +7,7 @@
   import Skeleton from '$lib/components/Skeleton.svelte';
   import { listRepositories } from '$lib/services/repositories';
   import { getExecutionPolicy, saveExecutionPolicy } from '$lib/services/execution-policy';
-  import { archiveTeam, createTeam, listTeams, updateTeam } from '$lib/services/teams';
+  import { archiveTeam, createTeam, listTeams, updateTeam, wakeTeam } from '$lib/services/teams';
   import type { Repository, Team } from '$lib/types';
 
   let teams = $state<Team[]>([]),
@@ -17,7 +17,9 @@
     busy = $state(false);
   let error = $state(''),
     loading = $state(true);
-  let archivingId = $state('');
+  let archivingId = $state(''),
+    wakingId = $state(''),
+    wakeMessage = $state('');
   let name = $state(''),
     description = $state(''),
     concurrency = $state(1);
@@ -124,6 +126,30 @@
       archivingId = '';
     }
   }
+  async function wake(team: Team) {
+    wakingId = team.id;
+    wakeMessage = '';
+    error = '';
+    try {
+      const result = await wakeTeam(team.id);
+      const actions = [
+        result.recovered_jobs ? `${result.recovered_jobs} expired job recovered` : '',
+        result.created_jobs ? `${result.created_jobs} missing job created` : '',
+        `${result.queued_jobs} queued`,
+        `${result.running_jobs} running`
+      ].filter(Boolean);
+      wakeMessage = `${team.name}: ${actions.join(' · ')}${
+        result.missing_repository_tasks
+          ? ` · ${result.missing_repository_tasks} task(s) still need a repository`
+          : ''
+      }`;
+      await load();
+    } catch (cause) {
+      error = String(cause);
+    } finally {
+      wakingId = '';
+    }
+  }
   onMount(load);
 </script>
 
@@ -134,6 +160,7 @@
 />
 <main class="space-y-6 p-4 sm:p-6 md:p-10">
   <ErrorBanner message={error} />
+  {#if wakeMessage}<p class="wake-result" role="status">{wakeMessage}</p>{/if}
   <div class="flex items-center justify-between">
     <p class="text-muted text-sm">
       Each team works sequentially by default. Teams run independently.
@@ -180,15 +207,19 @@
         <div class="usage">
           <span>{integer.format(team.total_input_tokens + team.total_output_tokens)} tokens</span
           ><span>{money.format(team.estimated_cost_usd)}</span><span
-            >{team.repository_ids.length} projects</span
+            >{team.repository_ids.length
+              ? `${team.repository_ids.length} projects`
+              : 'All projects'}</span
           >
         </div>
         <footer>
           <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
           <a class="primary" href={`${resolve('/agents')}?team=${team.id}`}>Open workflow</a><button
-            class="edit"
-            onclick={() => void open(team)}
-            aria-label={`Edit ${team.name}`}><span aria-hidden="true">✎</span> Edit</button
+            class="wake"
+            disabled={!team.enabled || wakingId === team.id}
+            onclick={() => void wake(team)}>{wakingId === team.id ? 'Waking…' : 'Wake team'}</button
+          ><button class="edit" onclick={() => void open(team)} aria-label={`Edit ${team.name}`}
+            ><span aria-hidden="true">✎</span> Edit</button
           >{#if team.id !== '00000000-0000-0000-0000-000000000001'}<button
               class="danger"
               disabled={archivingId === team.id}
@@ -234,19 +265,48 @@
           Tasks from these repositories can be routed here. Configured agents inherit access to
           their indexed code.
         </p>
-        <div class="repo-list">
-          {#each repositories.filter((repo) => repo.enabled) as repository (repository.id)}<label
-              ><input
-                type="checkbox"
-                checked={repositoryIds.includes(repository.id)}
-                onchange={() => toggleRepository(repository.id)}
-              /><span
-                ><strong>{repository.owner}/{repository.name}</strong><small
-                  >{repository.index_status} · {repository.chunk_count} chunks</small
-                ></span
-              ></label
-            >{/each}
+        <div class="repo-list mb-3">
+          <label>
+            <input
+              type="radio"
+              name="repository-scope"
+              checked={repositoryIds.length === 0}
+              onchange={() => (repositoryIds = [])}
+            />
+            <span
+              ><strong>All imported repositories</strong><small
+                >Includes future imports automatically.</small
+              ></span
+            >
+          </label>
+          <label>
+            <input
+              type="radio"
+              name="repository-scope"
+              checked={repositoryIds.length > 0}
+              onchange={() =>
+                (repositoryIds = repositories
+                  .filter((repository) => repository.enabled)
+                  .map((repository) => repository.id))}
+            />
+            <span
+              ><strong>Only selected repositories</strong><small>Restrict this Team.</small></span
+            >
+          </label>
         </div>
+        {#if repositoryIds.length > 0}<div class="repo-list">
+            {#each repositories.filter((repo) => repo.enabled) as repository (repository.id)}<label
+                ><input
+                  type="checkbox"
+                  checked={repositoryIds.includes(repository.id)}
+                  onchange={() => toggleRepository(repository.id)}
+                /><span
+                  ><strong>{repository.owner}/{repository.name}</strong><small
+                    >{repository.index_status} · {repository.chunk_count} chunks</small
+                  ></span
+                ></label
+              >{/each}
+          </div>{/if}
       </fieldset>
       <fieldset>
         <legend>Execution policy</legend>
@@ -425,6 +485,27 @@
     border-color: var(--color-brand);
     color: var(--color-text);
   }
+  .team-card > footer .wake {
+    border: 1px solid color-mix(in srgb, var(--color-brand) 40%, var(--color-line));
+    border-radius: 0.5rem;
+    color: var(--color-brand);
+    font-weight: 700;
+  }
+  .team-card > footer .wake:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--color-brand) 9%, transparent);
+  }
+  .team-card > footer .wake:disabled {
+    cursor: not-allowed;
+    opacity: 0.55;
+  }
+  .wake-result {
+    border: 1px solid color-mix(in srgb, #22a06b 35%, var(--color-line));
+    border-radius: 0.7rem;
+    background: color-mix(in srgb, #22a06b 8%, var(--color-panel));
+    padding: 0.75rem 0.9rem;
+    color: var(--color-text);
+    font-size: 0.78rem;
+  }
   .team-card > footer .danger {
     margin-left: auto;
     color: #e5484d;
@@ -439,13 +520,19 @@
   }
   .drawer {
     position: fixed;
-    inset: 0 0 0 auto;
+    top: 50%;
+    left: 50%;
     z-index: 50;
     display: grid;
-    width: min(560px, 100%);
+    width: min(620px, calc(100% - 2rem));
+    max-height: min(780px, calc(100dvh - 2rem));
     grid-template-rows: auto 1fr auto;
+    overflow: hidden;
+    transform: translate(-50%, -50%);
+    border: 1px solid var(--color-line);
+    border-radius: 1rem;
     background: var(--color-bg);
-    box-shadow: -20px 0 60px rgb(0 0 0/0.2);
+    box-shadow: 0 24px 80px rgb(0 0 0/0.3);
   }
   .drawer > header,
   .drawer > footer {
@@ -501,7 +588,9 @@
     display: grid;
     align-content: start;
     gap: 1.2rem;
+    min-height: 0;
     overflow-y: auto;
+    overscroll-behavior: contain;
     padding: 1.2rem;
   }
   .body > label {
@@ -563,5 +652,11 @@
     width: 1rem;
     height: 1rem;
     padding: 0;
+  }
+  @media (max-width: 640px) {
+    .drawer {
+      width: calc(100% - 1rem);
+      max-height: calc(100dvh - 1rem);
+    }
   }
 </style>

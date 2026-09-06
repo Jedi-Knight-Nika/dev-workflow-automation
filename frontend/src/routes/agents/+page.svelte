@@ -2,7 +2,6 @@
   import { page } from '$app/state';
   import { resolve } from '$app/paths';
   import { onMount } from 'svelte';
-  import { SvelteSet } from 'svelte/reactivity';
   import { API_URL } from '$lib/api';
   import PageHeader from '$lib/components/PageHeader.svelte';
   import Button from '$lib/components/Button.svelte';
@@ -16,7 +15,6 @@
   import {
     addAgentKnowledge,
     deleteAgentKnowledge,
-    discoverProviderModels,
     getAgentRuntime,
     getModelCapabilities,
     getWorkflow,
@@ -31,7 +29,6 @@
   import { listRepositories } from '$lib/services/repositories';
   import { listTeams } from '$lib/services/teams';
   import { t } from '$lib/i18n/index.svelte';
-  import { providerModelOptions } from '$lib/ai-model-catalog';
   import PixelAgentAvatar from '$lib/components/agents/PixelAgentAvatar.svelte';
   import BrandIcon from '$lib/components/resources/BrandIcon.svelte';
   import type {
@@ -40,7 +37,6 @@
     AgentRuntimeView,
     Integration,
     ModelCapabilities,
-    ProviderCatalog,
     Repository,
     Team,
     WorkflowGraph
@@ -48,8 +44,6 @@
   let agents: AgentConfig[] = [];
   let error = '';
   let saved = '';
-  let catalogs: Record<string, ProviderCatalog> = {};
-  let loadingProvider = '';
   let selectedRole = 'INTAKE';
   let knowledge: Record<string, AgentKnowledge[]> = {};
   let knowledgeTitle = '';
@@ -70,7 +64,6 @@
   let teamId: string | undefined = currentTeamId || undefined;
   let workflowDirty = false;
   let pendingTeamId: string | null = null;
-  const manualModelRoles = new SvelteSet<string>();
   const number = new Intl.NumberFormat();
   const date = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' });
   function configuredNumber(agent: AgentConfig, key: string): number | '' {
@@ -87,29 +80,11 @@
   function setConfiguredText(agent: AgentConfig, key: string, value: string) {
     agent.configuration[key] = value;
   }
-  function availableModels(agent: AgentConfig) {
-    return providerModelOptions(agent.provider, catalogs[agent.provider]?.models || []);
-  }
-  function usesManualModel(agent: AgentConfig) {
+  function workflowNodeFor(agent: AgentConfig) {
     return (
-      manualModelRoles.has(agent.role) ||
-      (!!agent.model && !availableModels(agent).some((model) => model.id === agent.model))
+      workflow?.nodes.find((node) => node.id === selectedNodeId) ||
+      workflow?.nodes.find((node) => node.role === agent.role)
     );
-  }
-  function changeProvider(agent: AgentConfig, event: Event) {
-    agent.provider = (event.currentTarget as HTMLSelectElement).value;
-    agent.model = '';
-    manualModelRoles.delete(agent.role);
-  }
-  function changeModel(agent: AgentConfig, event: Event) {
-    const value = (event.currentTarget as HTMLSelectElement).value;
-    if (value === '__manual__') {
-      agent.model = '';
-      manualModelRoles.add(agent.role);
-    } else {
-      agent.model = value;
-      manualModelRoles.delete(agent.role);
-    }
   }
   function repositoryKnowledgeEnabled(agent: AgentConfig) {
     return agent.configuration.use_repository_knowledge !== false;
@@ -261,18 +236,6 @@
       }, 1500);
     } catch (cause) {
       error = String(cause);
-    }
-  }
-  async function discoverModels(provider: string) {
-    loadingProvider = provider;
-    error = '';
-    try {
-      catalogs[provider] = await discoverProviderModels(provider);
-      catalogs = { ...catalogs };
-    } catch (cause) {
-      error = String(cause);
-    } finally {
-      loadingProvider = '';
     }
   }
   onMount(() => {
@@ -484,6 +447,7 @@
             </p>
           </div>
         {:else if inspectorTab === 'model'}
+          {@const configuredNode = workflowNodeFor(agent)}
           <div class="mx-auto grid max-w-4xl gap-5 md:grid-cols-2">
             <div class="setting-card md:col-span-2">
               <div class="section-heading">
@@ -492,56 +456,23 @@
                   <p>{t('workflow.languageModelDescription')}</p>
                 </div>
               </div>
-              <div class="grid gap-4 md:grid-cols-[0.7fr_1.3fr]">
-                <label class="field-label">
-                  {t('agents.provider')}
-                  <span class="icon-select">
-                    <BrandIcon brand={agent.provider} size={17} />
-                    <select
-                      class="field"
-                      value={agent.provider}
-                      onchange={(event) => changeProvider(agent, event)}
-                      ><option value="openai">OpenAI</option><option value="anthropic"
-                        >Anthropic / Claude</option
-                      ><option value="google">Google / Gemini</option></select
-                    >
-                  </span>
-                </label>
-                <label class="field-label" for={`model-${agent.role}`}
-                  >{t('agents.model')}
-                  <div class="flex items-start gap-2">
-                    <div class="min-w-0 flex-1">
-                      <select
-                        id={`model-${agent.role}`}
-                        class="field w-full"
-                        value={usesManualModel(agent) ? '__manual__' : agent.model}
-                        onchange={(event) => changeModel(agent, event)}
-                      >
-                        <option value="">{t('workflow.selectModel')}</option>
-                        {#each availableModels(agent) as model (model.id)}
-                          <option value={model.id}>{model.display_name} · {model.id}</option>
-                        {/each}
-                        <option value="__manual__">{t('workflow.enterModelIdManually')}</option>
-                      </select>
-                      {#if usesManualModel(agent)}
-                        <input
-                          class="field mt-2 w-full"
-                          bind:value={agent.model}
-                          placeholder={t('workflow.enterModelId')}
-                          aria-label={t('workflow.enterModelId')}
-                        />
-                      {/if}
-                    </div>
-                    <Button
-                      disabled={loadingProvider === agent.provider}
-                      onclick={() => discoverModels(agent.provider)}
-                      >{loadingProvider === agent.provider
-                        ? t('common.loading')
-                        : t('workflow.discover')}</Button
-                    >
-                  </div>
-                </label>
+              <div class="effective-model">
+                <BrandIcon brand={configuredNode?.provider || agent.provider} size={24} />
+                <div>
+                  <span
+                    >{configuredNode?.provider || agent.provider || 'Provider not configured'}</span
+                  >
+                  <strong>{configuredNode?.model || agent.model || 'Model not configured'}</strong>
+                </div>
+                <small
+                  >{configuredNode?.model_validation_status?.replaceAll('_', ' ') ||
+                    'NOT CONFIGURED'}</small
+                >
               </div>
+              <p class="text-muted mt-3 text-xs">
+                Provider and model are owned by this Team's workflow Agent. Open the Agent on the
+                canvas to change or test them.
+              </p>
             </div>
             <div class="setting-card">
               <label class="field-label"
@@ -832,22 +763,42 @@
     float: right;
     color: var(--color-muted);
   }
-  .field-label > .icon-select {
-    position: relative;
+  .effective-model {
+    display: flex;
+    align-items: center;
+    gap: 0.85rem;
+    border: 1px solid var(--color-line);
+    border-radius: 0.65rem;
+    background: var(--color-input);
+    padding: 0.8rem;
+  }
+  .effective-model div {
+    min-width: 0;
+  }
+  .effective-model span,
+  .effective-model strong {
     display: block;
-    float: none;
+  }
+  .effective-model span {
+    color: var(--color-muted);
+    font-size: 0.6rem;
+    text-transform: capitalize;
+  }
+  .effective-model strong {
+    overflow: hidden;
+    margin-top: 0.1rem;
     color: var(--color-heading);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.75rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
-  .icon-select :global(.brand-icon) {
-    position: absolute;
-    z-index: 1;
-    top: 50%;
-    left: 0.75rem;
-    transform: translateY(-50%);
-    pointer-events: none;
-  }
-  .icon-select .field {
-    padding-left: 2.8rem;
+  .effective-model small {
+    margin-left: auto;
+    color: var(--color-accent);
+    font-size: 0.52rem;
+    font-weight: 800;
+    letter-spacing: 0.08em;
   }
   .field {
     display: block;

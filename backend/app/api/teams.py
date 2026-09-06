@@ -26,6 +26,7 @@ from app.schemas import (
     TaskAssignmentRead,
     TeamRead,
     TeamWrite,
+    WakeTeamRead,
     WorkflowGraphRead,
     WorkflowNodeModelValidationRead,
 )
@@ -112,6 +113,18 @@ async def archive_team(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except TeamConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post("/{team_id}/wake", response_model=WakeTeamRead)
+async def wake_team(
+    team_id: uuid.UUID,
+    workflow: TeamManagementWorkflow = Depends(get_team_management_workflow),
+) -> WakeTeamRead:
+    try:
+        result = await ManageTeams(workflow).wake(team_id)
+    except TeamNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return WakeTeamRead.model_validate(result, from_attributes=True)
 
 
 @router.get("/{team_id}/assignments", response_model=list[TaskAssignmentRead])

@@ -60,6 +60,15 @@ class TaskAssignmentView:
     completed_at: datetime | None
 
 
+@dataclass(frozen=True, slots=True)
+class WakeTeamResult:
+    recovered_jobs: int
+    created_jobs: int
+    queued_jobs: int
+    running_jobs: int
+    missing_repository_tasks: int
+
+
 class TeamManagementWorkflow(Protocol):
     async def list(self) -> list[TeamView]: ...
     async def get(self, team_id: uuid.UUID) -> TeamView | None: ...
@@ -69,3 +78,4 @@ class TeamManagementWorkflow(Protocol):
     async def assign(self, command: AssignTaskCommand) -> TaskAssignmentView: ...
     async def unassign(self, task_id: uuid.UUID) -> None: ...
     async def assignments(self, team_id: uuid.UUID) -> builtins.list[TaskAssignmentView]: ...
+    async def wake(self, team_id: uuid.UUID) -> WakeTeamResult: ...

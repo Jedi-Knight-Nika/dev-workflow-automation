@@ -1371,29 +1371,60 @@
             <div class="access-section">
               <div>
                 <h3>{t('workflow.projectRagAccess')}</h3>
-                <p>{t('workflow.projectRagAccessHint')}</p>
+                <p>
+                  Inherit every imported repository or restrict this Agent to a selected subset.
+                </p>
               </div>
               <div class="access-list">
-                {#each repositories.filter((repository) => repository.enabled) as repository (repository.id)}
-                  <label
-                    ><input
-                      type="checkbox"
-                      checked={detailsNode.data.repositoryIds.includes(repository.id)}
-                      onchange={(event) =>
-                        toggleNodeAccess(
-                          detailsNode.id,
-                          'repositoryIds',
-                          repository.id,
-                          (event.currentTarget as HTMLInputElement).checked
-                        )}
-                    /><span
-                      ><b>{repository.owner}/{repository.name}</b><small
-                        >{repository.index_status} · {repository.chunk_count} chunks</small
-                      ></span
-                    ></label
+                <label>
+                  <input
+                    type="radio"
+                    name={`repository-scope-${detailsNode.id}`}
+                    checked={detailsNode.data.repositoryIds.length === 0}
+                    onchange={() => updateExecutionSetting(detailsNode.id, { repositoryIds: [] })}
+                  />
+                  <span
+                    ><b>All imported repositories</b><small
+                      >Includes future imports automatically.</small
+                    ></span
                   >
-                {:else}<p>{t('workflow.noEnabledRepositories')}</p>{/each}
+                </label>
+                <label>
+                  <input
+                    type="radio"
+                    name={`repository-scope-${detailsNode.id}`}
+                    checked={detailsNode.data.repositoryIds.length > 0}
+                    onchange={() =>
+                      updateExecutionSetting(detailsNode.id, {
+                        repositoryIds: repositories
+                          .filter((repository) => repository.enabled)
+                          .map((repository) => repository.id)
+                      })}
+                  />
+                  <span><b>Only selected repositories</b><small>Restrict this Agent.</small></span>
+                </label>
               </div>
+              {#if detailsNode.data.repositoryIds.length > 0}<div class="access-list mt-2">
+                  {#each repositories.filter((repository) => repository.enabled) as repository (repository.id)}
+                    <label
+                      ><input
+                        type="checkbox"
+                        checked={detailsNode.data.repositoryIds.includes(repository.id)}
+                        onchange={(event) =>
+                          toggleNodeAccess(
+                            detailsNode.id,
+                            'repositoryIds',
+                            repository.id,
+                            (event.currentTarget as HTMLInputElement).checked
+                          )}
+                      /><span
+                        ><b>{repository.owner}/{repository.name}</b><small
+                          >{repository.index_status} · {repository.chunk_count} chunks</small
+                        ></span
+                      ></label
+                    >
+                  {:else}<p>{t('workflow.noEnabledRepositories')}</p>{/each}
+                </div>{/if}
             </div>
           {/if}
           <div class="mt-5 flex justify-end gap-2">

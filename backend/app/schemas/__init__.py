@@ -58,6 +58,7 @@ from .teams import (
     TaskAssignmentRead,
     TeamRead,
     TeamWrite,
+    WakeTeamRead,
 )
 from .terminals import (
     TerminalAccessRead,
@@ -125,6 +126,7 @@ __all__ = [
     "TrelloBoardRead",
     "TrelloListRead",
     "ValidationRead",
+    "WakeTeamRead",
     "WebhookHealthRead",
     "WorkerNodeRead",
     "WorkerResult",

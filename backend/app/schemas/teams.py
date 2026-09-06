@@ -83,3 +83,11 @@ class TaskAssignmentRead(BaseModel):
     assigned_at: datetime
     started_at: datetime | None
     completed_at: datetime | None
+
+
+class WakeTeamRead(BaseModel):
+    recovered_jobs: int
+    created_jobs: int
+    queued_jobs: int
+    running_jobs: int
+    missing_repository_tasks: int

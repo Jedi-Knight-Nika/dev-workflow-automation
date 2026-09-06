@@ -8,6 +8,7 @@ from app.application.ports.team_management import (
     TeamManagementWorkflow,
     TeamNotFound,
     TeamView,
+    WakeTeamResult,
 )
 
 
@@ -42,3 +43,7 @@ class ManageTeams:
     async def assignments(self, team_id: uuid.UUID) -> builtins.list[TaskAssignmentView]:
         await self.get(team_id)
         return await self._workflow.assignments(team_id)
+
+    async def wake(self, team_id: uuid.UUID) -> WakeTeamResult:
+        await self.get(team_id)
+        return await self._workflow.wake(team_id)
