@@ -2,13 +2,14 @@ import types
 import uuid
 from typing import Self
 
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.application.ports.tester_completion import (
     TesterCompletionCommand,
     TesterCompletionContext,
 )
-from app.db.models import Job, JobRole, JobState, Task, TaskState
+from app.db.models import Job, JobRole, JobState, Task, TaskState, ValidationRecord
 from app.infrastructure.linear_sync import sync_current_task_state_to_linear
 from app.infrastructure.persistence.job_operations import enqueue_job, record_event
 from app.infrastructure.persistence.workflow_routing import route_completed_job
@@ -73,6 +74,46 @@ class SqlAlchemyTesterCompletionUnitOfWork:
         task = await session.get(Task, context.task_id)
         if task is None:
             raise RuntimeError("Task disappeared during Tester completion")
+        data = context.result.get("data", {})
+        if isinstance(data, dict) and data.get("content_revision"):
+            session.add(
+                ValidationRecord(
+                    task_id=task.id,
+                    provider="internal",
+                    kind="TESTER",
+                    name="task-validation",
+                    status="PASSED" if context.outcome == "TEST_PASS" else "FAILED",
+                    revision=str(data["content_revision"]),
+                    payload={
+                        "repository_sha": data.get("repository_sha"),
+                        "configuration_hash": data.get("validation_configuration_hash"),
+                        "deterministic": bool(data.get("deterministic")),
+                    },
+                )
+            )
+        if context.outcome == "TEST_FAILED":
+            strategy_limit = int((task.execution_strategy or {}).get("max_test_cycles", 3))
+            completed = await session.scalar(
+                select(func.count(Job.id)).where(
+                    Job.task_id == task.id,
+                    Job.role == JobRole.TESTER,
+                    Job.state == JobState.SUCCEEDED,
+                    Job.result.is_not(None),
+                )
+            )
+            if (completed or 0) >= strategy_limit:
+                task.state = TaskState.NEEDS_HUMAN
+                await record_event(
+                    session,
+                    task.id,
+                    "TEST_CYCLE_LIMIT_REACHED",
+                    {
+                        "job_id": str(context.job_id),
+                        "cycles": completed or 0,
+                        "limit": strategy_limit,
+                    },
+                )
+                return
         route = await route_completed_job(
             session, task, context.job_id, context.outcome, {"tester_result": context.result}
         )

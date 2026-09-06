@@ -47,6 +47,7 @@ class GatewayContext:
     workspace: Path
     task_branch: str | None
     permissions: frozenset[str]
+    max_tool_calls: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,8 +66,18 @@ class ToolGateway:
         self, session: AsyncSession, context: GatewayContext, policy: TeamExecutionPolicy
     ) -> None:
         self._session, self._context, self._policy = session, context, policy
+        self._tool_calls = 0
+
+    def _consume_tool_call(self) -> None:
+        self._tool_calls += 1
+        if (
+            self._context.max_tool_calls is not None
+            and self._tool_calls > self._context.max_tool_calls
+        ):
+            raise ToolDenied(f"Job tool-call budget exhausted ({self._context.max_tool_calls})")
 
     async def write_file(self, relative: str, content: str) -> None:
+        self._consume_tool_call()
         path = resolve_workspace_path(self._context.workspace, relative)
         existed = path.exists()
         # Creating a path is still a repository mutation. Requiring WRITE_REPOSITORY for every
@@ -81,6 +92,7 @@ class ToolGateway:
         path.write_text(content, encoding="utf-8")
 
     async def delete_file(self, relative: str) -> None:
+        self._consume_tool_call()
         path = resolve_workspace_path(self._context.workspace, relative, must_exist=True)
         await self._authorize("filesystem", "delete", "DELETE_FILES", {"path": relative})
         if path.is_symlink() or not path.is_file():
@@ -95,6 +107,7 @@ class ToolGateway:
         timeout_seconds: int = 60,
         environment: dict[str, str] | None = None,
     ) -> CommandResult:
+        self._consume_tool_call()
         if not command:
             raise ToolDenied("Empty command")
         timeout = min(max(timeout_seconds, 1), self._policy.max_command_timeout_seconds)
@@ -169,6 +182,7 @@ class ToolGateway:
         return result
 
     async def authorize_push(self, target_branch: str) -> None:
+        self._consume_tool_call()
         await self._authorize(
             "git",
             "push",

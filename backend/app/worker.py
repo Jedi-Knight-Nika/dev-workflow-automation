@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import json
 import sys
 import uuid
@@ -473,6 +474,8 @@ async def run(job_id: uuid.UUID) -> WorkerResult:
             retrieval_depth=str(config.configuration.get("rag_retrieval_depth", "normal")),
         )
         tester_checks = []
+        execution_strategy = task.execution_strategy or {}
+        strategy_tool_limit = int(execution_strategy.get("max_tool_calls", 50))
         if job.role == JobRole.TESTER and workspace is not None:
             require_permission(config, "RUN_TESTS")
             if task.team_id is None:
@@ -500,6 +503,7 @@ async def run(job_id: uuid.UUID) -> WorkerResult:
                     workspace,
                     task.branch_name,
                     expanded_permissions(config.permissions),
+                    strategy_tool_limit,
                 ),
                 policy,
             )
@@ -518,6 +522,50 @@ async def run(job_id: uuid.UUID) -> WorkerResult:
                     summary="Validation requires human approval",
                     data={"approval_id": str(exc.approval_id)},
                 )
+            strategy_kind = str((task.execution_strategy or {}).get("kind", "STANDARD"))
+            if (
+                strategy_kind == "FAST"
+                and tester_checks
+                and all(check.passed for check in tester_checks)
+            ):
+                if config.allowed_results and "TEST_PASS" not in config.allowed_results:
+                    raise RuntimeError("Agent role does not allow structured result TEST_PASS")
+                content_revision = await workspace_fingerprint(workspace)
+                configuration_hash = hashlib.sha256(
+                    json.dumps(
+                        [list(check.command) for check in tester_checks], sort_keys=True
+                    ).encode()
+                ).hexdigest()
+                fast_data: dict[str, object] = {
+                    "result": "TEST_PASS",
+                    "summary": "Deterministic validation passed",
+                    "findings": [],
+                    "reason": None,
+                    "checks": [check.model_dump(mode="json") for check in tester_checks],
+                    "repository_sha": await run_git("rev-parse", "HEAD", cwd=workspace),
+                    "content_revision": content_revision,
+                    "validation_configuration_hash": configuration_hash,
+                    "deterministic": True,
+                }
+                worker_result = WorkerResult(
+                    job_id=job.id,
+                    task_id=job.task_id,
+                    role=job.role,
+                    result="TEST_PASS",
+                    summary="Deterministic validation passed",
+                    data=fast_data,
+                )
+                await TaskMemoryService(session).checkpoint(
+                    task,
+                    job,
+                    fast_data,
+                    worker_result.summary,
+                    config.agent_id,
+                    config.role_id,
+                    worker_result.model_dump(mode="json"),
+                )
+                await provider.aclose()
+                return worker_result
         if job.role == JobRole.INTAKE:
             prompt_data = await compiler.compile_for_intake(task, job)
         elif job.role == JobRole.THINKER:
@@ -539,6 +587,8 @@ async def run(job_id: uuid.UUID) -> WorkerResult:
         prompt = json.dumps(prompt_data, ensure_ascii=False)
         configured_repairs = config.configuration.get("structured_output_retries", 2)
         max_repairs = int(configured_repairs) if isinstance(configured_repairs, (int, str)) else 2
+        max_job_turns = int(execution_strategy.get("max_job_turns", max_repairs + 1))
+        max_repairs = min(max_repairs, max(max_job_turns - 1, 0))
         budget_error: BudgetExceeded | None = None
         try:
             try:
@@ -649,6 +699,7 @@ async def run(job_id: uuid.UUID) -> WorkerResult:
                         workspace,
                         task.branch_name,
                         expanded_permissions(config.permissions),
+                        strategy_tool_limit,
                     ),
                     policy,
                 )
@@ -686,6 +737,10 @@ async def run(job_id: uuid.UUID) -> WorkerResult:
             result = review.result
             summary = review.summary
             data = review.model_dump(mode="json")
+            if workspace is not None:
+                data["repository_sha"] = await run_git("rev-parse", "HEAD", cwd=workspace)
+                data["content_revision"] = await workspace_fingerprint(workspace)
+                data["validation_configuration_hash"] = "reviewer-v1"
         elif job.role == JobRole.TESTER:
             test = TesterProposal.model_validate(data)
             failed_checks = [check for check in tester_checks if not check.passed]
@@ -712,6 +767,15 @@ async def run(job_id: uuid.UUID) -> WorkerResult:
                 summary = test.summary
                 data = test.model_dump(mode="json")
                 data["checks"] = [check.model_dump(mode="json") for check in tester_checks]
+            if workspace is not None:
+                data["repository_sha"] = await run_git("rev-parse", "HEAD", cwd=workspace)
+                data["content_revision"] = await workspace_fingerprint(workspace)
+                data["validation_configuration_hash"] = hashlib.sha256(
+                    json.dumps(
+                        [list(check.command) for check in tester_checks], sort_keys=True
+                    ).encode()
+                ).hexdigest()
+                data["deterministic"] = False
         if config.allowed_results and result not in config.allowed_results:
             raise RuntimeError(f"Agent role does not allow structured result {result}")
         checkpoint_data = dict(data)

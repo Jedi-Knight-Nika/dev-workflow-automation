@@ -20,6 +20,7 @@ class FailedJobContext:
     task_id: uuid.UUID
     attempt: int
     manual_takeover: bool
+    failure_class: str = "IMPLEMENTATION_FAILURE"
 
 
 class FailedCompletionUnitOfWork(Protocol):

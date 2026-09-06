@@ -7,6 +7,7 @@ from app.domain.workflows import (
     WorkflowRouteNotFound,
     resolve_route,
 )
+from app.infrastructure.persistence.workflow_routing import _stable_progress_evidence
 
 
 def graph(*edges: WorkflowEdgeData) -> WorkflowGraphData:
@@ -47,3 +48,10 @@ def test_rejects_ambiguous_or_missing_routes() -> None:
         resolve_route(ambiguous, "tester", "TEST_FAILED")
     with pytest.raises(WorkflowRouteNotFound, match="No route"):
         resolve_route(graph(), "tester", "TEST_PASS")
+
+
+def test_progress_evidence_ignores_per_job_handoff_metadata() -> None:
+    first = {"job_id": "one", "summary": "first wording", "data": {"failed": ["a"]}}
+    second = {"job_id": "two", "summary": "other wording", "data": {"failed": ["a"]}}
+
+    assert _stable_progress_evidence(first) == _stable_progress_evidence(second)

@@ -3,6 +3,14 @@ from app.application.ports.job_completion import (
     FailedJobCommand,
 )
 from app.domain.jobs import RetryPolicy
+from app.domain.orchestration import FailureClass
+
+NON_RETRYABLE_FAILURES = {
+    FailureClass.PROVIDER_AUTH.value,
+    FailureClass.POLICY_DENIED.value,
+    FailureClass.SECURITY_INCIDENT.value,
+    FailureClass.EXTERNAL_WAIT.value,
+}
 
 
 class CompleteFailedJob:
@@ -21,7 +29,10 @@ class CompleteFailedJob:
                 return False
             if context.manual_takeover:
                 await unit_of_work.finish_during_takeover(context)
-            elif self._retry_policy.should_retry(context.attempt):
+            elif (
+                context.failure_class not in NON_RETRYABLE_FAILURES
+                and self._retry_policy.should_retry(context.attempt)
+            ):
                 await unit_of_work.schedule_retry(
                     context,
                     self._retry_policy.delay_seconds(context.attempt),

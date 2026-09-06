@@ -251,3 +251,26 @@ async def test_gateway_cannot_create_with_create_permission_alone(tmp_path: Path
     with pytest.raises(ToolDenied):
         await gateway.write_file("new.txt", "not authorized")
     assert not (tmp_path / "new.txt").exists()
+
+
+@pytest.mark.asyncio
+async def test_gateway_enforces_job_tool_call_budget(tmp_path: Path) -> None:
+    gateway = ToolGateway(
+        cast(Any, RecordingSession()),
+        GatewayContext(
+            uuid.uuid4(),
+            uuid.uuid4(),
+            uuid.uuid4(),
+            None,
+            None,
+            tmp_path,
+            "agent/task-1",
+            frozenset({"RUN_COMMANDS"}),
+            1,
+        ),
+        TeamExecutionPolicy(),
+    )
+
+    assert (await gateway.run_command([sys.executable, "-c", "print('ok')"])).exit_code == 0
+    with pytest.raises(ToolDenied, match="tool-call budget exhausted"):
+        await gateway.run_command([sys.executable, "-c", "print('too many')"])

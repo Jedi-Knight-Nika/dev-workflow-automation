@@ -59,6 +59,10 @@ class Task(Base):
     project_name: Mapped[str | None] = mapped_column(String(255))
     labels: Mapped[list[str]] = mapped_column(JSON, default=list)
     estimate: Mapped[float | None] = mapped_column(Numeric(8, 2))
+    execution_profile: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    execution_strategy: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    progress_fingerprint: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    no_progress_count: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow

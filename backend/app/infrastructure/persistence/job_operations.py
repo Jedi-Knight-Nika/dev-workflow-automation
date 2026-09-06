@@ -19,6 +19,7 @@ from app.db.models import (
     WorkflowNode,
     WorkspaceLease,
 )
+from app.domain.orchestration import TaskProfiler, resolve_execution_strategy
 
 ROLE_TASK_STATE = {
     JobRole.ORCHESTRATOR: TaskState.NEW,
@@ -53,12 +54,23 @@ async def enqueue_job(
     workflow_node: WorkflowNode | None = None,
     workflow_version: int | None = None,
 ) -> Job:
+    if task.execution_profile is None or task.execution_strategy is None:
+        profile = TaskProfiler().profile(
+            title=task.title,
+            description=task.description,
+            labels=list(task.labels or []),
+        )
+        strategy = resolve_execution_strategy(profile)
+        task.execution_profile = profile.as_dict()
+        task.execution_strategy = strategy.as_dict()
+    job_payload = dict(payload or {})
+    job_payload.setdefault("execution_strategy", task.execution_strategy)
     job = Job(
         task_id=task.id,
         role=role,
         action=action,
         priority=task.priority if priority is None else priority,
-        payload=payload or {},
+        payload=job_payload,
     )
     session.add(job)
     if workflow_node is None:

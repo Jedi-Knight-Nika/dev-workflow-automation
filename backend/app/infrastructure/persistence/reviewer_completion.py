@@ -10,7 +10,16 @@ from app.application.ports.reviewer_completion import (
     ReviewerCompletionCommand,
     ReviewerCompletionContext,
 )
-from app.db.models import Job, JobRole, JobState, Repository, Task, TaskState, WorkflowNode
+from app.db.models import (
+    Job,
+    JobRole,
+    JobState,
+    Repository,
+    Task,
+    TaskState,
+    ValidationRecord,
+    WorkflowNode,
+)
 from app.domain.jobs import CompletionDirective
 from app.infrastructure.linear_sync import sync_current_task_state_to_linear
 from app.infrastructure.persistence.job_operations import (
@@ -103,6 +112,22 @@ class SqlAlchemyReviewerCompletionUnitOfWork:
         task = await session.get(Task, context.task_id)
         if task is None:
             raise RuntimeError("Task disappeared during Reviewer completion")
+        data = context.result.get("data", {})
+        if context.outcome == "PASS" and isinstance(data, dict) and data.get("content_revision"):
+            session.add(
+                ValidationRecord(
+                    task_id=task.id,
+                    provider="internal",
+                    kind="REVIEWER",
+                    name="semantic-review",
+                    status="PASSED",
+                    revision=str(data["content_revision"]),
+                    payload={
+                        "repository_sha": data.get("repository_sha"),
+                        "configuration_hash": data.get("validation_configuration_hash"),
+                    },
+                )
+            )
         if directive in {
             CompletionDirective.REVIEW_REPAIR,
             CompletionDirective.REVIEW_REPLAN,
@@ -184,7 +209,11 @@ class SqlAlchemyReviewerCompletionUnitOfWork:
                 Job.result.is_not(None),
             )
         )
-        if (completed_cycles or 0) < node.max_review_cycles:
+        strategy_limit = int(
+            (task.execution_strategy or {}).get("max_review_cycles", node.max_review_cycles)
+        )
+        effective_limit = min(node.max_review_cycles, strategy_limit)
+        if (completed_cycles or 0) < effective_limit:
             return False
         task.state = TaskState.NEEDS_HUMAN
         await record_event(
@@ -195,7 +224,7 @@ class SqlAlchemyReviewerCompletionUnitOfWork:
                 "job_id": str(context.job_id),
                 "workflow_node_id": str(node.id),
                 "cycles": completed_cycles or 0,
-                "limit": node.max_review_cycles,
+                "limit": effective_limit,
             },
         )
         return True

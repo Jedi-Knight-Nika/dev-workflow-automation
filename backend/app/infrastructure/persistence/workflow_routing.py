@@ -1,3 +1,5 @@
+import hashlib
+import json
 import uuid
 from dataclasses import dataclass
 
@@ -31,6 +33,64 @@ DEFAULT_JOB_TYPES = {
 @dataclass(frozen=True, slots=True)
 class ConfiguredRouteResult:
     publish: bool = False
+    stopped_for_no_progress: bool = False
+
+
+def _stable_progress_evidence(value: object) -> object:
+    """Remove handoff metadata that changes per Job but does not prove engineering progress."""
+    ignored = {"job_id", "task_id", "summary", "reason", "protocol_version"}
+    if isinstance(value, dict):
+        return {
+            key: _stable_progress_evidence(item)
+            for key, item in sorted(value.items())
+            if key not in ignored
+        }
+    if isinstance(value, list):
+        return [_stable_progress_evidence(item) for item in value]
+    return value
+
+
+async def _stop_repeated_no_progress(
+    session: AsyncSession,
+    task: Task,
+    outcome: str,
+    payload: dict[str, object],
+) -> bool:
+    if outcome not in {
+        "TEST_FAILED",
+        "FAIL_ACTIONABLE",
+        "FAIL_ARCHITECTURAL",
+        "PLAN_MISMATCH",
+        "NEEDS_REPLAN",
+    }:
+        task.no_progress_count = 0
+        return False
+    fingerprint = {
+        "repository_sha": task.current_revision,
+        "result_type": outcome,
+        "evidence_hash": hashlib.sha256(
+            json.dumps(_stable_progress_evidence(payload), sort_keys=True, default=str).encode()
+        ).hexdigest(),
+    }
+    if task.progress_fingerprint == fingerprint:
+        task.no_progress_count += 1
+    else:
+        task.progress_fingerprint = fingerprint
+        task.no_progress_count = 0
+    if task.no_progress_count < 2:
+        return False
+    task.state = TaskState.NEEDS_HUMAN
+    await record_event(
+        session,
+        task.id,
+        "NO_PROGRESS_DETECTED",
+        {
+            "result": outcome,
+            "repetitions": task.no_progress_count + 1,
+            "fingerprint": fingerprint,
+        },
+    )
+    return True
 
 
 async def route_completed_job(
@@ -43,6 +103,8 @@ async def route_completed_job(
     """Apply a current, pinned graph edge or return None for legacy compatibility routing."""
     if not outcome or task.workflow_id is None:
         return None
+    if await _stop_repeated_no_progress(session, task, outcome, payload):
+        return ConfiguredRouteResult(stopped_for_no_progress=True)
     job = await session.get(Job, completed_job_id)
     if job is None or job.workflow_node_id is None or job.team_workflow_version is None:
         return None

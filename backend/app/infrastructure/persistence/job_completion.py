@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.application.ports.job_completion import FailedJobCommand, FailedJobContext
 from app.db.models import Job, JobState, Task, TaskState
+from app.domain.orchestration import classify_failure
 from app.infrastructure.linear_sync import sync_current_task_state_to_linear
 from app.infrastructure.persistence.job_operations import record_event, release_workspace_lease
 
@@ -52,7 +53,17 @@ class SqlAlchemyFailedCompletionUnitOfWork:
         job.lease_expires_at = None
         await release_workspace_lease(session, job)
         self._command = command
-        return FailedJobContext(job.id, task.id, job.attempt, task.manual_takeover)
+        failure_class = classify_failure(
+            code=command.terminal_state,
+            outcome=command.failure,
+        ).value
+        return FailedJobContext(
+            job.id,
+            task.id,
+            job.attempt,
+            task.manual_takeover,
+            failure_class,
+        )
 
     async def schedule_retry(
         self, context: FailedJobContext, delay_seconds: int, max_attempts: int
@@ -75,6 +86,7 @@ class SqlAlchemyFailedCompletionUnitOfWork:
                 "max_attempts": max_attempts,
                 "delay_seconds": delay_seconds,
                 "reason": self._command.failure,
+                "failure_class": context.failure_class,
             },
         )
 
@@ -92,6 +104,7 @@ class SqlAlchemyFailedCompletionUnitOfWork:
                 "job_id": str(context.job_id),
                 "attempts": context.attempt,
                 "reason": self._command.failure,
+                "failure_class": context.failure_class,
             },
         )
 
