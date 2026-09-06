@@ -17,6 +17,4 @@ class CompositeTaskReconciliation:
             processed = processed or result.processed
             imported += result.imported
             updated += result.updated
-        return ReconciliationResult(
-            processed=processed, imported=imported, updated=updated
-        )
+        return ReconciliationResult(processed=processed, imported=imported, updated=updated)

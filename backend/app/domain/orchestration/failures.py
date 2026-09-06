@@ -84,8 +84,13 @@ def classify_failure_details(
         FailureClass.PROVIDER_UNAVAILABLE,
     }:
         return FailureClassification(
-            failure_class, FailureScope.PROVIDER, RecoveryAction.WAIT_PROVIDER, True,
-            "WARNING", "PROVIDER", "AI provider is temporarily unavailable."
+            failure_class,
+            FailureScope.PROVIDER,
+            RecoveryAction.WAIT_PROVIDER,
+            True,
+            "WARNING",
+            "PROVIDER",
+            "AI provider is temporarily unavailable.",
         )
     if failure_class in {
         FailureClass.GITHUB_UNAVAILABLE,
@@ -93,8 +98,13 @@ def classify_failure_details(
         FailureClass.RAG_UNAVAILABLE,
     }:
         return FailureClassification(
-            failure_class, FailureScope.INTEGRATION, RecoveryAction.WAIT_INTEGRATION, True,
-            "WARNING", "INTEGRATION", "A required integration is temporarily unavailable."
+            failure_class,
+            FailureScope.INTEGRATION,
+            RecoveryAction.WAIT_INTEGRATION,
+            True,
+            "WARNING",
+            "INTEGRATION",
+            "A required integration is temporarily unavailable.",
         )
     if failure_class in {
         FailureClass.PROVIDER_AUTH_ERROR,
@@ -103,60 +113,105 @@ def classify_failure_details(
         FailureClass.LINEAR_AUTH_ERROR,
     }:
         provider_failure = failure_class in {
-            FailureClass.PROVIDER_AUTH_ERROR, FailureClass.MODEL_UNAVAILABLE
+            FailureClass.PROVIDER_AUTH_ERROR,
+            FailureClass.MODEL_UNAVAILABLE,
         }
         return FailureClassification(
             failure_class,
             FailureScope.PROVIDER if provider_failure else FailureScope.INTEGRATION,
-            RecoveryAction.WAIT_CONFIGURATION, False, "ACTION_REQUIRED",
+            RecoveryAction.WAIT_CONFIGURATION,
+            False,
+            "ACTION_REQUIRED",
             "PROVIDER" if provider_failure else "INTEGRATION",
-            "Connection or model configuration requires attention."
+            "Connection or model configuration requires attention.",
         )
     if failure_class is FailureClass.SECURITY_INCIDENT:
         return FailureClassification(
-            failure_class, FailureScope.PLATFORM, RecoveryAction.STOP_SECURITY, False,
-            "CRITICAL", None, "Execution stopped because a security boundary was violated."
+            failure_class,
+            FailureScope.PLATFORM,
+            RecoveryAction.STOP_SECURITY,
+            False,
+            "CRITICAL",
+            None,
+            "Execution stopped because a security boundary was violated.",
+        )
+    if failure_class in {FailureClass.DATABASE_UNAVAILABLE, FailureClass.DATABASE_INTEGRITY_ERROR}:
+        return FailureClassification(
+            failure_class,
+            FailureScope.DATABASE,
+            RecoveryAction.FAIL_TERMINAL,
+            False,
+            "CRITICAL",
+            "DATABASE",
+            "Authoritative persistence is unavailable or inconsistent.",
         )
     if failure_class in {
-        FailureClass.DATABASE_UNAVAILABLE, FailureClass.DATABASE_INTEGRITY_ERROR
+        FailureClass.WORKER_CRASH,
+        FailureClass.WORKER_TIMEOUT,
+        FailureClass.WORKER_OOM,
     }:
         return FailureClassification(
-            failure_class, FailureScope.DATABASE, RecoveryAction.FAIL_TERMINAL, False,
-            "CRITICAL", "DATABASE", "Authoritative persistence is unavailable or inconsistent."
-        )
-    if failure_class in {
-        FailureClass.WORKER_CRASH, FailureClass.WORKER_TIMEOUT, FailureClass.WORKER_OOM
-    }:
-        return FailureClassification(
-            failure_class, FailureScope.WORKER_RUNTIME, RecoveryAction.RETRY, True,
-            "WARNING", "WORKER_RUNTIME", "The worker stopped before completing the Job."
+            failure_class,
+            FailureScope.WORKER_RUNTIME,
+            RecoveryAction.RETRY,
+            True,
+            "WARNING",
+            "WORKER_RUNTIME",
+            "The worker stopped before completing the Job.",
         )
     if failure_class is FailureClass.MODEL_PROTOCOL_ERROR:
         return FailureClassification(
-            failure_class, FailureScope.REQUEST, RecoveryAction.RETRY, True,
-            "WARNING", "PROVIDER", "The model returned an invalid structured result."
+            failure_class,
+            FailureScope.REQUEST,
+            RecoveryAction.RETRY,
+            True,
+            "WARNING",
+            "PROVIDER",
+            "The model returned an invalid structured result.",
         )
     if failure_class in {
-        FailureClass.IMPLEMENTATION_FAILURE, FailureClass.VALIDATION_FAILURE,
-        FailureClass.ARCHITECTURAL_FAILURE, FailureClass.REQUIREMENT_AMBIGUITY,
+        FailureClass.IMPLEMENTATION_FAILURE,
+        FailureClass.VALIDATION_FAILURE,
+        FailureClass.ARCHITECTURAL_FAILURE,
+        FailureClass.REQUIREMENT_AMBIGUITY,
     }:
         return FailureClassification(
-            failure_class, FailureScope.TASK, RecoveryAction.WORKFLOW, False,
-            "WARNING", None, "Engineering work requires another workflow step."
+            failure_class,
+            FailureScope.TASK,
+            RecoveryAction.WORKFLOW,
+            False,
+            "WARNING",
+            None,
+            "Engineering work requires another workflow step.",
         )
     if failure_class is FailureClass.EXTERNAL_WAIT:
         return FailureClassification(
-            failure_class, FailureScope.JOB, RecoveryAction.WAIT_INTEGRATION, False,
-            "INFO", "INTEGRATION", "The Job is waiting for an external event."
+            failure_class,
+            FailureScope.JOB,
+            RecoveryAction.WAIT_INTEGRATION,
+            False,
+            "INFO",
+            "INTEGRATION",
+            "The Job is waiting for an external event.",
         )
     if failure_class in {FailureClass.POLICY_DENIED, FailureClass.NO_PROGRESS}:
         return FailureClassification(
-            failure_class, FailureScope.TASK, RecoveryAction.WAIT_HUMAN, False,
-            "ACTION_REQUIRED", None, "The Job cannot continue safely without user attention."
+            failure_class,
+            FailureScope.TASK,
+            RecoveryAction.WAIT_HUMAN,
+            False,
+            "ACTION_REQUIRED",
+            None,
+            "The Job cannot continue safely without user attention.",
         )
     return FailureClassification(
-        failure_class, FailureScope.JOB, RecoveryAction.RETRY, True,
-        "WARNING", None, "The Job encountered an unexpected platform error."
+        failure_class,
+        FailureScope.JOB,
+        RecoveryAction.RETRY,
+        True,
+        "WARNING",
+        None,
+        "The Job encountered an unexpected platform error.",
     )
 
 
@@ -182,7 +237,9 @@ def _class_from_text(value: str) -> FailureClass:
         if "LINEAR" in value:
             return FailureClass.LINEAR_AUTH_ERROR
         return FailureClass.PROVIDER_AUTH_ERROR
-    if any(token in value for token in ("MODEL_NOT_FOUND", "MODEL UNAVAILABLE", "DEPRECATED MODEL")):
+    if any(
+        token in value for token in ("MODEL_NOT_FOUND", "MODEL UNAVAILABLE", "DEPRECATED MODEL")
+    ):
         return FailureClass.MODEL_UNAVAILABLE
     if any(token in value for token in ("CONTEXT_LENGTH", "CONTEXT LIMIT", "TOO MANY TOKENS")):
         return FailureClass.MODEL_CONTEXT_LIMIT
@@ -194,9 +251,14 @@ def _class_from_text(value: str) -> FailureClass:
         return FailureClass.LINEAR_UNAVAILABLE
     if "RAG" in value and any(token in value for token in ("TIMEOUT", "UNAVAILABLE", "FAILED")):
         return FailureClass.RAG_UNAVAILABLE
-    if any(token in value for token in ("503", "502", "504", "CONNECTION RESET", "PROVIDER UNAVAILABLE")):
+    if any(
+        token in value
+        for token in ("503", "502", "504", "CONNECTION RESET", "PROVIDER UNAVAILABLE")
+    ):
         return FailureClass.PROVIDER_UNAVAILABLE
-    if any(token in value for token in ("PROVIDER", "HTTPSTATUSERROR", "CONNECTERROR", "READTIMEOUT")):
+    if any(
+        token in value for token in ("PROVIDER", "HTTPSTATUSERROR", "CONNECTERROR", "READTIMEOUT")
+    ):
         return FailureClass.TRANSIENT_PROVIDER_ERROR
     if any(token in value for token in ("OUT OF MEMORY", "OOM", "EXITED 137")):
         return FailureClass.WORKER_OOM
@@ -204,10 +266,7 @@ def _class_from_text(value: str) -> FailureClass:
         return FailureClass.WORKER_TIMEOUT
     if any(token in value for token in ("WORKER_CRASH", "WORKER EXITED", "CONTAINER EXIT")):
         return FailureClass.WORKER_CRASH
-    if any(
-        token in value
-        for token in ("POLICY", "DENIED", "FORBIDDEN", "BUDGET EXHAUSTED")
-    ):
+    if any(token in value for token in ("POLICY", "DENIED", "FORBIDDEN", "BUDGET EXHAUSTED")):
         return FailureClass.POLICY_DENIED
     if any(token in value for token in ("PROTOCOL", "SCHEMA_VALIDATION", "INVALID WORKER RESULT")):
         return FailureClass.MODEL_PROTOCOL_ERROR

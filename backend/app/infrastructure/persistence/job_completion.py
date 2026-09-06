@@ -92,9 +92,7 @@ class SqlAlchemyFailedCompletionUnitOfWork:
             resource_id = agent.provider if agent else None
         if classification.failure_class is FailureClass.MODEL_UNAVAILABLE and worker_run:
             resource_id = f"{worker_run.provider}:{worker_run.model}"
-        fingerprint_source = (
-            f"{classification.failure_class.value}:{resource_id or job.id}"
-        )
+        fingerprint_source = f"{classification.failure_class.value}:{resource_id or job.id}"
         fingerprint = hashlib.sha256(fingerprint_source.encode()).hexdigest()[:32]
         retry_state = await session.get(JobRetryState, job.id, with_for_update=True)
         if retry_state is None:
@@ -130,7 +128,9 @@ class SqlAlchemyFailedCompletionUnitOfWork:
             health.status = (
                 "AUTH_ERROR"
                 if classification.action is RecoveryAction.WAIT_CONFIGURATION
-                else "UNAVAILABLE" if updated.state is CircuitState.OPEN else "DEGRADED"
+                else "UNAVAILABLE"
+                if updated.state is CircuitState.OPEN
+                else "DEGRADED"
             )
             health.circuit_state = updated.state.value
             health.consecutive_failures = updated.consecutive_failures
@@ -171,9 +171,7 @@ class SqlAlchemyFailedCompletionUnitOfWork:
         return health
 
     @staticmethod
-    def _increment_retry_counter(
-        retry_state: JobRetryState, scope: FailureScope
-    ) -> None:
+    def _increment_retry_counter(retry_state: JobRetryState, scope: FailureScope) -> None:
         if scope is FailureScope.PROVIDER:
             retry_state.provider_retry_count += 1
         elif scope is FailureScope.INTEGRATION:

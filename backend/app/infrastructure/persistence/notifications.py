@@ -39,8 +39,12 @@ class SqlAlchemyNotificationStore:
             incident.resolved_at = None
             incident.acknowledged_at = None
             incident.occurrence_count = 1
-            incident.root_resource_type = str((command.metadata or {}).get("resource_type") or "") or None
-            incident.root_resource_id = str((command.metadata or {}).get("resource_id") or "") or None
+            incident.root_resource_type = (
+                str((command.metadata or {}).get("resource_type") or "") or None
+            )
+            incident.root_resource_id = (
+                str((command.metadata or {}).get("resource_id") or "") or None
+            )
         else:
             incident = Incident(
                 fingerprint=command.fingerprint,

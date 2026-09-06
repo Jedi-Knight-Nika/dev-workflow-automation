@@ -45,12 +45,8 @@ class FailureEvent(Base):
         Index("ix_failure_events_fingerprint", "fingerprint"),
     )
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    task_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("tasks.id", ondelete="SET NULL")
-    )
-    job_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("jobs.id", ondelete="SET NULL")
-    )
+    task_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("tasks.id", ondelete="SET NULL"))
+    job_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("jobs.id", ondelete="SET NULL"))
     resource_type: Mapped[str | None] = mapped_column(String(40))
     resource_id: Mapped[str | None] = mapped_column(String(255))
     failure_class: Mapped[str] = mapped_column(String(80))

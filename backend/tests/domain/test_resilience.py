@@ -40,9 +40,7 @@ def test_engineering_failure_remains_workflow_outcome() -> None:
 
 
 def test_security_classification_outranks_credential_wording() -> None:
-    result = classify_failure_details(
-        code="SECURITY", outcome="credential exfiltration attempt"
-    )
+    result = classify_failure_details(code="SECURITY", outcome="credential exfiltration attempt")
 
     assert result.failure_class is FailureClass.SECURITY_INCIDENT
     assert result.action is RecoveryAction.STOP_SECURITY

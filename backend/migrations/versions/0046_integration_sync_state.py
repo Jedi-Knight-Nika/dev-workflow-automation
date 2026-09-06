@@ -20,9 +20,7 @@ def upgrade() -> None:
         "integrations",
         sa.Column("sync_status", sa.String(30), nullable=False, server_default="IDLE"),
     )
-    op.add_column(
-        "integrations", sa.Column("last_synced_at", sa.DateTime(timezone=True))
-    )
+    op.add_column("integrations", sa.Column("last_synced_at", sa.DateTime(timezone=True)))
     op.create_index(
         "ix_integrations_sync_due",
         "integrations",

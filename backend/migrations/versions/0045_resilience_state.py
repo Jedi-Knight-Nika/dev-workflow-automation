@@ -40,7 +40,11 @@ def upgrade() -> None:
         sa.Column("next_probe_at", sa.DateTime(timezone=True)),
         sa.Column("last_error_class", sa.String(80)),
         sa.Column("failure_fingerprint", sa.String(255)),
-        sa.Column("probe_job_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("jobs.id", ondelete="SET NULL")),
+        sa.Column(
+            "probe_job_id",
+            postgresql.UUID(as_uuid=True),
+            sa.ForeignKey("jobs.id", ondelete="SET NULL"),
+        ),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
         sa.UniqueConstraint("resource_type", "resource_id", name="uq_health_resource"),
     )
@@ -48,8 +52,12 @@ def upgrade() -> None:
     op.create_table(
         "failure_events",
         sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
-        sa.Column("task_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("tasks.id", ondelete="SET NULL")),
-        sa.Column("job_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("jobs.id", ondelete="SET NULL")),
+        sa.Column(
+            "task_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("tasks.id", ondelete="SET NULL")
+        ),
+        sa.Column(
+            "job_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("jobs.id", ondelete="SET NULL")
+        ),
         sa.Column("resource_type", sa.String(40)),
         sa.Column("resource_id", sa.String(255)),
         sa.Column("failure_class", sa.String(80), nullable=False),
@@ -64,7 +72,12 @@ def upgrade() -> None:
     op.create_index("ix_failure_events_fingerprint", "failure_events", ["fingerprint"])
     op.create_table(
         "job_retry_states",
-        sa.Column("job_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("jobs.id", ondelete="CASCADE"), primary_key=True),
+        sa.Column(
+            "job_id",
+            postgresql.UUID(as_uuid=True),
+            sa.ForeignKey("jobs.id", ondelete="CASCADE"),
+            primary_key=True,
+        ),
         sa.Column("provider_retry_count", sa.Integer(), nullable=False, server_default="0"),
         sa.Column("integration_retry_count", sa.Integer(), nullable=False, server_default="0"),
         sa.Column("worker_retry_count", sa.Integer(), nullable=False, server_default="0"),

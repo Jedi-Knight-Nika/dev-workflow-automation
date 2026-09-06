@@ -77,9 +77,7 @@ class TrelloClient:
                 await client.aclose()
 
     async def list_boards(self) -> list[TrelloBoard]:
-        payload = await self._get(
-            "/members/me/boards", fields="id,name,url", filter="open"
-        )
+        payload = await self._get("/members/me/boards", fields="id,name,url", filter="open")
         if not isinstance(payload, list):
             raise TypeError("Trello returned an invalid board list")
         return [

@@ -62,9 +62,7 @@ class SqlAlchemyTrelloTaskReconciliation:
                 integration.last_error = None
                 integration.last_synced_at = now
                 await session.commit()
-                return ReconciliationResult(
-                    processed=True, imported=imported, updated=updated
-                )
+                return ReconciliationResult(processed=True, imported=imported, updated=updated)
             except Exception as exc:  # noqa: BLE001 - persist safe operator context
                 integration.sync_status = "FAILED"
                 integration.last_error = str(exc)[:1000]
