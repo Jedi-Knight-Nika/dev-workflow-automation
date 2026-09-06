@@ -7,7 +7,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import IndexStatus, Job, JobRole, Repository, ReviewFinding, Task
+from app.db.models import IndexStatus, Job, JobRole, Repository, ReviewFinding, Task, Team
 from app.domain.memory import render_memory
 from app.infrastructure.agent_knowledge import search_agent_knowledge
 from app.infrastructure.git.workspaces import run_git
@@ -191,6 +191,26 @@ class ContextCompiler:
     async def compile_for_intake(self, task: Task, job: Job) -> dict[str, Any]:
         started = time.monotonic()
         context = self._base(task, job)
+        team = await self.session.get(Team, task.team_id) if task.team_id else None
+        repository_statement = select(Repository).where(
+            Repository.enabled.is_(True), Repository.archived_at.is_(None)
+        )
+        if team and team.repository_ids:
+            repository_statement = repository_statement.where(
+                Repository.id.in_([uuid.UUID(value) for value in team.repository_ids])
+            )
+        repositories = list((await self.session.scalars(repository_statement)).all())
+        context["repository_candidates"] = [
+            {
+                "id": str(repository.id),
+                "provider": repository.provider,
+                "owner": repository.owner,
+                "name": repository.name,
+                "default_branch": repository.default_branch,
+                "knowledge_status": repository.index_status.value,
+            }
+            for repository in repositories
+        ]
         context["task_memory"] = await self._persistent_memory(task, JobRole.INTAKE)
         context["retrieved_knowledge"] = await self._knowledge(task, None, JobRole.INTAKE)
         return await self._finish(task, job, context, started)

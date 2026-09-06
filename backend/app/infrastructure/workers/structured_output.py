@@ -27,6 +27,8 @@ class IntakeProposal(BaseModel):
     blocking: bool
     summary: str
     confidence: float = Field(ge=0, le=1)
+    repository_ids: list[str] = Field(default_factory=list)
+    repository_selection_reason: str = ""
 
 
 class ThinkerProposal(BaseModel):

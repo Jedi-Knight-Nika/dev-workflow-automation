@@ -2,14 +2,23 @@ import types
 import uuid
 from typing import Self
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.application.ports.intake_completion import (
     IntakeCompletionCommand,
     IntakeCompletionContext,
 )
-from app.db.models import Job, JobRole, JobState, Task, TaskState
+from app.db.models import (
+    Job,
+    JobRole,
+    JobState,
+    Repository,
+    Task,
+    TaskRepositoryScope,
+    TaskState,
+    Team,
+)
 from app.domain.jobs import CompletionDirective
 from app.infrastructure.linear_sync import sync_current_task_state_to_linear
 from app.infrastructure.persistence.job_operations import (
@@ -90,6 +99,7 @@ class SqlAlchemyIntakeCompletionUnitOfWork:
         task = await session.get(Task, context.task_id)
         if task is None:
             raise RuntimeError("Task disappeared during Intake completion")
+        await self._apply_repository_scope(task, context.data)
         route = await route_completed_job(
             session, task, context.job_id, context.outcome, {"intake": context.data}
         )
@@ -140,6 +150,71 @@ class SqlAlchemyIntakeCompletionUnitOfWork:
             task.id,
             "JOB_SUCCEEDED",
             {"job_id": str(context.job_id), "result": context.outcome},
+        )
+
+    async def _apply_repository_scope(self, task: Task, data: dict[str, object]) -> None:
+        if task.team_id is None:
+            return
+        session = self._active()
+        team = await session.get(Team, task.team_id)
+        if team is None:
+            return
+        statement = select(Repository).where(
+            Repository.enabled.is_(True), Repository.archived_at.is_(None)
+        )
+        if team.repository_ids:
+            statement = statement.where(
+                Repository.id.in_([uuid.UUID(value) for value in team.repository_ids])
+            )
+        candidates = list((await session.scalars(statement)).all())
+        candidates_by_id = {repository.id: repository for repository in candidates}
+        raw_ids = data.get("repository_ids")
+        selected_ids: list[uuid.UUID] = []
+        if isinstance(raw_ids, list):
+            for value in raw_ids:
+                try:
+                    repository_id = uuid.UUID(str(value))
+                except ValueError as exc:
+                    raise ValueError(f"Intake selected invalid repository ID: {value}") from exc
+                if repository_id not in candidates_by_id:
+                    raise ValueError("Intake selected a repository outside the Team scope")
+                if repository_id not in selected_ids:
+                    selected_ids.append(repository_id)
+        if not selected_ids and len(candidates) == 1:
+            selected_ids = [candidates[0].id]
+        if not selected_ids:
+            return
+
+        reason = str(data.get("repository_selection_reason") or "Selected during Intake")
+        confidence_value = data.get("confidence")
+        confidence = float(confidence_value) if isinstance(confidence_value, (int, float)) else None
+        await session.execute(
+            delete(TaskRepositoryScope).where(TaskRepositoryScope.task_id == task.id)
+        )
+        session.add_all(
+            [
+                TaskRepositoryScope(
+                    task_id=task.id,
+                    repository_id=repository_id,
+                    selected_by="INTAKE",
+                    reason=reason,
+                    confidence=confidence,
+                    is_primary=index == 0,
+                )
+                for index, repository_id in enumerate(selected_ids)
+            ]
+        )
+        # Preserve compatibility while execution/delivery consumers migrate to scopes.
+        task.repository_id = selected_ids[0]
+        await record_event(
+            session,
+            task.id,
+            "TASK_REPOSITORY_SCOPE_SELECTED",
+            {
+                "repository_ids": [str(repository_id) for repository_id in selected_ids],
+                "reason": reason,
+                "confidence": confidence,
+            },
         )
 
     async def _enqueue_repair(self, task: Task, context: IntakeCompletionContext) -> None:

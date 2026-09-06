@@ -13,7 +13,7 @@ export type CreateTaskInput = {
   title: string;
   description: string;
   priority: number;
-  repository_id: string | null;
+  repository_id?: string | null;
   enqueue_planning: boolean;
   external_key?: string | null;
   project_name?: string | null;

@@ -15,7 +15,7 @@ from app.application.ports.team_management import (
     TeamView,
     WakeTeamResult,
 )
-from app.db.models import Job, JobRole, JobState, Task, TaskAssignment, Team, WorkerRun
+from app.db.models import Job, JobRole, JobState, Repository, Task, TaskAssignment, Team, WorkerRun
 from app.infrastructure.persistence.workflow_designer import SqlAlchemyWorkflowDesigner
 
 
@@ -257,6 +257,16 @@ class SqlAlchemyTeamManagementWorkflow:
                 )
             ).all()
         )
+        candidate_statement = (
+            select(func.count())
+            .select_from(Repository)
+            .where(Repository.enabled.is_(True), Repository.archived_at.is_(None))
+        )
+        if team.repository_ids:
+            candidate_statement = candidate_statement.where(
+                Repository.id.in_([uuid.UUID(value) for value in team.repository_ids])
+            )
+        candidate_repository_count = int(await self._session.scalar(candidate_statement) or 0)
         active_task_ids = {
             task_id
             for task_id in (
@@ -284,7 +294,7 @@ class SqlAlchemyTeamManagementWorkflow:
         created_jobs = 0
         missing_repository_tasks = 0
         for assignment, task in assignments:
-            if task.repository_id is None:
+            if task.repository_id is None and candidate_repository_count == 0:
                 missing_repository_tasks += 1
             if task.id in active_task_ids:
                 continue

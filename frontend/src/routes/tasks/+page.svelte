@@ -26,7 +26,6 @@
     description: '',
     priority: 3,
     external_key: '',
-    repository_id: '',
     team_id: '',
     project_name: '',
     labels: '',
@@ -85,7 +84,6 @@
       description: '',
       priority: 3,
       external_key: '',
-      repository_id: '',
       team_id: '',
       project_name: '',
       labels: '',
@@ -103,7 +101,6 @@
         description: draft.description.trim(),
         priority: draft.priority,
         external_key: draft.external_key.trim() || null,
-        repository_id: draft.repository_id || null,
         project_name: draft.project_name.trim() || null,
         labels: [
           ...new Set(
@@ -360,14 +357,10 @@
               >{/each}</select
           ></label
         >
-        <label
-          ><span>Repository</span><select bind:value={draft.repository_id}
-            ><option value="">No repository</option
-            >{#each repositories.filter((repository) => repository.enabled) as repository (repository.id)}<option
-                value={repository.id}>{repository.owner}/{repository.name}</option
-              >{/each}</select
-          ></label
-        >
+        <div class="scope-note">
+          <strong>Repository scope is automatic</strong>
+          <span>Intake selects from every repository available to the chosen Team.</span>
+        </div>
         <label
           ><span>Project</span><input
             bind:value={draft.project_name}
@@ -481,8 +474,8 @@
             <dd>{selected.source?.project_name || selected.project_name || '—'}</dd>
           </div>
           <div>
-            <dt>Repository</dt>
-            <dd>{selected.repository_name || '—'}</dd>
+            <dt>Primary execution repository</dt>
+            <dd>{selected.repository_name || 'Pending AI selection'}</dd>
           </div>
           <div>
             <dt>Estimate</dt>

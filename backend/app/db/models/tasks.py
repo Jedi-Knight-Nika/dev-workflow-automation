@@ -71,6 +71,30 @@ class Task(Base):
     events: Mapped[list[TaskEvent]] = relationship(
         back_populates="task", cascade="all, delete-orphan"
     )
+    repository_scopes: Mapped[list[TaskRepositoryScope]] = relationship(
+        back_populates="task", cascade="all, delete-orphan"
+    )
+
+
+class TaskRepositoryScope(Base):
+    """Repository selected from the owning Team's available execution scope."""
+
+    __tablename__ = "task_repository_scopes"
+    __table_args__ = (
+        UniqueConstraint("task_id", "repository_id", name="uq_task_repository_scope"),
+        Index("ix_task_repository_scopes_repository", "repository_id"),
+    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    task_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tasks.id", ondelete="CASCADE"))
+    repository_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("repositories.id", ondelete="RESTRICT")
+    )
+    selected_by: Mapped[str] = mapped_column(String(30), default="INTAKE")
+    reason: Mapped[str] = mapped_column(Text, default="")
+    confidence: Mapped[float | None] = mapped_column(Numeric(4, 3))
+    is_primary: Mapped[bool] = mapped_column(default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    task: Mapped[Task] = relationship(back_populates="repository_scopes")
 
 
 class Job(Base):

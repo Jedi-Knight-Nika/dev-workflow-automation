@@ -45,6 +45,7 @@ from .tasks import (
     Task,
     TaskEvent,
     TaskMemory,
+    TaskRepositoryScope,
     ValidationRecord,
     WorkspaceLease,
 )
@@ -95,6 +96,7 @@ __all__ = [
     "TaskAssignment",
     "TaskEvent",
     "TaskMemory",
+    "TaskRepositoryScope",
     "TaskState",
     "Team",
     "TelegramConnection",
