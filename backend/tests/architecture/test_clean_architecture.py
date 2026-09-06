@@ -7,6 +7,8 @@ import pytest
 from app.application.tasks import CreateTask, CreateTaskCommand
 from app.domain.tasks import Task, TaskState
 
+BACKEND_ROOT = Path(__file__).parents[2]
+
 
 class FakeTasks:
     def __init__(self) -> None:
@@ -94,7 +96,7 @@ async def test_create_task_use_case_rolls_back_as_one_transaction() -> None:
 
 
 def test_domain_layer_has_no_framework_or_infrastructure_imports() -> None:
-    domain_root = Path(__file__).parents[1] / "app" / "domain"
+    domain_root = BACKEND_ROOT / "app" / "domain"
     forbidden = {
         "fastapi",
         "sqlalchemy",
@@ -120,7 +122,7 @@ def test_domain_layer_has_no_framework_or_infrastructure_imports() -> None:
 
 
 def test_application_layer_has_no_transport_or_infrastructure_imports() -> None:
-    application_root = Path(__file__).parents[1] / "app" / "application"
+    application_root = BACKEND_ROOT / "app" / "application"
     forbidden = {
         "fastapi",
         "sqlalchemy",
@@ -150,7 +152,7 @@ def test_application_layer_has_no_transport_or_infrastructure_imports() -> None:
 
 
 def test_legacy_service_namespace_stays_empty() -> None:
-    services_root = Path(__file__).parents[1] / "app" / "services"
+    services_root = BACKEND_ROOT / "app" / "services"
 
     assert not list(services_root.glob("*.py")), (
         "Place business rules in domain/application and external implementations in infrastructure"
@@ -158,7 +160,7 @@ def test_legacy_service_namespace_stays_empty() -> None:
 
 
 def test_transport_schemas_do_not_import_persistence_models() -> None:
-    schemas_root = Path(__file__).parents[1] / "app" / "schemas"
+    schemas_root = BACKEND_ROOT / "app" / "schemas"
     for schema_path in schemas_root.rglob("*.py"):
         tree = ast.parse(schema_path.read_text())
         imports = [
@@ -171,7 +173,7 @@ def test_transport_schemas_do_not_import_persistence_models() -> None:
 
 
 def test_http_routes_depend_on_application_ports_not_persistence_adapters() -> None:
-    api_root = Path(__file__).parents[1] / "app" / "api"
+    api_root = BACKEND_ROOT / "app" / "api"
     forbidden = {"sqlalchemy", "app.db", "app.integrations", "app.infrastructure.persistence"}
 
     for source_path in api_root.rglob("*.py"):
