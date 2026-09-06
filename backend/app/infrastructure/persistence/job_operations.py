@@ -7,6 +7,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
 from app.db.models import (
+    AIAgent,
+    HealthState,
     Job,
     JobRole,
     JobState,
@@ -155,11 +157,22 @@ async def claim_next_job(session: AsyncSession, worker_id: str, lease_seconds: i
         select(Job)
         .join(Task)
         .outerjoin(Team, Team.id == Task.team_id)
+        .outerjoin(AIAgent, AIAgent.id == Job.agent_id)
+        .outerjoin(
+            HealthState,
+            (HealthState.resource_type == "PROVIDER")
+            & (HealthState.resource_id == AIAgent.provider),
+        )
         .where(
             Job.state.in_([JobState.QUEUED, JobState.RETRY_WAIT]),
             or_(Job.retry_not_before.is_(None), Job.retry_not_before <= datetime.now(UTC)),
             Task.manual_takeover.is_(False),
             Task.state.notin_([TaskState.PAUSED, TaskState.CANCELLED]),
+            or_(
+                HealthState.id.is_(None),
+                HealthState.circuit_state == "CLOSED",
+                HealthState.probe_job_id == Job.id,
+            ),
             or_(
                 Task.team_id.is_(None),
                 (

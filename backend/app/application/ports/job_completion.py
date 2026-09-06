@@ -21,6 +21,13 @@ class FailedJobContext:
     attempt: int
     manual_takeover: bool
     failure_class: str = "IMPLEMENTATION_FAILURE"
+    recovery_action: str = "RETRY"
+    severity: str = "WARNING"
+    safe_message: str = "The Job failed."
+    fingerprint: str = "job_failure"
+    resource_type: str | None = None
+    resource_id: str | None = None
+    circuit_open: bool = False
 
 
 class FailedCompletionUnitOfWork(Protocol):
@@ -40,6 +47,10 @@ class FailedCompletionUnitOfWork(Protocol):
     ) -> None: ...
 
     async def exhaust(self, context: FailedJobContext) -> None: ...
+
+    async def wait(self, context: FailedJobContext, state: str) -> None: ...
+
+    async def raise_incident(self, context: FailedJobContext) -> None: ...
 
     async def finish_during_takeover(self, context: FailedJobContext) -> None: ...
 

@@ -10,6 +10,7 @@ from app.application.manage_worker_presence import ManageWorkerPresence
 from app.application.process_deliveries import ProcessDeliveries
 from app.application.process_indexes import ProcessIndexes
 from app.application.reconcile_tasks import ReconcileExternalTasks
+from app.application.recover_resources import RecoveryManager
 from app.application.run_startup_maintenance import RunStartupMaintenance
 from app.config import Settings
 from app.db.session import SessionLocal
@@ -27,6 +28,7 @@ from app.infrastructure.persistence.intake_completion import (
 from app.infrastructure.persistence.job_completion import (
     SqlAlchemyFailedCompletionUnitOfWorkFactory,
 )
+from app.infrastructure.persistence.resilience import SqlAlchemyResilienceStore
 from app.infrastructure.persistence.reviewer_completion import (
     SqlAlchemyReviewerCompletionUnitOfWorkFactory,
 )
@@ -104,6 +106,7 @@ def create_scheduler(settings: Settings) -> Scheduler:
         startup_maintenance,
         worker_presence,
         ReconcileExternalTasks(SqlAlchemyLinearTaskReconciliation(SessionLocal)),
+        RecoveryManager(SqlAlchemyResilienceStore(SessionLocal)),
     )
 
 

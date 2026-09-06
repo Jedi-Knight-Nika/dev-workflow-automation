@@ -45,6 +45,8 @@ class Incident(Base):
     )
     title: Mapped[str] = mapped_column(String(500))
     summary: Mapped[str] = mapped_column(Text)
+    root_resource_type: Mapped[str | None] = mapped_column(String(40))
+    root_resource_id: Mapped[str | None] = mapped_column(String(255))
     occurrence_count: Mapped[int] = mapped_column(Integer, default=1)
     metadata_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

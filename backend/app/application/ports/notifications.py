@@ -35,7 +35,9 @@ class NotificationView:
 
 
 class NotificationStore(Protocol):
-    async def raise_incident(self, command: RaiseIncident) -> NotificationView | None: ...
+    async def raise_incident(
+        self, command: RaiseIncident, *, commit: bool = True
+    ) -> NotificationView | None: ...
     async def list_notifications(
         self, status: str | None, limit: int
     ) -> list[NotificationView]: ...

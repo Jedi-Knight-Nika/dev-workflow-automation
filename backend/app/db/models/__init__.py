@@ -34,6 +34,7 @@ from .notifications import (
     TelegramConnectionToken,
     TelegramUpdate,
 )
+from .resilience import FailureEvent, HealthState, JobRetryState
 from .settings import AccountSettings, SettingsAuditEvent
 from .tasks import (
     AgentCheckpoint,
@@ -73,12 +74,15 @@ __all__ = [
     "ApprovalRequest",
     "ExecutionPolicy",
     "ExternalTaskSnapshot",
+    "FailureEvent",
+    "HealthState",
     "Incident",
     "IndexStatus",
     "Integration",
     "IntegrationStatus",
     "Job",
     "JobContext",
+    "JobRetryState",
     "JobRole",
     "JobState",
     "Notification",

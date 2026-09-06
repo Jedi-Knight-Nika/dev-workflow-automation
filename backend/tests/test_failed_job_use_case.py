@@ -18,6 +18,8 @@ class FakeFailureUnitOfWork:
         self.takeover = False
         self.committed = False
         self.synchronized = False
+        self.waiting_state: str | None = None
+        self.incident_raised = False
 
     async def __aenter__(self) -> Self:
         return self
@@ -40,6 +42,12 @@ class FakeFailureUnitOfWork:
 
     async def exhaust(self, _context: FailedJobContext) -> None:
         self.exhausted = True
+
+    async def wait(self, _context: FailedJobContext, state: str) -> None:
+        self.waiting_state = state
+
+    async def raise_incident(self, _context: FailedJobContext) -> None:
+        self.incident_raised = True
 
     async def finish_during_takeover(self, _context: FailedJobContext) -> None:
         self.takeover = True
@@ -95,3 +103,26 @@ async def test_stale_failed_worker_result_is_ignored_without_commit() -> None:
 
     assert not await handler.execute(command())
     assert not unit.committed and not unit.synchronized
+
+
+@pytest.mark.asyncio
+async def test_open_provider_circuit_waits_without_consuming_more_attempts() -> None:
+    context = FailedJobContext(
+        uuid.uuid4(),
+        uuid.uuid4(),
+        2,
+        False,
+        failure_class="PROVIDER_UNAVAILABLE",
+        recovery_action="WAIT_PROVIDER",
+        fingerprint="provider-fingerprint",
+        resource_type="PROVIDER",
+        resource_id="anthropic",
+        circuit_open=True,
+    )
+    unit = FakeFailureUnitOfWork(context)
+    handler = CompleteFailedJob(lambda: unit, RetryPolicy(3, 5))  # type: ignore[arg-type]
+
+    assert await handler.execute(command())
+    assert unit.waiting_state == "WAITING_PROVIDER"
+    assert unit.incident_raised
+    assert unit.retry is None

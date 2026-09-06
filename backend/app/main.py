@@ -21,6 +21,7 @@ from app.api.health import router as health_router
 from app.api.memory import router as memory_router
 from app.api.notifications import router as notifications_router
 from app.api.notifications import webhook_router as telegram_webhook_router
+from app.api.resilience import router as resilience_router
 from app.api.roles import router as roles_router
 from app.api.settings import router as settings_router
 from app.api.tasks import router as tasks_router
@@ -74,6 +75,7 @@ app.include_router(dashboard_router, prefix="/api/v1")
 app.include_router(tasks_router, prefix="/api/v1")
 app.include_router(teams_router, prefix="/api/v1")
 app.include_router(roles_router, prefix="/api/v1")
+app.include_router(resilience_router, prefix="/api/v1")
 app.include_router(settings_router, prefix="/api/v1")
 app.include_router(ai_runtime_router, prefix="/api/v1")
 app.include_router(agent_runtime_router, prefix="/api/v1")

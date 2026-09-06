@@ -14,7 +14,9 @@ class SqlAlchemyNotificationStore:
         self._session = session
         self._user_id = user_id
 
-    async def raise_incident(self, command: RaiseIncident) -> NotificationView | None:
+    async def raise_incident(
+        self, command: RaiseIncident, *, commit: bool = True
+    ) -> NotificationView | None:
         now = datetime.now(UTC)
         incident = await self._session.scalar(
             select(Incident).where(Incident.fingerprint == command.fingerprint).with_for_update()
@@ -24,7 +26,8 @@ class SqlAlchemyNotificationStore:
             incident.last_seen_at = now
             incident.summary = command.summary
             incident.metadata_json = command.metadata or {}
-            await self._session.commit()
+            if commit:
+                await self._session.commit()
             return None
         if incident:
             incident.status = IncidentStatus.OPEN.value
@@ -36,6 +39,8 @@ class SqlAlchemyNotificationStore:
             incident.resolved_at = None
             incident.acknowledged_at = None
             incident.occurrence_count = 1
+            incident.root_resource_type = str((command.metadata or {}).get("resource_type") or "") or None
+            incident.root_resource_id = str((command.metadata or {}).get("resource_id") or "") or None
         else:
             incident = Incident(
                 fingerprint=command.fingerprint,
@@ -46,6 +51,8 @@ class SqlAlchemyNotificationStore:
                 job_id=command.job_id,
                 title=command.title,
                 summary=command.summary,
+                root_resource_type=str((command.metadata or {}).get("resource_type") or "") or None,
+                root_resource_id=str((command.metadata or {}).get("resource_id") or "") or None,
                 metadata_json=command.metadata or {},
             )
             self._session.add(incident)
@@ -91,7 +98,8 @@ class SqlAlchemyNotificationStore:
                         recipient_ref=connection.telegram_chat_id,
                     )
                 )
-        await self._session.commit()
+        if commit:
+            await self._session.commit()
         return self._view(notification)
 
     async def list_notifications(self, status: str | None, limit: int) -> list[NotificationView]:

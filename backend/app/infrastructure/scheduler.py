@@ -27,6 +27,7 @@ from app.application.ports.worker_runtime import WorkerRunner
 from app.application.process_deliveries import ProcessDeliveries
 from app.application.process_indexes import ProcessIndexes
 from app.application.reconcile_tasks import ReconcileExternalTasks
+from app.application.recover_resources import RecoveryManager
 from app.application.run_startup_maintenance import RunStartupMaintenance
 from app.config import Settings
 from app.domain.agents import AgentRole
@@ -54,6 +55,7 @@ class Scheduler:
         startup_maintenance: RunStartupMaintenance,
         worker_presence: ManageWorkerPresence,
         task_reconciler: ReconcileExternalTasks,
+        recovery_manager: RecoveryManager | None = None,
     ) -> None:
         self.settings = settings
         self._job_dispatch = job_dispatch
@@ -69,6 +71,7 @@ class Scheduler:
         self._startup_maintenance = startup_maintenance
         self._worker_presence = worker_presence
         self._task_reconciler = task_reconciler
+        self._recovery_manager = recovery_manager
         self.worker_id = worker_id
         self._stop = asyncio.Event()
         self._loop_task: asyncio.Task[None] | None = None
@@ -114,6 +117,8 @@ class Scheduler:
                 try:
                     self._job_tasks = {task for task in self._job_tasks if not task.done()}
                     await self._task_reconciler.execute()
+                    if self._recovery_manager is not None:
+                        await self._recovery_manager.recover_due_resources()
                     await self._delivery_processor.execute()
                     claimed_any = False
                     while len(self._job_tasks) < self.settings.scheduler_max_concurrent_jobs:
@@ -148,8 +153,15 @@ class Scheduler:
             await self._execute(claimed_job)
         except asyncio.CancelledError:
             raise
-        except Exception:
+        except Exception as exc:
             log.exception("job_execution_failed", job_id=str(claimed_job.job_id))
+            await self._finish(
+                claimed_job.job_id,
+                claimed_job.lease_token,
+                JobExecutionState.FAILED,
+                None,
+                f"Unknown system error: {type(exc).__name__}",
+            )
 
     async def _run_indexer(self) -> None:
         while not self._stop.is_set():
@@ -189,6 +201,8 @@ class Scheduler:
                 result.model_dump(mode="json"),
                 None,
             )
+            if self._recovery_manager is not None:
+                await self._recovery_manager.record_job_success(job_id)
             return
         execution = await self._worker_runner(job_id)
         if execution.timed_out:
@@ -206,7 +220,13 @@ class Scheduler:
                 or execution.stdout.decode(errors="replace")[-4000:]
                 or f"Worker exited {execution.returncode}"
             )
-            await self._finish(job_id, lease_token, JobExecutionState.FAILED, None, reason)
+            await self._finish(
+                job_id,
+                lease_token,
+                JobExecutionState.FAILED,
+                None,
+                f"Worker crashed: {reason}",
+            )
             return
         try:
             result = WorkerResult.model_validate_json(execution.stdout)
@@ -226,6 +246,8 @@ class Scheduler:
             result.model_dump(mode="json"),
             None,
         )
+        if self._recovery_manager is not None:
+            await self._recovery_manager.record_job_success(job_id)
 
     async def _finish(
         self,

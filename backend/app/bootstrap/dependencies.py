@@ -26,6 +26,7 @@ from app.infrastructure.persistence.readiness import SqlAlchemyReadinessProbe
 from app.infrastructure.persistence.repository_management import (
     SqlAlchemyRepositoryManagementWorkflow,
 )
+from app.infrastructure.persistence.resilience_queries import SqlAlchemyResilienceQueries
 from app.infrastructure.persistence.role_management import SqlAlchemyRoleManagementWorkflow
 from app.infrastructure.persistence.task_history import SqlAlchemyTaskHistoryQueries
 from app.infrastructure.persistence.task_lifecycle import SqlAlchemyTaskLifecycleUnitOfWorkFactory
@@ -72,6 +73,12 @@ def get_readiness_probe(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> SqlAlchemyReadinessProbe:
     return SqlAlchemyReadinessProbe(session)
+
+
+def get_resilience_queries(
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> SqlAlchemyResilienceQueries:
+    return SqlAlchemyResilienceQueries(session)
 
 
 def get_merge_workflow(

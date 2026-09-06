@@ -1,15 +1,38 @@
+import hashlib
 import types
 import uuid
 from datetime import timedelta
 from typing import Self
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.application.ports.job_completion import FailedJobCommand, FailedJobContext
-from app.db.models import Job, JobState, Task, TaskState
-from app.domain.orchestration import classify_failure
+from app.application.ports.notifications import RaiseIncident
+from app.db.models import (
+    AIAgent,
+    FailureEvent,
+    HealthState,
+    Job,
+    JobRetryState,
+    JobState,
+    Task,
+    TaskState,
+    WorkerRun,
+)
+from app.domain.notifications import NotificationSeverity
+from app.domain.orchestration import (
+    CircuitSnapshot,
+    CircuitState,
+    FailureClass,
+    FailureScope,
+    RecoveryAction,
+    classify_failure_details,
+    record_failure,
+)
 from app.infrastructure.linear_sync import sync_current_task_state_to_linear
 from app.infrastructure.persistence.job_operations import record_event, release_workspace_lease
+from app.infrastructure.persistence.notifications import SqlAlchemyNotificationStore
 
 
 class SqlAlchemyFailedCompletionUnitOfWork:
@@ -53,17 +76,114 @@ class SqlAlchemyFailedCompletionUnitOfWork:
         job.lease_expires_at = None
         await release_workspace_lease(session, job)
         self._command = command
-        failure_class = classify_failure(
+        classification = classify_failure_details(
             code=command.terminal_state,
             outcome=command.failure,
-        ).value
+        )
+        worker_run = await session.scalar(
+            select(WorkerRun)
+            .where(WorkerRun.job_id == job.id)
+            .order_by(WorkerRun.created_at.desc())
+            .limit(1)
+        )
+        resource_id = worker_run.provider if worker_run and classification.resource_type else None
+        if resource_id is None and job.agent_id and classification.resource_type == "PROVIDER":
+            agent = await session.get(AIAgent, job.agent_id)
+            resource_id = agent.provider if agent else None
+        if classification.failure_class is FailureClass.MODEL_UNAVAILABLE and worker_run:
+            resource_id = f"{worker_run.provider}:{worker_run.model}"
+        fingerprint_source = (
+            f"{classification.failure_class.value}:{resource_id or job.id}"
+        )
+        fingerprint = hashlib.sha256(fingerprint_source.encode()).hexdigest()[:32]
+        retry_state = await session.get(JobRetryState, job.id, with_for_update=True)
+        if retry_state is None:
+            retry_state = JobRetryState(job_id=job.id)
+            session.add(retry_state)
+        self._increment_retry_counter(retry_state, classification.scope)
+        retry_state.last_failure_fingerprint = fingerprint
+        session.add(
+            FailureEvent(
+                task_id=task.id,
+                job_id=job.id,
+                resource_type=classification.resource_type,
+                resource_id=resource_id,
+                failure_class=classification.failure_class.value,
+                fingerprint=fingerprint,
+                error_code=command.terminal_state,
+                safe_message=classification.safe_message,
+                technical_details_json={"terminal_state": command.terminal_state},
+                retryable=classification.retryable,
+            )
+        )
+        circuit_open = False
+        if classification.resource_type and resource_id:
+            health = await self._load_health(classification.resource_type, resource_id)
+            updated = record_failure(
+                CircuitSnapshot(
+                    CircuitState(health.circuit_state),
+                    health.consecutive_failures,
+                    health.next_probe_at,
+                ),
+                now=command.finished_at,
+            )
+            health.status = (
+                "AUTH_ERROR"
+                if classification.action is RecoveryAction.WAIT_CONFIGURATION
+                else "UNAVAILABLE" if updated.state is CircuitState.OPEN else "DEGRADED"
+            )
+            health.circuit_state = updated.state.value
+            health.consecutive_failures = updated.consecutive_failures
+            health.last_failure_at = command.finished_at
+            health.next_probe_at = updated.next_probe_at
+            health.last_error_class = classification.failure_class.value
+            health.failure_fingerprint = fingerprint
+            health.probe_job_id = None
+            circuit_open = updated.state is CircuitState.OPEN
         return FailedJobContext(
             job.id,
             task.id,
             job.attempt,
             task.manual_takeover,
-            failure_class,
+            classification.failure_class.value,
+            classification.action.value,
+            classification.severity,
+            classification.safe_message,
+            fingerprint,
+            classification.resource_type,
+            resource_id,
+            circuit_open,
         )
+
+    async def _load_health(self, resource_type: str, resource_id: str) -> HealthState:
+        session = self._active_session()
+        health = await session.scalar(
+            select(HealthState)
+            .where(
+                HealthState.resource_type == resource_type,
+                HealthState.resource_id == resource_id,
+            )
+            .with_for_update()
+        )
+        if health is None:
+            health = HealthState(resource_type=resource_type, resource_id=resource_id)
+            session.add(health)
+        return health
+
+    @staticmethod
+    def _increment_retry_counter(
+        retry_state: JobRetryState, scope: FailureScope
+    ) -> None:
+        if scope is FailureScope.PROVIDER:
+            retry_state.provider_retry_count += 1
+        elif scope is FailureScope.INTEGRATION:
+            retry_state.integration_retry_count += 1
+        elif scope is FailureScope.WORKER_RUNTIME:
+            retry_state.worker_retry_count += 1
+        elif scope is FailureScope.REQUEST:
+            retry_state.protocol_retry_count += 1
+        elif scope is FailureScope.TASK:
+            retry_state.engineering_retry_count += 1
 
     async def schedule_retry(
         self, context: FailedJobContext, delay_seconds: int, max_attempts: int
@@ -106,6 +226,50 @@ class SqlAlchemyFailedCompletionUnitOfWork:
                 "reason": self._command.failure,
                 "failure_class": context.failure_class,
             },
+        )
+
+    async def wait(self, context: FailedJobContext, state: str) -> None:
+        session = self._active_session()
+        job = await session.get(Job, context.job_id)
+        task = await session.get(Task, context.task_id)
+        if job is None or task is None:
+            raise RuntimeError("Job or Task disappeared before wait transition")
+        job.state = JobState(state)
+        job.worker_id = None
+        job.lease_token = None
+        job.retry_not_before = None
+        if state in {"WAITING_CONFIGURATION", "WAITING_HUMAN"}:
+            task.state = TaskState.NEEDS_HUMAN
+        await record_event(
+            session,
+            context.task_id,
+            f"JOB_{state}",
+            {
+                "job_id": str(context.job_id),
+                "failure_class": context.failure_class,
+                "resource_type": context.resource_type,
+                "resource_id": context.resource_id,
+            },
+        )
+
+    async def raise_incident(self, context: FailedJobContext) -> None:
+        severity = NotificationSeverity(context.severity)
+        await SqlAlchemyNotificationStore(self._active_session()).raise_incident(
+            RaiseIncident(
+                fingerprint=context.fingerprint,
+                type=context.failure_class,
+                severity=severity,
+                title=context.failure_class.replace("_", " ").title(),
+                summary=context.safe_message,
+                task_id=context.task_id,
+                job_id=context.job_id,
+                action_target=f"/tasks/{context.task_id}",
+                metadata={
+                    "resource_type": context.resource_type or "JOB",
+                    "resource_id": context.resource_id or str(context.job_id),
+                },
+            ),
+            commit=False,
         )
 
     async def finish_during_takeover(self, context: FailedJobContext) -> None:
