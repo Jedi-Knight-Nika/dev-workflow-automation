@@ -27,7 +27,9 @@
             style="animation-delay: {Math.min(index, 10) * 30}ms"
           >
             <div class="flex justify-between">
-              <strong>{job.role}</strong><span class="font-mono text-xs">{job.state}</span>
+              <strong>{job.role}</strong><span class="font-mono text-xs {stateClass(job.state)}"
+                >{job.state}</span
+              >
             </div>
             <small class="text-muted">{job.action} · {t('taskDetail.attempt')} {job.attempt}</small>
             {#if job.result}

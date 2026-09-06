@@ -4,6 +4,12 @@
   import { t } from '$lib/i18n/index.svelte';
 
   let { findings }: { findings: ReviewFinding[] } = $props();
+
+  function severityClass(severity: string): string {
+    if (/CRITICAL|HIGH|ERROR|MAJOR/.test(severity)) return 'text-danger';
+    if (/MEDIUM|WARNING/.test(severity)) return 'text-warning';
+    return 'text-muted';
+  }
 </script>
 
 <section class="border-line rounded-xl border p-5 xl:col-span-2">
@@ -20,7 +26,8 @@
           >
             <div class="flex flex-wrap justify-between gap-3">
               <strong class="text-sm"
-                >{finding.severity} · {finding.status}{finding.occurrence_count > 1
+                ><span class={severityClass(finding.severity)}>{finding.severity}</span> · {finding.status}{finding.occurrence_count >
+                1
                   ? ` · ${t('taskDetail.repeated')} ${finding.occurrence_count}×`
                   : ''}</strong
               >

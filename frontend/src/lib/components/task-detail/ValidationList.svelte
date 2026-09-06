@@ -4,6 +4,13 @@
   import { t } from '$lib/i18n/index.svelte';
 
   let { validations }: { validations: ValidationRecord[] } = $props();
+
+  function statusClass(status: string): string {
+    if (/FAIL|ERROR|CHANGES_REQUESTED|CANCEL|REJECT/.test(status)) return 'text-danger';
+    if (/SUCCESS|APPROVED|PASS|COMPLETE/.test(status)) return 'text-accent';
+    if (/PENDING|WAIT|REQUESTED|ACTION_REQUIRED|QUEUE/.test(status)) return 'text-warning';
+    return 'text-muted';
+  }
 </script>
 
 <section class="border-line rounded-xl border p-5 xl:col-span-2">
@@ -20,7 +27,9 @@
           >
             <div class="flex justify-between gap-3">
               <strong class="text-sm">{validation.name}</strong>
-              <span class="font-mono text-xs">{validation.status}</span>
+              <span class="font-mono text-xs {statusClass(validation.status)}"
+                >{validation.status}</span
+              >
             </div>
             <small class="text-muted">{validation.kind} · {validation.revision.slice(0, 12)}</small>
             {#if validation.details_url}<!-- eslint-disable svelte/no-navigation-without-resolve -->
