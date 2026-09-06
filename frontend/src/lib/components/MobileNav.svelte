@@ -20,7 +20,7 @@
 <svelte:window onkeydown={open ? handleKeydown : undefined} />
 
 <div
-  class="border-line bg-panel-alt flex h-14 items-center justify-between border-b px-4 md:hidden"
+  class="border-line bg-panel-alt/80 flex h-14 items-center justify-between border-b px-4 backdrop-blur-md md:hidden"
 >
   <a
     href={resolve('/')}
@@ -63,7 +63,7 @@
     onclick={close}
   ></button>
   <nav
-    class="border-line bg-panel-alt fixed inset-y-0 left-0 z-50 flex w-64 flex-col gap-1 rounded-r-2xl border-r p-4 shadow-[8px_0_24px_rgba(0,0,0,.4)] motion-safe:animate-slide-in-left md:hidden"
+    class="border-line bg-panel-alt/85 fixed inset-y-0 left-0 z-50 flex w-64 flex-col gap-1 rounded-r-2xl border-r p-4 shadow-[8px_0_24px_rgba(0,0,0,.4)] backdrop-blur-md motion-safe:animate-slide-in-left md:hidden"
   >
     <div class="border-line mb-3 flex h-12 items-center border-b pb-3">
       <a
