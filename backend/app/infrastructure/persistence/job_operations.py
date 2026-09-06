@@ -2,13 +2,16 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
-from sqlalchemy import CursorResult, func, or_, select, text, update
+from sqlalchemy import CursorResult, String, func, or_, select, text, update
+from sqlalchemy import cast as sql_cast
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
 from app.db.models import (
     AIAgent,
     HealthState,
+    Integration,
     Job,
     JobRole,
     JobState,
@@ -148,6 +151,34 @@ async def claim_next_job(session: AsyncSession, worker_id: str, lease_seconds: i
         .correlate(Task, Job)
         .scalar_subquery()
     )
+    integration_health = aliased(HealthState)
+    required_integration = aliased(Integration)
+    blocked_integration = (
+        select(1)
+        .select_from(WorkflowNode)
+        .join(
+            required_integration,
+            func.jsonb_exists(
+                sql_cast(WorkflowNode.integration_ids, JSONB),
+                sql_cast(required_integration.id, String),
+            ),
+        )
+        .join(
+            integration_health,
+            (integration_health.resource_type == "INTEGRATION")
+            & (integration_health.resource_id == required_integration.provider_name),
+        )
+        .where(
+            WorkflowNode.id == Job.workflow_node_id,
+            integration_health.circuit_state != "CLOSED",
+            or_(
+                integration_health.probe_job_id.is_(None),
+                integration_health.probe_job_id != Job.id,
+            ),
+        )
+        .correlate(Job)
+        .exists()
+    )
     stmt = (
         select(Job)
         .join(Task)
@@ -168,6 +199,7 @@ async def claim_next_job(session: AsyncSession, worker_id: str, lease_seconds: i
                 HealthState.circuit_state == "CLOSED",
                 HealthState.probe_job_id == Job.id,
             ),
+            ~blocked_integration,
             or_(
                 Task.team_id.is_(None),
                 (
