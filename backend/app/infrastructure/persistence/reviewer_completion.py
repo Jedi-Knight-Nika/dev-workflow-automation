@@ -22,7 +22,7 @@ from app.db.models import (
     WorkflowNode,
 )
 from app.domain.jobs import CompletionDirective
-from app.infrastructure.linear_sync import sync_current_task_state_to_linear
+from app.infrastructure.external_task_sync import sync_external_task_state
 from app.infrastructure.persistence.job_operations import (
     enqueue_job,
     record_event,
@@ -310,7 +310,7 @@ class SqlAlchemyReviewerCompletionUnitOfWork:
     async def synchronize_tracker(self, task_id: uuid.UUID) -> None:
         task = await self._active().get(Task, task_id)
         if task is not None:
-            await sync_current_task_state_to_linear(self._active(), task)
+            await sync_external_task_state(self._active(), task)
 
 
 class SqlAlchemyReviewerCompletionUnitOfWorkFactory:

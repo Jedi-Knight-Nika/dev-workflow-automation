@@ -7,8 +7,8 @@ from app.application.ports.merge_workflow import MergeContext, MergeOutcome
 from app.application.pull_requests.merge_task import MergeConflict
 from app.db.models import IndexStatus, Integration, Repository, Task, TaskState, ValidationRecord
 from app.domain.pull_requests import ValidationEvidence
+from app.infrastructure.external_task_sync import sync_external_task_state
 from app.infrastructure.integration_access import role_allows_integration
-from app.infrastructure.linear_sync import sync_merged_task_to_linear
 from app.infrastructure.persistence.job_operations import record_event
 from app.infrastructure.security.crypto import cipher
 from app.integrations.github import GitHubClient
@@ -114,7 +114,7 @@ class SqlAlchemyGitHubMergeWorkflow:
     async def synchronize_tracker(self, task_id: uuid.UUID) -> None:
         task = await self._session.get(Task, task_id)
         if task is not None:
-            await sync_merged_task_to_linear(self._session, task)
+            await sync_external_task_state(self._session, task)
 
     async def rollback(self) -> None:
         await self._session.rollback()

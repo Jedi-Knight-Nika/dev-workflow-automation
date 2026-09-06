@@ -30,7 +30,7 @@ from app.domain.orchestration import (
     failure_resource_id,
     record_failure,
 )
-from app.infrastructure.linear_sync import sync_current_task_state_to_linear
+from app.infrastructure.external_task_sync import sync_external_task_state
 from app.infrastructure.persistence.job_operations import record_event, release_workspace_lease
 from app.infrastructure.persistence.notifications import SqlAlchemyNotificationStore
 
@@ -287,7 +287,7 @@ class SqlAlchemyFailedCompletionUnitOfWork:
         session = self._active_session()
         task = await session.get(Task, task_id)
         if task is not None:
-            await sync_current_task_state_to_linear(session, task)
+            await sync_external_task_state(session, task)
 
 
 class SqlAlchemyFailedCompletionUnitOfWorkFactory:

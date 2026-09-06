@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.application.ports.tracker_sync import TrackerSyncConflict, TrackerTaskNotFound
 from app.db.models import Task, TaskState
-from app.infrastructure.linear_sync import sync_merged_task_to_linear
+from app.infrastructure.external_task_sync import sync_external_task_state
 
 
 class SqlAlchemyLinearSyncWorkflow:
@@ -17,4 +17,4 @@ class SqlAlchemyLinearSyncWorkflow:
             raise TrackerTaskNotFound("Task not found")
         if task.state != TaskState.MERGED:
             raise TrackerSyncConflict("Only merged tasks can be synchronized")
-        return await sync_merged_task_to_linear(self._session, task)
+        return await sync_external_task_state(self._session, task)

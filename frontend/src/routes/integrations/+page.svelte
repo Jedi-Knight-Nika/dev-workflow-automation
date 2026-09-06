@@ -106,6 +106,12 @@
   let trelloToken = '';
   let trelloBoardId = '';
   let trelloListIds: string[] = [];
+  let trelloTodoListId = '';
+  let trelloInProgressListId = '';
+  let trelloInReviewListId = '';
+  let trelloBlockedListId = '';
+  let trelloReadyForTestingListId = '';
+  let trelloDoneListId = '';
   let trelloBoards: TrelloBoard[] = [];
   let trelloLists: TrelloList[] = [];
   let loadingTrello = false;
@@ -170,6 +176,12 @@
               ? {
                   board_id: trelloBoardId || null,
                   list_ids: trelloListIds,
+                  todo_list_id: trelloTodoListId || null,
+                  in_progress_list_id: trelloInProgressListId || null,
+                  in_review_list_id: trelloInReviewListId || null,
+                  blocked_list_id: trelloBlockedListId || null,
+                  ready_for_testing_list_id: trelloReadyForTestingListId || null,
+                  done_list_id: trelloDoneListId || null,
                   repository_id: repositoryId || null,
                   sync_enabled: true,
                   poll_interval_seconds: 60
@@ -237,6 +249,7 @@
     error = '';
     try {
       trelloBoards = await listTrelloBoards();
+      if (trelloBoardId) await discoverTrelloLists();
     } catch (cause) {
       error = String(cause);
     } finally {
@@ -254,6 +267,12 @@
         configuration: {
           board_id: trelloBoardId || null,
           list_ids: trelloListIds,
+          todo_list_id: trelloTodoListId || null,
+          in_progress_list_id: trelloInProgressListId || null,
+          in_review_list_id: trelloInReviewListId || null,
+          blocked_list_id: trelloBlockedListId || null,
+          ready_for_testing_list_id: trelloReadyForTestingListId || null,
+          done_list_id: trelloDoneListId || null,
           repository_id: repositoryId || null,
           sync_enabled: true,
           poll_interval_seconds: 60
@@ -278,6 +297,14 @@
     try {
       trelloLists = await listTrelloLists(trelloBoardId);
       trelloListIds = trelloListIds.filter((id) => trelloLists.some((item) => item.id === id));
+      const findList = (...names: string[]) =>
+        trelloLists.find((list) => names.includes(list.name.trim().toLowerCase()))?.id || '';
+      trelloTodoListId ||= findList('todo', 'to do', 'backlog', 'ready for ai');
+      trelloInProgressListId ||= findList('in progress', 'doing', 'working');
+      trelloInReviewListId ||= findList('in review', 'review', 'ready for review');
+      trelloBlockedListId ||= findList('blocked', 'needs attention', 'needs human');
+      trelloReadyForTestingListId ||= findList('ready for testing', 'testing', 'ready to test');
+      trelloDoneListId ||= findList('done', 'complete', 'completed');
     } catch (cause) {
       error = String(cause);
     } finally {
@@ -545,6 +572,83 @@
                               </label>
                             {/each}
                           </fieldset>
+                          <fieldset class="grid gap-3 sm:grid-cols-2">
+                            <legend class="text-muted col-span-full text-xs">
+                              Workflow destination lists
+                            </legend>
+                            <label class="text-muted text-xs">
+                              New / Todo
+                              <select
+                                class="border-line bg-panel-alt mt-1 w-full rounded-lg border p-2 text-sm"
+                                bind:value={trelloTodoListId}
+                              >
+                                <option value="">Do not move</option>
+                                {#each trelloLists as list (list.id)}<option value={list.id}
+                                    >{list.name}</option
+                                  >{/each}
+                              </select>
+                            </label>
+                            <label class="text-muted text-xs">
+                              In progress
+                              <select
+                                class="border-line bg-panel-alt mt-1 w-full rounded-lg border p-2 text-sm"
+                                bind:value={trelloInProgressListId}
+                              >
+                                <option value="">Do not move</option>
+                                {#each trelloLists as list (list.id)}<option value={list.id}
+                                    >{list.name}</option
+                                  >{/each}
+                              </select>
+                            </label>
+                            <label class="text-muted text-xs">
+                              In review
+                              <select
+                                class="border-line bg-panel-alt mt-1 w-full rounded-lg border p-2 text-sm"
+                                bind:value={trelloInReviewListId}
+                              >
+                                <option value="">Do not move</option>
+                                {#each trelloLists as list (list.id)}<option value={list.id}
+                                    >{list.name}</option
+                                  >{/each}
+                              </select>
+                            </label>
+                            <label class="text-muted text-xs">
+                              Blocked / needs attention
+                              <select
+                                class="border-line bg-panel-alt mt-1 w-full rounded-lg border p-2 text-sm"
+                                bind:value={trelloBlockedListId}
+                              >
+                                <option value="">Do not move</option>
+                                {#each trelloLists as list (list.id)}<option value={list.id}
+                                    >{list.name}</option
+                                  >{/each}
+                              </select>
+                            </label>
+                            <label class="text-muted text-xs">
+                              Ready for testing
+                              <select
+                                class="border-line bg-panel-alt mt-1 w-full rounded-lg border p-2 text-sm"
+                                bind:value={trelloReadyForTestingListId}
+                              >
+                                <option value="">Do not move</option>
+                                {#each trelloLists as list (list.id)}<option value={list.id}
+                                    >{list.name}</option
+                                  >{/each}
+                              </select>
+                            </label>
+                            <label class="text-muted text-xs">
+                              Done / cancelled
+                              <select
+                                class="border-line bg-panel-alt mt-1 w-full rounded-lg border p-2 text-sm"
+                                bind:value={trelloDoneListId}
+                              >
+                                <option value="">Do not move</option>
+                                {#each trelloLists as list (list.id)}<option value={list.id}
+                                    >{list.name}</option
+                                  >{/each}
+                              </select>
+                            </label>
+                          </fieldset>
                         {/if}
                         <label class="text-muted block text-xs" for="trello-repository"
                           >{t('integrations.repositoryForNewTasks')}</label
@@ -696,6 +800,14 @@
                         trelloListIds = Array.isArray(existing?.list_ids)
                           ? existing.list_ids.map(String)
                           : [];
+                        trelloTodoListId = String(existing?.todo_list_id || '');
+                        trelloInProgressListId = String(existing?.in_progress_list_id || '');
+                        trelloInReviewListId = String(existing?.in_review_list_id || '');
+                        trelloBlockedListId = String(existing?.blocked_list_id || '');
+                        trelloReadyForTestingListId = String(
+                          existing?.ready_for_testing_list_id || ''
+                        );
+                        trelloDoneListId = String(existing?.done_list_id || '');
                         trelloApiKey = '';
                         trelloToken = '';
                         registryUrl = String(existing?.registry_url || existing?.index_url || '');

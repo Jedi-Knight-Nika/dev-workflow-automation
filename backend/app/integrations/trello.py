@@ -76,6 +76,20 @@ class TrelloClient:
             if self._client is None:
                 await client.aclose()
 
+    async def _put(self, path: str, **params: str) -> object:
+        client = self._client or httpx.AsyncClient(timeout=30)
+        try:
+            response = await client.put(
+                f"https://api.trello.com/1{path}",
+                headers={"Authorization": self._authorization, "Accept": "application/json"},
+                params=params,
+            )
+            response.raise_for_status()
+            return response.json()
+        finally:
+            if self._client is None:
+                await client.aclose()
+
     async def list_boards(self) -> list[TrelloBoard]:
         payload = await self._get("/members/me/boards", fields="id,name,url", filter="open")
         if not isinstance(payload, list):
@@ -132,6 +146,11 @@ class TrelloClient:
                 )
             )
         return cards
+
+    async def update_card_list(self, card_id: str, list_id: str) -> None:
+        payload = await self._put(f"/cards/{card_id}", idList=list_id)
+        if not isinstance(payload, dict) or str(payload.get("idList") or "") != list_id:
+            raise RuntimeError("Trello did not confirm the card list update")
 
 
 def trello_datetime(value: str | None) -> datetime | None:

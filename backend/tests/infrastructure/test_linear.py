@@ -13,7 +13,7 @@ from app.domain.webhooks.linear import (
     linear_comment,
     linear_priority,
 )
-from app.infrastructure.linear_sync import LINEAR_STATE_CONFIGURATION
+from app.infrastructure.external_task_sync import external_status_configuration_key
 from app.integrations.linear import LinearClient, verify_linear_signature
 
 
@@ -55,12 +55,24 @@ def test_linear_comment_is_normalized_for_intake() -> None:
 
 
 def test_linear_state_mapping_covers_operational_lifecycle() -> None:
-    assert LINEAR_STATE_CONFIGURATION[TaskState.NEW][0] == "todo_state_id"
-    assert LINEAR_STATE_CONFIGURATION[TaskState.IMPLEMENTING][0] == "in_progress_state_id"
-    assert LINEAR_STATE_CONFIGURATION[TaskState.WAITING_GITHUB][0] == "in_review_state_id"
-    assert LINEAR_STATE_CONFIGURATION[TaskState.NEEDS_HUMAN][0] == "blocked_state_id"
-    assert LINEAR_STATE_CONFIGURATION[TaskState.MERGED][0] == "ready_for_testing_state_id"
-    assert LINEAR_STATE_CONFIGURATION[TaskState.CANCELLED][0] == "done_state_id"
+    assert external_status_configuration_key("linear", TaskState.NEW) == "todo_state_id"
+    assert (
+        external_status_configuration_key("linear", TaskState.IMPLEMENTING)
+        == "in_progress_state_id"
+    )
+    assert (
+        external_status_configuration_key("linear", TaskState.WAITING_GITHUB)
+        == "in_review_state_id"
+    )
+    assert external_status_configuration_key("linear", TaskState.NEEDS_HUMAN) == "blocked_state_id"
+    assert (
+        external_status_configuration_key("linear", TaskState.MERGED)
+        == "ready_for_testing_state_id"
+    )
+    assert external_status_configuration_key("linear", TaskState.CANCELLED) == "done_state_id"
+    assert (
+        external_status_configuration_key("trello", TaskState.IMPLEMENTING) == "in_progress_list_id"
+    )
 
 
 @pytest.mark.asyncio

@@ -4,8 +4,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Integration, Repository, Task, TaskRepositoryScope, TaskState
+from app.infrastructure.external_task_sync import sync_external_task_state
 from app.infrastructure.git.workspaces import github_token, run_git
-from app.infrastructure.linear_sync import sync_published_task_to_linear
 from app.infrastructure.persistence.job_operations import record_event
 from app.infrastructure.security.crypto import cipher
 from app.integrations.github import GitHubClient
@@ -95,5 +95,5 @@ async def publish_pull_request(
         },
     )
     await session.commit()
-    await sync_published_task_to_linear(session, task)
+    await sync_external_task_state(session, task)
     return pull_request

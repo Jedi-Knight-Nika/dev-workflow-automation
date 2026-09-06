@@ -10,7 +10,7 @@ from app.application.ports.tester_completion import (
     TesterCompletionContext,
 )
 from app.db.models import Job, JobRole, JobState, Task, TaskState, ValidationRecord
-from app.infrastructure.linear_sync import sync_current_task_state_to_linear
+from app.infrastructure.external_task_sync import sync_external_task_state
 from app.infrastructure.persistence.job_operations import enqueue_job, record_event
 from app.infrastructure.persistence.workflow_routing import route_completed_job
 
@@ -147,7 +147,7 @@ class SqlAlchemyTesterCompletionUnitOfWork:
     async def synchronize_tracker(self, task_id: uuid.UUID) -> None:
         task = await self._active().get(Task, task_id)
         if task is not None:
-            await sync_current_task_state_to_linear(self._active(), task)
+            await sync_external_task_state(self._active(), task)
 
 
 class SqlAlchemyTesterCompletionUnitOfWorkFactory:

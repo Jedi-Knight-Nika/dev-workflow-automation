@@ -14,9 +14,9 @@ from app.db.models import (
     TaskState,
     ValidationRecord,
 )
+from app.infrastructure.external_task_sync import sync_external_task_state
 from app.infrastructure.git.workspaces import run_git
 from app.infrastructure.github_events import evaluate_current_revision, focused_validation_payload
-from app.infrastructure.linear_sync import sync_merged_task_to_linear
 from app.infrastructure.persistence.job_operations import record_event
 from app.infrastructure.security.crypto import cipher
 from app.integrations.github import GitHubClient
@@ -106,7 +106,7 @@ async def reconcile_startup(session: AsyncSession) -> int:
                 source="github",
             )
             await session.commit()
-            await sync_merged_task_to_linear(session, task)
+            await sync_external_task_state(session, task)
         elif pull_request.state.lower() == "closed":
             task.state = TaskState.NEEDS_HUMAN
             await record_event(
