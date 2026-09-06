@@ -5,9 +5,7 @@ import io
 import zipfile
 from typing import Any
 
-import httpx
-
-from app.integrations.http import request_with_retry
+from app.integrations.http import integration_http_pool
 from app.schemas import DiscoveredRepository, MergeResult, PullRequestRead
 
 
@@ -22,30 +20,31 @@ class GitHubClient:
 
     async def list_repositories(self) -> list[DiscoveredRepository]:
         repositories: list[dict[str, Any]] = []
-        async with httpx.AsyncClient(timeout=30, headers=self.headers) as client:
-            page = 1
-            while True:
-                params: dict[str, Any] = {"per_page": 100, "page": page}
-                if not self.installation:
-                    params.update(
-                        {
-                            "sort": "full_name",
-                            "affiliation": "owner,collaborator,organization_member",
-                        }
-                    )
-                endpoint = (
-                    "https://api.github.com/installation/repositories"
-                    if self.installation
-                    else "https://api.github.com/user/repos"
+        page = 1
+        while True:
+            params: dict[str, Any] = {"per_page": 100, "page": page}
+            if not self.installation:
+                params.update(
+                    {
+                        "sort": "full_name",
+                        "affiliation": "owner,collaborator,organization_member",
+                    }
                 )
-                response = await request_with_retry(client, "GET", endpoint, params=params)
-                response.raise_for_status()
-                body: Any = response.json()
-                batch: list[dict[str, Any]] = body["repositories"] if self.installation else body
-                repositories.extend(batch)
-                if len(batch) < 100:
-                    break
-                page += 1
+            endpoint = (
+                "https://api.github.com/installation/repositories"
+                if self.installation
+                else "https://api.github.com/user/repos"
+            )
+            response = await integration_http_pool.request(
+                "GET", endpoint, headers=self.headers, params=params
+            )
+            response.raise_for_status()
+            body: Any = response.json()
+            batch: list[dict[str, Any]] = body["repositories"] if self.installation else body
+            repositories.extend(batch)
+            if len(batch) < 100:
+                break
+            page += 1
         return [
             DiscoveredRepository(
                 external_repo_id=str(item["id"]),
@@ -62,15 +61,14 @@ class GitHubClient:
     async def find_open_pull_request(
         self, owner: str, repository: str, head_branch: str
     ) -> PullRequestRead | None:
-        async with httpx.AsyncClient(timeout=30, headers=self.headers) as client:
-            response = await request_with_retry(
-                client,
-                "GET",
-                f"https://api.github.com/repos/{owner}/{repository}/pulls",
-                params={"state": "open", "head": f"{owner}:{head_branch}", "per_page": 1},
-            )
-            response.raise_for_status()
-            items: list[dict[str, Any]] = response.json()
+        response = await integration_http_pool.request(
+            "GET",
+            f"https://api.github.com/repos/{owner}/{repository}/pulls",
+            headers=self.headers,
+            params={"state": "open", "head": f"{owner}:{head_branch}", "per_page": 1},
+        )
+        response.raise_for_status()
+        items: list[dict[str, Any]] = response.json()
         if not items:
             return None
         data = items[0]
@@ -86,13 +84,15 @@ class GitHubClient:
     async def create_pull_request(
         self, owner: str, repository: str, head: str, base: str, title: str, body: str
     ) -> PullRequestRead:
-        async with httpx.AsyncClient(timeout=30, headers=self.headers) as client:
-            response = await client.post(
-                f"https://api.github.com/repos/{owner}/{repository}/pulls",
-                json={"title": title, "body": body, "head": head, "base": base},
-            )
-            response.raise_for_status()
-            data: dict[str, Any] = response.json()
+        response = await integration_http_pool.request(
+            "POST",
+            f"https://api.github.com/repos/{owner}/{repository}/pulls",
+            retry=False,
+            headers=self.headers,
+            json={"title": title, "body": body, "head": head, "base": base},
+        )
+        response.raise_for_status()
+        data: dict[str, Any] = response.json()
         return PullRequestRead(
             number=data["number"],
             url=data["html_url"],
@@ -103,12 +103,13 @@ class GitHubClient:
         )
 
     async def get_pull_request(self, owner: str, repository: str, number: int) -> PullRequestRead:
-        async with httpx.AsyncClient(timeout=30, headers=self.headers) as client:
-            response = await request_with_retry(
-                client, "GET", f"https://api.github.com/repos/{owner}/{repository}/pulls/{number}"
-            )
-            response.raise_for_status()
-            data: dict[str, Any] = response.json()
+        response = await integration_http_pool.request(
+            "GET",
+            f"https://api.github.com/repos/{owner}/{repository}/pulls/{number}",
+            headers=self.headers,
+        )
+        response.raise_for_status()
+        data: dict[str, Any] = response.json()
         return PullRequestRead(
             number=data["number"],
             url=data["html_url"],
@@ -121,13 +122,15 @@ class GitHubClient:
     async def merge_pull_request(
         self, owner: str, repository: str, number: int, expected_sha: str
     ) -> MergeResult:
-        async with httpx.AsyncClient(timeout=30, headers=self.headers) as client:
-            response = await client.put(
-                f"https://api.github.com/repos/{owner}/{repository}/pulls/{number}/merge",
-                json={"sha": expected_sha, "merge_method": "squash"},
-            )
-            response.raise_for_status()
-            data: dict[str, Any] = response.json()
+        response = await integration_http_pool.request(
+            "PUT",
+            f"https://api.github.com/repos/{owner}/{repository}/pulls/{number}/merge",
+            retry=False,
+            headers=self.headers,
+            json={"sha": expected_sha, "merge_method": "squash"},
+        )
+        response.raise_for_status()
+        data: dict[str, Any] = response.json()
         return MergeResult(
             merged=bool(data.get("merged")), sha=data.get("sha"), message=data.get("message", "")
         )
@@ -135,34 +138,30 @@ class GitHubClient:
     async def get_check_run_diagnostics(
         self, owner: str, repository: str, check_run_id: int
     ) -> dict[str, Any]:
-        async with httpx.AsyncClient(
-            timeout=30, headers=self.headers, follow_redirects=True
-        ) as client:
-            check_response = await request_with_retry(
-                client,
+        base = f"https://api.github.com/repos/{owner}/{repository}"
+        check_response = await integration_http_pool.request(
+            "GET", f"{base}/check-runs/{check_run_id}", headers=self.headers
+        )
+        check_response.raise_for_status()
+        check: dict[str, Any] = check_response.json()
+        annotations_response = await integration_http_pool.request(
+            "GET",
+            f"{base}/check-runs/{check_run_id}/annotations",
+            headers=self.headers,
+            params={"per_page": 100},
+        )
+        annotations_response.raise_for_status()
+        annotations: list[dict[str, Any]] = annotations_response.json()
+        actions_log = ""
+        external_id = str(check.get("external_id") or "")
+        if (check.get("app") or {}).get("slug") == "github-actions" and external_id.isdigit():
+            log_response = await integration_http_pool.request(
                 "GET",
-                f"https://api.github.com/repos/{owner}/{repository}/check-runs/{check_run_id}",
+                f"{base}/actions/jobs/{external_id}/logs",
+                headers=self.headers,
             )
-            check_response.raise_for_status()
-            check: dict[str, Any] = check_response.json()
-            annotations_response = await request_with_retry(
-                client,
-                "GET",
-                f"https://api.github.com/repos/{owner}/{repository}/check-runs/{check_run_id}/annotations",
-                params={"per_page": 100},
-            )
-            annotations_response.raise_for_status()
-            annotations: list[dict[str, Any]] = annotations_response.json()
-            actions_log = ""
-            external_id = str(check.get("external_id") or "")
-            if (check.get("app") or {}).get("slug") == "github-actions" and external_id.isdigit():
-                log_response = await request_with_retry(
-                    client,
-                    "GET",
-                    f"https://api.github.com/repos/{owner}/{repository}/actions/jobs/{external_id}/logs",
-                )
-                if log_response.status_code < 400:
-                    actions_log = decode_actions_log(log_response.content)
+            if log_response.status_code < 400:
+                actions_log = decode_actions_log(log_response.content)
         return {"check_run": check, "annotations": annotations, "actions_log": actions_log}
 
     async def list_revision_evidence(
@@ -170,33 +169,32 @@ class GitHubClient:
     ) -> list[dict[str, Any]]:
         """Fetch authoritative current-SHA checks and PR review evidence after downtime."""
         base = f"https://api.github.com/repos/{owner}/{repository}"
-        async with httpx.AsyncClient(timeout=30, headers=self.headers) as client:
-            check_runs, statuses, reviews, comments = await asyncio.gather(
-                request_with_retry(
-                    client,
-                    "GET",
-                    f"{base}/commits/{revision}/check-runs",
-                    params={"per_page": 100},
-                ),
-                request_with_retry(
-                    client,
-                    "GET",
-                    f"{base}/commits/{revision}/status",
-                    params={"per_page": 100},
-                ),
-                request_with_retry(
-                    client,
-                    "GET",
-                    f"{base}/pulls/{number}/reviews",
-                    params={"per_page": 100},
-                ),
-                request_with_retry(
-                    client,
-                    "GET",
-                    f"{base}/pulls/{number}/comments",
-                    params={"per_page": 100},
-                ),
-            )
+        check_runs, statuses, reviews, comments = await asyncio.gather(
+            integration_http_pool.request(
+                "GET",
+                f"{base}/commits/{revision}/check-runs",
+                headers=self.headers,
+                params={"per_page": 100},
+            ),
+            integration_http_pool.request(
+                "GET",
+                f"{base}/commits/{revision}/status",
+                headers=self.headers,
+                params={"per_page": 100},
+            ),
+            integration_http_pool.request(
+                "GET",
+                f"{base}/pulls/{number}/reviews",
+                headers=self.headers,
+                params={"per_page": 100},
+            ),
+            integration_http_pool.request(
+                "GET",
+                f"{base}/pulls/{number}/comments",
+                headers=self.headers,
+                params={"per_page": 100},
+            ),
+        )
         for response in (check_runs, statuses, reviews, comments):
             response.raise_for_status()
         evidence: list[dict[str, Any]] = []

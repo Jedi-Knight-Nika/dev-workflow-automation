@@ -1,7 +1,29 @@
 import httpx
 import pytest
 
-from app.integrations.http import request_with_retry
+from app.integrations.http import IntegrationHttpPool, request_with_retry
+
+
+@pytest.mark.asyncio
+async def test_pool_reuses_client_and_closes_it(monkeypatch: pytest.MonkeyPatch) -> None:
+    created = 0
+    original = httpx.AsyncClient
+
+    def client_factory(*args: object, **kwargs: object) -> httpx.AsyncClient:
+        nonlocal created
+        created += 1
+        return original(transport=httpx.MockTransport(lambda request: httpx.Response(200)))
+
+    monkeypatch.setattr(httpx, "AsyncClient", client_factory)
+    pool = IntegrationHttpPool()
+
+    first = await pool.client()
+    second = await pool.client()
+
+    assert first is second
+    assert created == 1
+    await pool.aclose()
+    assert first.is_closed
 
 
 @pytest.mark.asyncio

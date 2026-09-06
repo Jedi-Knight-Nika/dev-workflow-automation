@@ -3,9 +3,7 @@ import hmac
 import time
 from typing import Any, TypedDict
 
-import httpx
-
-from app.integrations.http import request_with_retry
+from app.integrations.http import integration_http_pool
 
 
 class LinearWorkflowState(TypedDict):
@@ -56,15 +54,14 @@ class LinearClient:
         self.headers = {"authorization": api_key, "content-type": "application/json"}
 
     async def _graphql(self, query: str, variables: dict[str, Any] | None = None) -> dict[str, Any]:
-        async with httpx.AsyncClient(timeout=30, headers=self.headers) as client:
-            response = await request_with_retry(
-                client,
-                "POST",
-                "https://api.linear.app/graphql",
-                json={"query": query, "variables": variables or {}},
-            )
-            response.raise_for_status()
-            body: dict[str, Any] = response.json()
+        response = await integration_http_pool.request(
+            "POST",
+            "https://api.linear.app/graphql",
+            headers=self.headers,
+            json={"query": query, "variables": variables or {}},
+        )
+        response.raise_for_status()
+        body: dict[str, Any] = response.json()
         if body.get("errors"):
             message = str(body["errors"][0].get("message", "Unknown GraphQL error"))
             raise RuntimeError(f"Linear GraphQL error: {message}")

@@ -32,6 +32,7 @@ from app.bootstrap.scheduler import create_scheduler
 from app.config import get_settings
 from app.db.session import SessionLocal
 from app.infrastructure.telegram import TelegramService
+from app.integrations.http import integration_http_pool
 from app.logging import configure_logging
 
 settings = get_settings()
@@ -61,6 +62,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await asyncio.gather(notification_task, return_exceptions=True)
     if settings.scheduler_enabled:
         await scheduler.stop()
+    await integration_http_pool.aclose()
 
 
 app = FastAPI(title=settings.app_name, version="0.1.0", lifespan=lifespan)

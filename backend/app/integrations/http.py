@@ -1,10 +1,56 @@
 import asyncio
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import Any
 
 import httpx
 
 TRANSIENT_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
+
+
+class IntegrationHttpPool:
+    """Own one connection-pooled client for external integration adapters."""
+
+    def __init__(self) -> None:
+        self._client: httpx.AsyncClient | None = None
+        self._factory: Callable[..., httpx.AsyncClient] | None = None
+        self._lock = asyncio.Lock()
+
+    async def client(self) -> httpx.AsyncClient:
+        factory = httpx.AsyncClient
+        async with self._lock:
+            if self._client is None or self._client.is_closed or self._factory is not factory:
+                if self._client is not None and not self._client.is_closed:
+                    await self._client.aclose()
+                self._client = factory(timeout=30, follow_redirects=True)
+                self._factory = factory
+            return self._client
+
+    async def request(
+        self,
+        method: str,
+        url: str,
+        *,
+        retry: bool = True,
+        headers: Mapping[str, str] | None = None,
+        params: Mapping[str, Any] | None = None,
+        json: Any = None,
+    ) -> httpx.Response:
+        client = await self.client()
+        if retry:
+            return await request_with_retry(
+                client, method, url, headers=headers, params=params, json=json
+            )
+        return await client.request(method, url, headers=headers, params=params, json=json)
+
+    async def aclose(self) -> None:
+        async with self._lock:
+            if self._client is not None and not self._client.is_closed:
+                await self._client.aclose()
+            self._client = None
+            self._factory = None
+
+
+integration_http_pool = IntegrationHttpPool()
 
 
 def _retry_delay(response: httpx.Response | None, attempt: int) -> float:
