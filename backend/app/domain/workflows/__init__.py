@@ -6,7 +6,12 @@ from app.domain.workflows.graph import (
     WorkflowNodeData,
     validate_workflow_graph,
 )
-from app.domain.workflows.routing import RouteDecision, WorkflowRouteNotFound, resolve_route
+from app.domain.workflows.routing import (
+    RouteDecision,
+    WorkflowRouteNotFound,
+    resolve_route,
+    resolve_route_edge,
+)
 
 __all__ = [
     "AGENT_ROLES",
@@ -17,5 +22,6 @@ __all__ = [
     "WorkflowNodeData",
     "WorkflowRouteNotFound",
     "resolve_route",
+    "resolve_route_edge",
     "validate_workflow_graph",
 ]

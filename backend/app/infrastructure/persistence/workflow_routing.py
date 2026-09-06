@@ -16,6 +16,7 @@ from app.db.models import (
     WorkflowNode,
     WorkflowTransition,
 )
+from app.domain.workflows import WorkflowEdgeData, WorkflowRouteNotFound, resolve_route_edge
 from app.infrastructure.persistence.job_operations import enqueue_job, record_event
 
 EXECUTABLE_AGENT_ROLES = frozenset(
@@ -111,23 +112,32 @@ async def route_completed_job(
     definition = await session.get(WorkflowDefinition, task.workflow_id)
     if definition is None or definition.version != job.team_workflow_version:
         return None
-    edge = await session.scalar(
-        select(WorkflowEdge).where(
-            WorkflowEdge.workflow_id == definition.id,
-            WorkflowEdge.source_node_id == job.workflow_node_id,
-            WorkflowEdge.outcome == outcome,
-        )
-    )
-    if edge is None:
-        edge = await session.scalar(
-            select(WorkflowEdge).where(
-                WorkflowEdge.workflow_id == definition.id,
-                WorkflowEdge.source_node_id == job.workflow_node_id,
-                WorkflowEdge.outcome == "always",
+    candidate_edges = tuple(
+        (
+            await session.scalars(
+                select(WorkflowEdge).where(
+                    WorkflowEdge.workflow_id == definition.id,
+                    WorkflowEdge.source_node_id == job.workflow_node_id,
+                    WorkflowEdge.outcome.in_([outcome, "always"]),
+                )
             )
+        ).all()
+    )
+    edge_records = {str(edge.id): edge for edge in candidate_edges}
+    edge_data = tuple(
+        WorkflowEdgeData(
+            id=str(edge.id),
+            source_node_id=str(edge.source_node_id),
+            target_node_id=str(edge.target_node_id),
+            outcome=edge.outcome,
         )
-    if edge is None:
+        for edge in candidate_edges
+    )
+    try:
+        selected = resolve_route_edge(edge_data, str(job.workflow_node_id), outcome)
+    except WorkflowRouteNotFound:
         return None
+    edge = edge_records[selected.id]
     target = await session.get(WorkflowNode, edge.target_node_id)
     if target is None or not target.enabled:
         return None

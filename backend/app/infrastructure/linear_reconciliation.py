@@ -19,33 +19,23 @@ class SqlAlchemyLinearTaskReconciliation:
     async def reconcile_due(self) -> ReconciliationResult:
         async with self._session_factory() as session:
             now = datetime.now(UTC)
-            candidates = list(
-                (
-                    await session.scalars(
-                        select(WorkflowNode)
-                        .where(
-                            WorkflowNode.role == "INTAKE",
-                            WorkflowNode.enabled.is_(True),
-                            WorkflowNode.integration_mode.in_(["poll", "hybrid"]),
-                            WorkflowNode.filter_assignee_id != "",
-                        )
-                        .order_by(WorkflowNode.integration_last_synced_at.asc().nullsfirst())
-                        .with_for_update(skip_locked=True)
-                    )
-                ).all()
+            node = await session.scalar(
+                select(WorkflowNode)
+                .where(
+                    WorkflowNode.role == "INTAKE",
+                    WorkflowNode.enabled.is_(True),
+                    WorkflowNode.integration_mode.in_(["poll", "hybrid"]),
+                    WorkflowNode.filter_assignee_id != "",
+                )
+                .order_by(WorkflowNode.integration_last_synced_at.asc().nullsfirst())
+                .limit(1)
+                .with_for_update(skip_locked=True)
             )
-            node = next(
-                (
-                    candidate
-                    for candidate in candidates
-                    if candidate.integration_last_synced_at is None
-                    or candidate.integration_last_synced_at
-                    + timedelta(seconds=candidate.poll_interval_seconds)
-                    <= now
-                ),
-                None,
-            )
-            if node is None:
+            if node is None or (
+                node.integration_last_synced_at is not None
+                and node.integration_last_synced_at + timedelta(seconds=node.poll_interval_seconds)
+                > now
+            ):
                 return ReconciliationResult(processed=False)
             node.integration_sync_status = "RUNNING"
             node.integration_sync_error = None

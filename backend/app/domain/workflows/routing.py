@@ -14,6 +14,21 @@ class WorkflowRouteNotFound(ValueError):
     pass
 
 
+def resolve_route_edge(
+    edges: tuple[WorkflowEdgeData, ...], source_node_id: str, result_type: str
+) -> WorkflowEdgeData:
+    """Resolve the unique exact edge, or the unique explicit fallback edge."""
+    candidates = [edge for edge in edges if edge.source_node_id == source_node_id]
+    exact = [edge for edge in candidates if edge.outcome == result_type]
+    fallback = [edge for edge in candidates if edge.outcome == "always"]
+    matches = exact or fallback
+    if not matches:
+        raise WorkflowRouteNotFound(f"No route for result {result_type}")
+    if len(matches) > 1:
+        raise WorkflowRouteNotFound(f"Workflow has multiple routes for result {result_type}")
+    return matches[0]
+
+
 def resolve_route(graph: WorkflowGraphData, source_node_id: str, result_type: str) -> RouteDecision:
     """Resolve one deterministic outcome route, with `always` as the explicit fallback."""
     nodes = {node.id: node for node in graph.nodes}
@@ -22,19 +37,10 @@ def resolve_route(graph: WorkflowGraphData, source_node_id: str, result_type: st
         raise WorkflowRouteNotFound("Current workflow node no longer exists")
     if not source.enabled:
         raise WorkflowRouteNotFound("Current workflow node is disabled")
-    candidates = [edge for edge in graph.edges if edge.source_node_id == source_node_id]
-    exact = [edge for edge in candidates if edge.outcome == result_type]
-    fallback = [edge for edge in candidates if edge.outcome == "always"]
-    matches = exact or fallback
-    if not matches:
-        raise WorkflowRouteNotFound(
-            f"No route from {source.label} for result {result_type}; human attention is required"
-        )
-    if len(matches) > 1:
-        raise WorkflowRouteNotFound(
-            f"Workflow has multiple routes from {source.label} for result {result_type}"
-        )
-    edge = matches[0]
+    try:
+        edge = resolve_route_edge(graph.edges, source_node_id, result_type)
+    except WorkflowRouteNotFound as exc:
+        raise WorkflowRouteNotFound(f"{exc} from {source.label}") from exc
     target = nodes.get(edge.target_node_id)
     if target is None or not target.enabled:
         raise WorkflowRouteNotFound("Configured workflow destination is unavailable")

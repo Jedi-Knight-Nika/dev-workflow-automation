@@ -134,12 +134,7 @@ async def _pin_job_to_workflow(session: AsyncSession, task: Task, job: Job) -> N
 
 
 async def claim_next_job(session: AsyncSession, worker_id: str, lease_seconds: int) -> Job | None:
-    # Serialize the short count-and-claim transaction across scheduler processes. Locking only
-    # the candidate Job is insufficient because two jobs for one Team can independently pass
-    # the concurrency-count predicate. The transaction-scoped lock releases on commit/rollback.
     bind = session.get_bind()
-    if bind.dialect.name == "postgresql":
-        await session.execute(text("SELECT pg_advisory_xact_lock(741963205)"))
     active_job = aliased(Job)
     active_task = aliased(Task)
     active_team_tasks = (
@@ -189,6 +184,34 @@ async def claim_next_job(session: AsyncSession, worker_id: str, lease_seconds: i
     job = (await session.execute(stmt)).scalar_one_or_none()
     if job is None:
         return None
+    task = await session.get(Task, job.task_id)
+    if task is None:
+        await session.rollback()
+        return None
+    if task.team_id is not None and bind.dialect.name == "postgresql":
+        # Serialize only claims competing for this Team. The Job row lock alone cannot protect
+        # a team-wide concurrency count, while one global advisory key unnecessarily serializes
+        # unrelated Teams.
+        await session.execute(
+            text("SELECT pg_advisory_xact_lock(741963205, hashtext(:team_id))"),
+            {"team_id": str(task.team_id)},
+        )
+        team = await session.get(Team, task.team_id)
+        if team is None or not team.enabled or team.archived_at is not None:
+            await session.rollback()
+            return None
+        active_count = await session.scalar(
+            select(func.count(func.distinct(Job.task_id)))
+            .join(Task, Task.id == Job.task_id)
+            .where(
+                Task.team_id == task.team_id,
+                Job.state.in_([JobState.CLAIMED, JobState.RUNNING]),
+                Job.task_id != job.task_id,
+            )
+        )
+        if (active_count or 0) >= team.max_concurrent_tasks:
+            await session.rollback()
+            return None
     now = datetime.now(UTC)
     job.state = JobState.CLAIMED
     job.worker_id = worker_id
