@@ -2,6 +2,7 @@
   import { page } from '$app/state';
   import { resolve } from '$app/paths';
   import { onMount } from 'svelte';
+  import { SvelteSet } from 'svelte/reactivity';
   import { API_URL } from '$lib/api';
   import PageHeader from '$lib/components/PageHeader.svelte';
   import Button from '$lib/components/Button.svelte';
@@ -30,6 +31,7 @@
   import { listRepositories } from '$lib/services/repositories';
   import { listTeams } from '$lib/services/teams';
   import { t } from '$lib/i18n/index.svelte';
+  import { providerModelOptions } from '$lib/ai-model-catalog';
   import type {
     AgentConfig,
     AgentKnowledge,
@@ -66,6 +68,7 @@
   let teamId: string | undefined = currentTeamId || undefined;
   let workflowDirty = false;
   let pendingTeamId: string | null = null;
+  const manualModelRoles = new SvelteSet<string>();
   const number = new Intl.NumberFormat();
   const date = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' });
   function configuredNumber(agent: AgentConfig, key: string): number | '' {
@@ -81,6 +84,30 @@
   }
   function setConfiguredText(agent: AgentConfig, key: string, value: string) {
     agent.configuration[key] = value;
+  }
+  function availableModels(agent: AgentConfig) {
+    return providerModelOptions(agent.provider, catalogs[agent.provider]?.models || []);
+  }
+  function usesManualModel(agent: AgentConfig) {
+    return (
+      manualModelRoles.has(agent.role) ||
+      (!!agent.model && !availableModels(agent).some((model) => model.id === agent.model))
+    );
+  }
+  function changeProvider(agent: AgentConfig, event: Event) {
+    agent.provider = (event.currentTarget as HTMLSelectElement).value;
+    agent.model = '';
+    manualModelRoles.delete(agent.role);
+  }
+  function changeModel(agent: AgentConfig, event: Event) {
+    const value = (event.currentTarget as HTMLSelectElement).value;
+    if (value === '__manual__') {
+      agent.model = '';
+      manualModelRoles.add(agent.role);
+    } else {
+      agent.model = value;
+      manualModelRoles.delete(agent.role);
+    }
   }
   function repositoryKnowledgeEnabled(agent: AgentConfig) {
     return agent.configuration.use_repository_knowledge !== false;
@@ -449,7 +476,10 @@
               </div>
               <div class="grid gap-4 md:grid-cols-[0.7fr_1.3fr]">
                 <label class="field-label"
-                  >{t('agents.provider')}<select class="field" bind:value={agent.provider}
+                  >{t('agents.provider')}<select
+                    class="field"
+                    value={agent.provider}
+                    onchange={(event) => changeProvider(agent, event)}
                     ><option value="openai">OpenAI</option><option value="anthropic"
                       >Anthropic</option
                     ><option value="google">Google</option></select
@@ -457,23 +487,29 @@
                 >
                 <label class="field-label" for={`model-${agent.role}`}
                   >{t('agents.model')}
-                  <div class="flex gap-2">
-                    {#if catalogs[agent.provider]?.models.length}
+                  <div class="flex items-start gap-2">
+                    <div class="min-w-0 flex-1">
                       <select
                         id={`model-${agent.role}`}
-                        class="field flex-1"
-                        bind:value={agent.model}
-                        ><option value="">{t('workflow.selectModel')}</option
-                        >{#each catalogs[agent.provider].models as model (model.id)}<option
-                            value={model.id}>{model.display_name} · {model.id}</option
-                          >{/each}</select
+                        class="field w-full"
+                        value={usesManualModel(agent) ? '__manual__' : agent.model}
+                        onchange={(event) => changeModel(agent, event)}
                       >
-                    {:else}<input
-                        id={`model-${agent.role}`}
-                        class="field flex-1"
-                        bind:value={agent.model}
-                        placeholder={t('workflow.enterModelId')}
-                      />{/if}
+                        <option value="">{t('workflow.selectModel')}</option>
+                        {#each availableModels(agent) as model (model.id)}
+                          <option value={model.id}>{model.display_name} · {model.id}</option>
+                        {/each}
+                        <option value="__manual__">{t('workflow.enterModelIdManually')}</option>
+                      </select>
+                      {#if usesManualModel(agent)}
+                        <input
+                          class="field mt-2 w-full"
+                          bind:value={agent.model}
+                          placeholder={t('workflow.enterModelId')}
+                          aria-label={t('workflow.enterModelId')}
+                        />
+                      {/if}
+                    </div>
                     <Button
                       disabled={loadingProvider === agent.provider}
                       onclick={() => discoverModels(agent.provider)}

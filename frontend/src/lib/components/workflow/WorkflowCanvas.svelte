@@ -23,6 +23,7 @@
   import { listLinearMembers, listLinearWorkflowStates } from '$lib/services/integrations';
   import { t } from '$lib/i18n/index.svelte';
   import { getTheme } from '$lib/theme.svelte';
+  import { providerModelOptions } from '$lib/ai-model-catalog';
 
   let {
     workflow,
@@ -354,6 +355,21 @@
     }
   }
 
+  function availableNodeModels(node: CanvasNode) {
+    return providerModelOptions(
+      node.data.provider,
+      modelCatalogs[node.data.provider]?.models || []
+    );
+  }
+
+  function usesManualNodeModel(node: CanvasNode) {
+    return (
+      manualModelNodes.has(node.id) ||
+      (!!node.data.model &&
+        !availableNodeModels(node).some((model) => model.id === node.data.model))
+    );
+  }
+
   async function loadLinearFilters() {
     loadingLinearFilters = true;
     try {
@@ -427,6 +443,7 @@
       updateNodeModel(nodeId, 'model', '');
       return;
     }
+    manualModelNodes.delete(nodeId);
     updateNodeModel(nodeId, 'model', value);
   }
 
@@ -866,7 +883,7 @@
             </div>
             <div>
               <span>{t('workflow.modelLabel')}</span><b
-                >{detailsAgent?.model || t('workflow.notConfigured')}</b
+                >{detailsNode.data.model || t('workflow.notConfigured')}</b
               >
             </div>
           </div>
@@ -893,18 +910,17 @@
                   >Anthropic / Claude</option
                 ><option value="google">Google / Gemini</option>
               </select>
-              {#if modelCatalogs[detailsNode.data.provider]?.models.length && !manualModelNodes.has(detailsNode.id)}
-                <select
-                  value={detailsNode.data.model}
-                  onchange={(event) => chooseModel(detailsNode.id, event)}
-                >
-                  <option value="">{t('workflow.selectModel')}</option>
-                  {#each modelCatalogs[detailsNode.data.provider].models as model (model.id)}<option
-                      value={model.id}>{model.display_name} · {model.id}</option
-                    >{/each}
-                  <option value="__manual__">{t('workflow.enterModelIdManually')}</option>
-                </select>
-              {:else}
+              <select
+                value={usesManualNodeModel(detailsNode) ? '__manual__' : detailsNode.data.model}
+                onchange={(event) => chooseModel(detailsNode.id, event)}
+              >
+                <option value="">{t('workflow.selectModel')}</option>
+                {#each availableNodeModels(detailsNode) as model (model.id)}
+                  <option value={model.id}>{model.display_name} · {model.id}</option>
+                {/each}
+                <option value="__manual__">{t('workflow.enterModelIdManually')}</option>
+              </select>
+              {#if usesManualNodeModel(detailsNode)}
                 <input
                   value={detailsNode.data.model}
                   oninput={(event) =>
