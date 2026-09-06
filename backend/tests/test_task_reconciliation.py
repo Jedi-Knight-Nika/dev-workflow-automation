@@ -7,7 +7,7 @@ class StubReconciliationGateway:
 
     async def reconcile_due(self) -> ReconciliationResult:
         self.called = True
-        return ReconciliationResult(True, imported=2, updated=3)
+        return ReconciliationResult(processed=True, imported=2, updated=3)
 
 
 async def test_reconcile_external_tasks_delegates_to_gateway() -> None:
@@ -16,4 +16,4 @@ async def test_reconcile_external_tasks_delegates_to_gateway() -> None:
     result = await ReconcileExternalTasks(gateway).execute()
 
     assert gateway.called
-    assert result == ReconciliationResult(True, imported=2, updated=3)
+    assert result == ReconciliationResult(processed=True, imported=2, updated=3)

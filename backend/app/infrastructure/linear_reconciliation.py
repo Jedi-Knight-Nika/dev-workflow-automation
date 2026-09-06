@@ -46,7 +46,7 @@ class SqlAlchemyLinearTaskReconciliation:
                 None,
             )
             if node is None:
-                return ReconciliationResult(False)
+                return ReconciliationResult(processed=False)
             node.integration_sync_status = "RUNNING"
             node.integration_sync_error = None
             try:
@@ -63,13 +63,13 @@ class SqlAlchemyLinearTaskReconciliation:
                 node.integration_sync_status = "READY"
                 node.integration_last_synced_at = now
                 await session.commit()
-                return ReconciliationResult(True, imported, updated)
+                return ReconciliationResult(processed=True, imported=imported, updated=updated)
             except Exception as exc:  # noqa: BLE001 - persist third-party failures for operators
                 node.integration_sync_status = "FAILED"
                 node.integration_sync_error = str(exc)[:1000]
                 node.integration_last_synced_at = now
                 await session.commit()
-                return ReconciliationResult(True)
+                return ReconciliationResult(processed=True)
 
     async def _linear_integration(self, session: AsyncSession, node: WorkflowNode) -> Integration:
         allowed = {str(value) for value in node.integration_ids or []}

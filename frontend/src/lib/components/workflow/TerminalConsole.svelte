@@ -9,7 +9,7 @@
   import { closeTerminal, openTerminal, terminalWebSocketUrl } from '$lib/services/terminals';
   import { t } from '$lib/i18n/index.svelte';
 
-  let { agent, nodeId, onclose }: { agent: AgentConfig; nodeId: string; onclose: () => void } =
+  let { agent, nodeId, onClose }: { agent: AgentConfig; nodeId: string; onClose: () => void } =
     $props();
   let host: HTMLDivElement;
   let terminal: XTerm | null = null;
@@ -79,7 +79,7 @@
     if (access) await closeTerminal(access.session_id);
     socket?.close();
     if (agent.active_task_id) await runTaskCommand(agent.active_task_id, 'resume');
-    onclose();
+    onClose();
   }
 
   onDestroy(() => {
@@ -112,7 +112,7 @@
           >{/if}
         {#if connected}<Button size="sm" onclick={release}>{t('terminal.releaseResume')}</Button
           >{/if}
-        <Button size="sm" variant="ghost" onclick={onclose}>{t('terminal.close')}</Button>
+        <Button size="sm" variant="ghost" onclick={onClose}>{t('terminal.close')}</Button>
       </div>
     </header>
     <ErrorBanner message={error} class="m-3" />

@@ -31,9 +31,9 @@
     repositories,
     teamId,
     selectedRole,
-    onselect,
-    onconsole,
-    onsave
+    onSelect,
+    onConsole,
+    onSave
   }: {
     workflow: WorkflowGraph;
     agents: AgentConfig[];
@@ -41,9 +41,9 @@
     repositories: Repository[];
     teamId?: string;
     selectedRole: string;
-    onselect: (role: string, nodeId: string) => void;
-    onconsole: (role: string, nodeId: string) => void;
-    onsave: (graph: WorkflowGraph) => Promise<void>;
+    onSelect: (role: string, nodeId: string) => void;
+    onConsole: (role: string, nodeId: string) => void;
+    onSave: (graph: WorkflowGraph) => Promise<void>;
   } = $props();
 
   type CanvasData = {
@@ -93,7 +93,7 @@
     if (node) {
       selectedNodeId = node.id;
       selectedEdgeId = '';
-      onselect(node.data.role, node.id);
+      onSelect(node.data.role, node.id);
     }
     nodeMenu = { x: event.clientX, y: event.clientY, nodeId };
     addMenuOpen = false;
@@ -216,7 +216,7 @@
   function selectNode(node: CanvasNode, event: MouseEvent) {
     selectedNodeId = node.id;
     selectedEdgeId = '';
-    onselect(node.data.role, node.id);
+    onSelect(node.data.role, node.id);
     nodeMenu = null;
     if (event.detail >= 2) {
       detailsNodeId = node.id;
@@ -226,7 +226,7 @@
 
   function editSelectedNode() {
     const node = nodes.find((item) => item.id === nodeMenu?.nodeId);
-    if (node) onselect(node.data.role, node.id);
+    if (node) onSelect(node.data.role, node.id);
     nodeMenu = null;
     document
       .getElementById('agent-inspector')
@@ -481,7 +481,7 @@
   function addRole(role: string) {
     if (role === 'ORCHESTRATOR' || role === 'DELIVERER') {
       const existing = nodes.find((node) => node.data.role === role);
-      if (existing) onselect(role, existing.id);
+      if (existing) onSelect(role, existing.id);
       return;
     }
     const roleCount = nodes.filter((node) => node.data.role === role).length;
@@ -551,7 +551,7 @@
         type: 'agent'
       }
     ];
-    onselect(role, nodes[nodes.length - 1].id);
+    onSelect(role, nodes[nodes.length - 1].id);
     dirty = true;
   }
 
@@ -625,10 +625,10 @@
         }))
     };
     try {
-      await onsave(graph);
+      await onSave(graph);
       dirty = false;
     } catch {
-      // onsave already records the error for display; nothing further to do here.
+      // onSave already records the error for display; nothing further to do here.
     } finally {
       saving = false;
     }
@@ -1308,7 +1308,7 @@
             <Button
               size="sm"
               variant="ghost"
-              onclick={() => onconsole(detailsNode.data.role, detailsNode.id)}
+              onclick={() => onConsole(detailsNode.data.role, detailsNode.id)}
               >{t('workflow.liveConsoleButton')}</Button
             >
             <Button size="sm" variant="primary" disabled={saving || !dirty} onclick={persist}>
@@ -1325,7 +1325,7 @@
               size="sm"
               variant="ghost"
               onclick={() => {
-                onselect(detailsNode.data.role, detailsNode.id);
+                onSelect(detailsNode.data.role, detailsNode.id);
                 detailsNodeId = '';
                 document.getElementById('agent-inspector')?.scrollIntoView({ behavior: 'smooth' });
               }}>{t('workflow.fullConfiguration')}</Button

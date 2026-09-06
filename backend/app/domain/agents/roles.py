@@ -1,11 +1,5 @@
-from enum import StrEnum
+from app.domain.operational_states import JobRole
 
-
-class AgentRole(StrEnum):
-    ORCHESTRATOR = "ORCHESTRATOR"
-    INTAKE = "INTAKE"
-    THINKER = "THINKER"
-    EXECUTOR = "EXECUTOR"
-    REVIEWER = "REVIEWER"
-    TESTER = "TESTER"
-    DELIVERER = "DELIVERER"
+# A role is one domain concept whether it is viewed from an Agent or a Job.
+# Keep the AgentRole name as a compatibility alias for API and UI-facing code.
+AgentRole = JobRole

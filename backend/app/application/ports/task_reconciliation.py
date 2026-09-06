@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, kw_only=True)
 class ReconciliationResult:
     processed: bool
     imported: int = 0

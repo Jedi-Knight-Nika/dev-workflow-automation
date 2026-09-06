@@ -184,15 +184,15 @@
       {repositories}
       {selectedRole}
       {teamId}
-      onselect={(role, nodeId) => {
+      onSelect={(role, nodeId) => {
         selectedRole = role;
         selectedNodeId = nodeId;
       }}
-      onconsole={(role, nodeId) => {
+      onConsole={(role, nodeId) => {
         selectedNodeId = nodeId;
         consoleAgent = agents.find((agent) => agent.role === role) || null;
       }}
-      onsave={persistWorkflow}
+      onSave={persistWorkflow}
     />
   {:else if !error}
     <section class="border-line bg-panel mb-6 overflow-hidden rounded-xl border" aria-busy="true">
@@ -474,7 +474,7 @@
   <TerminalConsole
     agent={consoleAgent}
     nodeId={selectedNodeId}
-    onclose={() => (consoleAgent = null)}
+    onClose={() => (consoleAgent = null)}
   />
 {/if}
 
