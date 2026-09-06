@@ -6,8 +6,13 @@ from typing import Any
 from sqlalchemy import Select, String, exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.application.ports.task_queries import ExternalTaskView, TaskListFilters, TaskView
-from app.db.models import ExternalTaskSnapshot, Repository, Task, Team
+from app.application.ports.task_queries import (
+    ExternalTaskView,
+    TaskListFilters,
+    TaskRepositoryScopeView,
+    TaskView,
+)
+from app.db.models import ExternalTaskSnapshot, Repository, Task, TaskRepositoryScope, Team
 from app.infrastructure.persistence.repositories import task_to_domain
 
 
@@ -159,6 +164,31 @@ class SqlAlchemyTaskQueries:
             if repository_ids
             else {}
         )
+        scope_rows = (
+            await self._session.execute(
+                select(TaskRepositoryScope, Repository)
+                .join(Repository, Repository.id == TaskRepositoryScope.repository_id)
+                .where(TaskRepositoryScope.task_id.in_(task_ids))
+                .order_by(TaskRepositoryScope.is_primary.desc(), TaskRepositoryScope.created_at)
+            )
+        ).all()
+        scopes_by_task: dict[uuid.UUID, list[TaskRepositoryScopeView]] = {}
+        for scope, repository in scope_rows:
+            scopes_by_task.setdefault(scope.task_id, []).append(
+                TaskRepositoryScopeView(
+                    scope.repository_id,
+                    f"{repository.owner}/{repository.name}",
+                    scope.selected_by,
+                    scope.reason,
+                    float(scope.confidence) if scope.confidence is not None else None,
+                    scope.is_primary,
+                    scope.changed,
+                    scope.branch_name,
+                    scope.current_revision,
+                    scope.pull_request_number,
+                    scope.pull_request_url,
+                )
+            )
         team_ids = {record.team_id for record in records if record.team_id}
         teams = (
             {
@@ -187,6 +217,7 @@ class SqlAlchemyTaskQueries:
                 record.project_name,
                 tuple(record.labels or []),
                 float(record.estimate) if record.estimate is not None else None,
+                tuple(scopes_by_task.get(record.id, [])),
             )
             for record in records
         ]

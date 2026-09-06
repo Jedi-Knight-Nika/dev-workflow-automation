@@ -16,6 +16,7 @@ from app.db.models import (
     JobState,
     Repository,
     Task,
+    TaskRepositoryScope,
     TaskState,
     ValidationRecord,
     WorkflowNode,
@@ -272,17 +273,28 @@ class SqlAlchemyReviewerCompletionUnitOfWork:
         session = self._active()
         try:
             task = await session.get(Task, task_id, with_for_update=True)
-            if (
-                task is None
-                or task.state != TaskState.WAITING_GITHUB
-                or task.manual_takeover
-                or task.repository_id is None
-            ):
+            if task is None or task.state != TaskState.WAITING_GITHUB or task.manual_takeover:
                 return
-            repository = await session.get(Repository, task.repository_id)
-            if repository is None or not repository.enabled:
-                raise RuntimeError("Reviewed task repository is unavailable")
-            await publish_pull_request(session, task, repository)
+            rows = (
+                await session.execute(
+                    select(TaskRepositoryScope, Repository)
+                    .join(Repository, Repository.id == TaskRepositoryScope.repository_id)
+                    .where(
+                        TaskRepositoryScope.task_id == task.id,
+                        TaskRepositoryScope.changed.is_(True),
+                    )
+                    .order_by(TaskRepositoryScope.is_primary.desc())
+                )
+            ).all()
+            if not rows and task.repository_id is not None:
+                repository = await session.get(Repository, task.repository_id)
+                if repository is not None:
+                    await publish_pull_request(session, task, repository)
+                return
+            for scope, repository in rows:
+                if not repository.enabled:
+                    raise RuntimeError("Reviewed task repository is unavailable")
+                await publish_pull_request(session, task, repository, scope)
         except Exception as exc:
             log.exception("automatic_pull_request_publish_failed", task_id=str(task_id))
             await session.rollback()

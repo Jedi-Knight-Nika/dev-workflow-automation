@@ -96,6 +96,7 @@ def task_view_response(view: TaskView) -> TaskRead:
             "project_name": view.project_name,
             "labels": view.labels,
             "estimate": view.estimate,
+            "repository_scopes": [asdict(scope) for scope in view.repository_scopes],
         }
     )
 

@@ -93,6 +93,13 @@ class TaskRepositoryScope(Base):
     reason: Mapped[str] = mapped_column(Text, default="")
     confidence: Mapped[float | None] = mapped_column(Numeric(4, 3))
     is_primary: Mapped[bool] = mapped_column(default=False)
+    workspace_path: Mapped[str | None] = mapped_column(Text)
+    branch_name: Mapped[str | None] = mapped_column(String(255))
+    base_revision: Mapped[str | None] = mapped_column(String(64))
+    current_revision: Mapped[str | None] = mapped_column(String(64))
+    changed: Mapped[bool] = mapped_column(default=False)
+    pull_request_number: Mapped[int | None] = mapped_column(Integer)
+    pull_request_url: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     task: Mapped[Task] = relationship(back_populates="repository_scopes")
 

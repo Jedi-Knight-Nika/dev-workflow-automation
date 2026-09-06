@@ -54,6 +54,21 @@ class ExternalTaskView:
 
 
 @dataclass(frozen=True, slots=True)
+class TaskRepositoryScopeView:
+    repository_id: uuid.UUID
+    repository_name: str
+    selected_by: str
+    reason: str
+    confidence: float | None
+    is_primary: bool
+    changed: bool
+    branch_name: str | None
+    current_revision: str | None
+    pull_request_number: int | None
+    pull_request_url: str | None
+
+
+@dataclass(frozen=True, slots=True)
 class TaskView:
     task: Task
     source: ExternalTaskView | None
@@ -66,6 +81,7 @@ class TaskView:
     project_name: str | None = None
     labels: tuple[str, ...] = ()
     estimate: float | None = None
+    repository_scopes: tuple[TaskRepositoryScopeView, ...] = ()
 
 
 class TaskQueries(Protocol):

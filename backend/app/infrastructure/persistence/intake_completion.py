@@ -2,7 +2,7 @@ import types
 import uuid
 from typing import Self
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.application.ports.intake_completion import (
@@ -188,22 +188,34 @@ class SqlAlchemyIntakeCompletionUnitOfWork:
         reason = str(data.get("repository_selection_reason") or "Selected during Intake")
         confidence_value = data.get("confidence")
         confidence = float(confidence_value) if isinstance(confidence_value, (int, float)) else None
-        await session.execute(
-            delete(TaskRepositoryScope).where(TaskRepositoryScope.task_id == task.id)
+        existing_scopes = list(
+            (
+                await session.scalars(
+                    select(TaskRepositoryScope).where(TaskRepositoryScope.task_id == task.id)
+                )
+            ).all()
         )
-        session.add_all(
-            [
-                TaskRepositoryScope(
+        existing_by_repository = {scope.repository_id: scope for scope in existing_scopes}
+        for index, repository_id in enumerate(selected_ids):
+            scope = existing_by_repository.get(repository_id)
+            if scope is None:
+                scope = TaskRepositoryScope(
                     task_id=task.id,
                     repository_id=repository_id,
                     selected_by="INTAKE",
-                    reason=reason,
-                    confidence=confidence,
-                    is_primary=index == 0,
                 )
-                for index, repository_id in enumerate(selected_ids)
-            ]
-        )
+                session.add(scope)
+            scope.reason = reason
+            scope.confidence = confidence
+            scope.is_primary = index == 0
+        selected_set = set(selected_ids)
+        for scope in existing_scopes:
+            if scope.repository_id in selected_set:
+                continue
+            if scope.workspace_path or scope.changed or scope.pull_request_number:
+                scope.is_primary = False
+                continue
+            await session.delete(scope)
         # Preserve compatibility while execution/delivery consumers migrate to scopes.
         task.repository_id = selected_ids[0]
         await record_event(

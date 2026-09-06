@@ -7,11 +7,20 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import IndexStatus, Job, JobRole, Repository, ReviewFinding, Task, Team
+from app.db.models import (
+    IndexStatus,
+    Job,
+    JobRole,
+    Repository,
+    ReviewFinding,
+    Task,
+    TaskRepositoryScope,
+    Team,
+)
 from app.domain.memory import render_memory
 from app.infrastructure.agent_knowledge import search_agent_knowledge
-from app.infrastructure.git.workspaces import run_git
-from app.infrastructure.indexing import semantic_search
+from app.infrastructure.git.workspaces import ScopedWorkspace, run_git
+from app.infrastructure.indexing import semantic_search, semantic_search_repositories
 from app.infrastructure.persistence.task_memory import TaskMemoryService
 from app.infrastructure.workers.executor import repository_context
 
@@ -29,6 +38,16 @@ def fit_context(context: dict[str, Any], limit: int) -> dict[str, Any]:
             value = repository.get(key)
             if isinstance(value, str) and len(value) > limit // 2:
                 repository[key] = value[: limit // 2] + "\n[TRUNCATED]"
+    repositories = context.get("repositories")
+    if isinstance(repositories, list) and repositories:
+        per_repository = max(2_000, limit // (len(repositories) * 2))
+        for item in repositories:
+            if not isinstance(item, dict):
+                continue
+            for key in ("files", "diff"):
+                value = item.get(key)
+                if isinstance(value, str) and len(value) > per_repository:
+                    item[key] = value[:per_repository] + "\n[TRUNCATED]"
     for key in ("retrieved_knowledge", "open_findings"):
         values = context.get(key)
         while isinstance(values, list) and values and len(json.dumps(context)) > limit:
@@ -191,15 +210,7 @@ class ContextCompiler:
     async def compile_for_intake(self, task: Task, job: Job) -> dict[str, Any]:
         started = time.monotonic()
         context = self._base(task, job)
-        team = await self.session.get(Team, task.team_id) if task.team_id else None
-        repository_statement = select(Repository).where(
-            Repository.enabled.is_(True), Repository.archived_at.is_(None)
-        )
-        if team and team.repository_ids:
-            repository_statement = repository_statement.where(
-                Repository.id.in_([uuid.UUID(value) for value in team.repository_ids])
-            )
-        repositories = list((await self.session.scalars(repository_statement)).all())
+        repositories = await self._team_repositories(task)
         context["repository_candidates"] = [
             {
                 "id": str(repository.id),
@@ -208,12 +219,57 @@ class ContextCompiler:
                 "name": repository.name,
                 "default_branch": repository.default_branch,
                 "knowledge_status": repository.index_status.value,
+                "latest_sha": repository.latest_sha,
+                "indexed_sha": repository.indexed_sha,
+                "knowledge_stale": bool(
+                    repository.latest_sha
+                    and repository.indexed_sha
+                    and repository.latest_sha != repository.indexed_sha
+                ),
             }
             for repository in repositories
         ]
         context["task_memory"] = await self._persistent_memory(task, JobRole.INTAKE)
-        context["retrieved_knowledge"] = await self._knowledge(task, None, JobRole.INTAKE)
+        context["retrieved_knowledge"] = await self._intake_knowledge(task, repositories)
         return await self._finish(task, job, context, started)
+
+    async def _team_repositories(self, task: Task) -> list[Repository]:
+        team = await self.session.get(Team, task.team_id) if task.team_id else None
+        statement = select(Repository).where(
+            Repository.enabled.is_(True), Repository.archived_at.is_(None)
+        )
+        if team and team.repository_ids:
+            statement = statement.where(
+                Repository.id.in_([uuid.UUID(value) for value in team.repository_ids])
+            )
+        return list((await self.session.scalars(statement.order_by(Repository.name))).all())
+
+    async def _intake_knowledge(
+        self, task: Task, repositories: list[Repository]
+    ) -> list[dict[str, Any]]:
+        ready = [
+            repository
+            for repository in repositories
+            if repository.index_status == IndexStatus.READY
+        ]
+        if not self.include_repository_knowledge or not ready:
+            return await self._knowledge(task, None, JobRole.INTAKE)
+        query = f"{task.title}\n{task.description}"
+        limit = {"low": 12, "normal": 24, "deep": 40}.get(self.retrieval_depth, 24)
+        rows = await semantic_search_repositories(
+            self.session, [repository.id for repository in ready], query, limit=limit
+        )
+        names = {repository.id: f"{repository.owner}/{repository.name}" for repository in ready}
+        repository_rows = [
+            {
+                **row,
+                "repository_id": str(row["repository_id"]),
+                "repository_name": names.get(row["repository_id"], "unknown"),
+            }
+            for row in rows
+        ]
+        repository_rows.extend(await self._knowledge(task, None, JobRole.INTAKE))
+        return repository_rows
 
     async def compile_for_thinker(
         self, task: Task, job: Job, repository: Repository | None
@@ -223,6 +279,32 @@ class ContextCompiler:
         context["task_memory"] = await self._persistent_memory(task, JobRole.THINKER)
         context["previous_role_checkpoint"] = await self._previous_checkpoint(task, JobRole.THINKER)
         context["retrieved_knowledge"] = await self._knowledge(task, repository, JobRole.THINKER)
+        return await self._finish(task, job, context, started)
+
+    async def compile_for_scoped_thinker(self, task: Task, job: Job) -> dict[str, Any]:
+        started = time.monotonic()
+        context = self._base(task, job)
+        context["task_memory"] = await self._persistent_memory(task, JobRole.THINKER)
+        context["previous_role_checkpoint"] = await self._previous_checkpoint(task, JobRole.THINKER)
+        scope_rows = (
+            await self.session.execute(
+                select(TaskRepositoryScope, Repository)
+                .join(Repository, Repository.id == TaskRepositoryScope.repository_id)
+                .where(TaskRepositoryScope.task_id == task.id)
+                .order_by(TaskRepositoryScope.is_primary.desc())
+            )
+        ).all()
+        context["repositories"] = [
+            {
+                "id": str(repository.id),
+                "name": f"{repository.owner}/{repository.name}",
+                "default_branch": repository.default_branch,
+                "latest_sha": repository.latest_sha,
+                "indexed_sha": repository.indexed_sha,
+                "retrieved_knowledge": await self._knowledge(task, repository, JobRole.THINKER),
+            }
+            for _, repository in scope_rows
+        ]
         return await self._finish(task, job, context, started)
 
     async def compile_for_executor(
@@ -263,6 +345,63 @@ class ContextCompiler:
             repository_data["files"] = await repository_context(workspace)
             repository_data["context_mode"] = "full"
         context["repository"] = repository_data
+        return await self._finish(task, job, context, started)
+
+    async def compile_for_scoped_executor(
+        self, task: Task, job: Job, workspaces: list[ScopedWorkspace]
+    ) -> dict[str, Any]:
+        started = time.monotonic()
+        context = self._base(task, job)
+        context["task_memory"] = await self._persistent_memory(task, JobRole.EXECUTOR)
+        context["previous_role_checkpoint"] = await self._previous_checkpoint(
+            task, JobRole.EXECUTOR
+        )
+        context["technical_plan"] = await self._plan(task)
+        context["open_findings"] = await self._findings(task)
+        context["repository_path_rule"] = (
+            "All file paths must start with the repository directory shown in repositories[].path_prefix."
+        )
+        context["repositories"] = [
+            {
+                "id": str(item.repository.id),
+                "name": f"{item.repository.owner}/{item.repository.name}",
+                "path_prefix": ("." if task.workspace_path == str(item.path) else item.path.name),
+                "branch": item.scope.branch_name,
+                "base_revision": item.scope.base_revision,
+                "current_revision": item.scope.current_revision,
+                "files": await repository_context(item.path),
+                "retrieved_knowledge": await self._knowledge(
+                    task, item.repository, JobRole.EXECUTOR
+                ),
+            }
+            for item in workspaces
+        ]
+        return await self._finish(task, job, context, started)
+
+    async def compile_for_scoped_review(
+        self,
+        task: Task,
+        job: Job,
+        workspaces: list[ScopedWorkspace],
+        role: JobRole,
+        checks: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        started = time.monotonic()
+        context = self._base(task, job)
+        context["task_memory"] = await self._persistent_memory(task, role)
+        context["technical_plan"] = await self._plan(task)
+        context["open_findings"] = await self._findings(task)
+        context["checks"] = checks or []
+        context["repositories"] = [
+            {
+                "id": str(item.repository.id),
+                "name": f"{item.repository.owner}/{item.repository.name}",
+                "path_prefix": ("." if task.workspace_path == str(item.path) else item.path.name),
+                "current_revision": await run_git("rev-parse", "HEAD", cwd=item.path),
+                "diff": await run_git("diff", "--no-ext-diff", cwd=item.path),
+            }
+            for item in workspaces
+        ]
         return await self._finish(task, job, context, started)
 
     async def compile_for_reviewer(

@@ -48,6 +48,20 @@ class ExternalTaskRead(BaseModel):
     raw_payload: dict[str, Any]
 
 
+class TaskRepositoryScopeRead(BaseModel):
+    repository_id: uuid.UUID
+    repository_name: str
+    selected_by: str
+    reason: str
+    confidence: float | None
+    is_primary: bool
+    changed: bool
+    branch_name: str | None
+    current_revision: str | None
+    pull_request_number: int | None
+    pull_request_url: str | None
+
+
 class TaskRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: uuid.UUID
@@ -73,6 +87,7 @@ class TaskRead(BaseModel):
     project_name: str | None = None
     labels: list[str] = Field(default_factory=list)
     estimate: float | None = None
+    repository_scopes: list[TaskRepositoryScopeRead] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
 

@@ -8,17 +8,15 @@
   import Skeleton from '$lib/components/Skeleton.svelte';
   import TeamBadge from '$lib/components/TeamBadge.svelte';
   import { t } from '$lib/i18n/index.svelte';
-  import { listRepositories } from '$lib/services/repositories';
   import { createTask, listTasks, type TaskFilters } from '$lib/services/tasks';
   import { assignTaskToTeam, listTeams, unassignTask } from '$lib/services/teams';
   import { priorityLabel, tasksByColumn } from '$lib/task-board';
-  import type { Repository, Task, Team } from '$lib/types';
+  import type { Task, Team } from '$lib/types';
 
   let tasks = $state<Task[]>([]),
     selected = $state<Task | null>(null);
   let teams = $state<Team[]>([]),
     assigning = $state(false);
-  let repositories = $state<Repository[]>([]);
   let creating = $state(false),
     savingTask = $state(false);
   let draft = $state({
@@ -134,10 +132,9 @@
   }
   onMount(() => {
     void refresh();
-    void Promise.all([listTeams(), listRepositories()])
-      .then(([teamResult, repositoryResult]) => {
+    void listTeams()
+      .then((teamResult) => {
         teams = teamResult;
-        repositories = repositoryResult;
       })
       .catch((cause) => (error = String(cause)));
     const stream = new EventSource(`${API_URL}/api/v1/events/stream`);
@@ -474,8 +471,26 @@
             <dd>{selected.source?.project_name || selected.project_name || '—'}</dd>
           </div>
           <div>
-            <dt>Primary execution repository</dt>
-            <dd>{selected.repository_name || 'Pending AI selection'}</dd>
+            <dt>AI repository scope</dt>
+            <dd>
+              {#if selected.repository_scopes?.length}
+                <ul class="scope-list">
+                  {#each selected.repository_scopes as scope (scope.repository_id)}
+                    <li>
+                      <span>{scope.repository_name}{scope.changed ? ' · changed' : ''}</span>
+                      {#if scope.pull_request_url}
+                        <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
+                        <a href={scope.pull_request_url} target="_blank" rel="noreferrer"
+                          >PR #{scope.pull_request_number}</a
+                        >
+                      {/if}
+                    </li>
+                  {/each}
+                </ul>
+              {:else}
+                {selected.repository_name || 'Pending AI selection'}
+              {/if}
+            </dd>
           </div>
           <div>
             <dt>Estimate</dt>
@@ -525,6 +540,20 @@
 {/if}
 
 <style>
+  .scope-list {
+    display: grid;
+    gap: 0.3rem;
+  }
+  .scope-list li {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: 0.5rem;
+  }
+  .scope-list a {
+    color: var(--color-brand);
+    font-weight: 700;
+  }
   .filters {
     border: 1px solid var(--color-line);
     border-radius: 0.8rem;

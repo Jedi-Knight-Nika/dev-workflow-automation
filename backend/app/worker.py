@@ -6,6 +6,7 @@ import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 from sqlalchemy import func, select
@@ -21,7 +22,6 @@ from app.db.models import (
     Job,
     JobRole,
     JobState,
-    Repository,
     Role,
     Task,
     TaskEvent,
@@ -32,7 +32,7 @@ from app.db.models import (
 from app.db.session import SessionLocal
 from app.domain.ai_runtime import ReasoningLevel, resolve_runtime_config
 from app.domain.security import Decision, ExecutionMode, TeamExecutionPolicy
-from app.infrastructure.git.workspaces import prepare_workspace, run_git
+from app.infrastructure.git.workspaces import prepare_task_workspaces, run_git
 from app.infrastructure.persistence.task_memory import TaskMemoryService
 from app.infrastructure.security.crypto import cipher
 from app.infrastructure.tools import GatewayContext, ToolGateway, ToolNeedsApproval
@@ -602,23 +602,18 @@ async def run(job_id: uuid.UUID) -> WorkerResult:
         provider = create_provider(
             config.provider, cipher.decrypt(integration.encrypted_credentials)
         )
-        repository = (
-            await session.get(Repository, task.repository_id) if task.repository_id else None
-        )
-        if (
-            repository is not None
-            and config.repository_ids
-            and str(repository.id) not in config.repository_ids
-        ):
-            raise RuntimeError(f"Agent {job.role.value} is not granted access to this repository")
+        scoped_workspaces = []
         workspace = None
         if job.role in {JobRole.EXECUTOR, JobRole.REVIEWER, JobRole.TESTER}:
             require_permission(config, "READ_REPOSITORY")
-            if task.repository_id is None:
-                raise RuntimeError(f"{job.role.value} task has no repository")
-            if repository is None or not repository.enabled:
-                raise RuntimeError(f"{job.role.value} repository is unavailable")
-            workspace = await prepare_workspace(session, task, repository)
+            scoped_workspaces = await prepare_task_workspaces(session, task)
+            if not scoped_workspaces:
+                raise RuntimeError(f"{job.role.value} task has no selected repository scope")
+            if config.repository_ids and any(
+                str(item.repository.id) not in config.repository_ids for item in scoped_workspaces
+            ):
+                raise RuntimeError(f"Agent {job.role.value} lacks access to a selected repository")
+            workspace = scoped_workspaces[0].path
         depth_limits = {"low": 60_000, "normal": 160_000, "deep": 400_000}
         configured_limit = config.configuration.get(
             "max_context_chars",
@@ -640,7 +635,7 @@ async def run(job_id: uuid.UUID) -> WorkerResult:
         strategy_tool_limit = int(
             config.configuration.get("max_tool_calls", execution_strategy.get("max_tool_calls", 50))
         )
-        if job.role == JobRole.TESTER and workspace is not None:
+        if job.role == JobRole.TESTER and scoped_workspaces:
             require_permission(config, "RUN_TESTS")
             if task.team_id is None:
                 raise RuntimeError("Tester task must belong to a Team")
@@ -656,27 +651,32 @@ async def run(job_id: uuid.UUID) -> WorkerResult:
                 policy_record.max_command_timeout_seconds if policy_record else 1200,
                 policy_record.max_output_bytes if policy_record else 1_000_000,
             )
-            gateway = ToolGateway(
-                session,
-                GatewayContext(
-                    task.team_id,
-                    task.id,
-                    job.id,
-                    config.agent_id,
-                    config.role_id,
-                    workspace,
-                    task.branch_name,
-                    expanded_permissions(config.permissions),
-                    strategy_tool_limit,
-                ),
-                policy,
-            )
             try:
-                tester_checks = await run_checks(
-                    workspace,
-                    credential_environment=await package_registry_environment(session),
-                    gateway=gateway,
-                )
+                credentials = await package_registry_environment(session)
+                for item in scoped_workspaces:
+                    gateway = ToolGateway(
+                        session,
+                        GatewayContext(
+                            task.team_id,
+                            task.id,
+                            job.id,
+                            config.agent_id,
+                            config.role_id,
+                            item.path,
+                            item.scope.branch_name,
+                            expanded_permissions(config.permissions),
+                            strategy_tool_limit,
+                        ),
+                        policy,
+                    )
+                    checks = await run_checks(
+                        item.path,
+                        credential_environment=credentials,
+                        gateway=gateway,
+                    )
+                    for check in checks:
+                        check.command.insert(0, f"[{item.repository.owner}/{item.repository.name}]")
+                    tester_checks.extend(checks)
             except ToolNeedsApproval as exc:
                 return WorkerResult(
                     job_id=job.id,
@@ -733,17 +733,19 @@ async def run(job_id: uuid.UUID) -> WorkerResult:
         if job.role == JobRole.INTAKE:
             prompt_data = await compiler.compile_for_intake(task, job)
         elif job.role == JobRole.THINKER:
-            prompt_data = await compiler.compile_for_thinker(task, job, repository)
-        elif job.role == JobRole.EXECUTOR and repository is not None and workspace is not None:
-            prompt_data = await compiler.compile_for_executor(task, job, repository, workspace)
-        elif job.role == JobRole.REVIEWER and repository is not None and workspace is not None:
-            prompt_data = await compiler.compile_for_reviewer(task, job, repository, workspace)
-        elif job.role == JobRole.TESTER and repository is not None and workspace is not None:
-            prompt_data = await compiler.compile_for_tester(
+            prompt_data = await compiler.compile_for_scoped_thinker(task, job)
+        elif job.role == JobRole.EXECUTOR and scoped_workspaces:
+            prompt_data = await compiler.compile_for_scoped_executor(task, job, scoped_workspaces)
+        elif job.role == JobRole.REVIEWER and scoped_workspaces:
+            prompt_data = await compiler.compile_for_scoped_review(
+                task, job, scoped_workspaces, JobRole.REVIEWER
+            )
+        elif job.role == JobRole.TESTER and scoped_workspaces:
+            prompt_data = await compiler.compile_for_scoped_review(
                 task,
                 job,
-                repository,
-                workspace,
+                scoped_workspaces,
+                JobRole.TESTER,
                 [check.model_dump(mode="json") for check in tester_checks],
             )
         else:
@@ -837,7 +839,7 @@ async def run(job_id: uuid.UUID) -> WorkerResult:
         elif job.role == JobRole.THINKER:
             result = str(data["result"])
             summary = str(data.get("goal") or data.get("reason") or "Thinker completed")[:500]
-        elif job.role == JobRole.EXECUTOR and workspace is not None:
+        elif job.role == JobRole.EXECUTOR and scoped_workspaces:
             proposal = ExecutorProposal.model_validate(data)
             if proposal.result != "IMPLEMENTED":
                 result = proposal.result
@@ -869,7 +871,7 @@ async def run(job_id: uuid.UUID) -> WorkerResult:
                         job.id,
                         config.agent_id,
                         config.role_id,
-                        workspace,
+                        Path(task.workspace_path or str(workspace)),
                         task.branch_name,
                         expanded_permissions(config.permissions),
                         strategy_tool_limit,
@@ -879,11 +881,34 @@ async def run(job_id: uuid.UUID) -> WorkerResult:
                 try:
                     await apply_proposal_via_gateway(gateway, proposal)
                     require_permission(config, "RUN_TESTS")
-                    checks = await run_checks(
-                        workspace,
-                        credential_environment=await package_registry_environment(session),
-                        gateway=gateway,
-                    )
+                    checks = []
+                    credentials = await package_registry_environment(session)
+                    for item in scoped_workspaces:
+                        repository_gateway = ToolGateway(
+                            session,
+                            GatewayContext(
+                                task.team_id,
+                                task.id,
+                                job.id,
+                                config.agent_id,
+                                config.role_id,
+                                item.path,
+                                item.scope.branch_name,
+                                expanded_permissions(config.permissions),
+                                strategy_tool_limit,
+                            ),
+                            policy,
+                        )
+                        repository_checks = await run_checks(
+                            item.path,
+                            credential_environment=credentials,
+                            gateway=repository_gateway,
+                        )
+                        for check in repository_checks:
+                            check.command.insert(
+                                0, f"[{item.repository.owner}/{item.repository.name}]"
+                            )
+                        checks.extend(repository_checks)
                 except ToolNeedsApproval as exc:
                     return WorkerResult(
                         job_id=job.id,
@@ -893,15 +918,40 @@ async def run(job_id: uuid.UUID) -> WorkerResult:
                         summary="Execution policy requires human approval",
                         data={"approval_id": str(exc.approval_id)},
                     )
-                files = await changed_files(workspace)
-                revision = await run_git("rev-parse", "HEAD", cwd=workspace)
+                repository_changes = []
+                files = []
+                fingerprints = []
+                for item in scoped_workspaces:
+                    scoped_files = await changed_files(item.path)
+                    revision = await run_git("rev-parse", "HEAD", cwd=item.path)
+                    fingerprint = await workspace_fingerprint(item.path)
+                    item.scope.changed = bool(scoped_files)
+                    item.scope.current_revision = revision
+                    files.extend(
+                        f"{item.path.name}/{file}" if len(scoped_workspaces) > 1 else file
+                        for file in scoped_files
+                    )
+                    fingerprints.append(f"{item.repository.id}:{fingerprint}")
+                    repository_changes.append(
+                        {
+                            "repository_id": str(item.repository.id),
+                            "repository_name": f"{item.repository.owner}/{item.repository.name}",
+                            "changed_files": scoped_files,
+                            "revision": revision,
+                            "content_revision": fingerprint,
+                        }
+                    )
+                await session.commit()
                 checks_passed = all(check.passed for check in checks)
                 result = "IMPLEMENTED" if checks_passed else "TEST_FAILED"
                 summary = proposal.summary
                 data = {
                     "changed_files": files,
-                    "workspace_revision": revision,
-                    "workspace_fingerprint": await workspace_fingerprint(workspace),
+                    "repository_changes": repository_changes,
+                    "workspace_revision": scoped_workspaces[0].scope.current_revision,
+                    "workspace_fingerprint": hashlib.sha256(
+                        "|".join(fingerprints).encode()
+                    ).hexdigest(),
                     "checks": [check.model_dump(mode="json") for check in checks],
                     "plan_mismatch": proposal.plan_mismatch,
                 }
@@ -910,9 +960,19 @@ async def run(job_id: uuid.UUID) -> WorkerResult:
             result = review.result
             summary = review.summary
             data = review.model_dump(mode="json")
-            if workspace is not None:
-                data["repository_sha"] = await run_git("rev-parse", "HEAD", cwd=workspace)
-                data["content_revision"] = await workspace_fingerprint(workspace)
+            if scoped_workspaces:
+                revisions = [
+                    f"{item.repository.id}:{await run_git('rev-parse', 'HEAD', cwd=item.path)}"
+                    for item in scoped_workspaces
+                ]
+                fingerprints = [
+                    f"{item.repository.id}:{await workspace_fingerprint(item.path)}"
+                    for item in scoped_workspaces
+                ]
+                data["repository_sha"] = hashlib.sha256("|".join(revisions).encode()).hexdigest()
+                data["content_revision"] = hashlib.sha256(
+                    "|".join(fingerprints).encode()
+                ).hexdigest()
                 data["validation_configuration_hash"] = "reviewer-v1"
         elif job.role == JobRole.TESTER:
             test = TesterProposal.model_validate(data)
@@ -940,9 +1000,19 @@ async def run(job_id: uuid.UUID) -> WorkerResult:
                 summary = test.summary
                 data = test.model_dump(mode="json")
                 data["checks"] = [check.model_dump(mode="json") for check in tester_checks]
-            if workspace is not None:
-                data["repository_sha"] = await run_git("rev-parse", "HEAD", cwd=workspace)
-                data["content_revision"] = await workspace_fingerprint(workspace)
+            if scoped_workspaces:
+                revisions = [
+                    f"{item.repository.id}:{await run_git('rev-parse', 'HEAD', cwd=item.path)}"
+                    for item in scoped_workspaces
+                ]
+                fingerprints = [
+                    f"{item.repository.id}:{await workspace_fingerprint(item.path)}"
+                    for item in scoped_workspaces
+                ]
+                data["repository_sha"] = hashlib.sha256("|".join(revisions).encode()).hexdigest()
+                data["content_revision"] = hashlib.sha256(
+                    "|".join(fingerprints).encode()
+                ).hexdigest()
                 data["validation_configuration_hash"] = hashlib.sha256(
                     json.dumps(
                         [list(check.command) for check in tester_checks], sort_keys=True

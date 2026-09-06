@@ -221,3 +221,34 @@ async def semantic_search(
         )
     ).mappings()
     return [dict(row) for row in rows]
+
+
+async def semantic_search_repositories(
+    session: AsyncSession,
+    repository_ids: list[uuid.UUID],
+    query: str,
+    limit: int = 24,
+) -> list[dict[str, Any]]:
+    """Search one embedding across a Team repository pool for Intake scoping."""
+    if not repository_ids:
+        return []
+    client = await embedding_client(session)
+    embedding = (await client.embed([query]))[0]
+    rows = (
+        await session.execute(
+            text(
+                """SELECT repository_id, file_path, chunk_index, content, commit_sha,
+                   1 - (embedding <=> CAST(:embedding AS vector)) AS score
+                   FROM knowledge_chunks
+                   WHERE repository_id = ANY(CAST(:repository_ids AS uuid[]))
+                   ORDER BY embedding <=> CAST(:embedding AS vector)
+                   LIMIT :limit"""
+            ),
+            {
+                "repository_ids": [str(repository_id) for repository_id in repository_ids],
+                "embedding": vector_literal(embedding),
+                "limit": limit,
+            },
+        )
+    ).mappings()
+    return [dict(row) for row in rows]

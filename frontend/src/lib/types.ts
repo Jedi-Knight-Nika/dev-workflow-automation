@@ -24,6 +24,19 @@ export type Task = {
   project_name?: string | null;
   labels?: string[];
   estimate?: number | null;
+  repository_scopes?: Array<{
+    repository_id: string;
+    repository_name: string;
+    selected_by: string;
+    reason: string;
+    confidence: number | null;
+    is_primary: boolean;
+    changed: boolean;
+    branch_name: string | null;
+    current_revision: string | null;
+    pull_request_number: number | null;
+    pull_request_url: string | null;
+  }>;
 };
 
 export type ExternalTaskSource = {
