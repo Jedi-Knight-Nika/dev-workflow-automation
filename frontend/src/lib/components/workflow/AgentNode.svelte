@@ -1,5 +1,7 @@
 <script lang="ts">
   import { Handle, Position, type NodeProps } from '@xyflow/svelte';
+  import PixelAgentAvatar from '$lib/components/agents/PixelAgentAvatar.svelte';
+  import BrandIcon from '$lib/components/resources/BrandIcon.svelte';
 
   type AgentNodeData = {
     displayName: string;
@@ -17,26 +19,15 @@
 
   let { data }: NodeProps = $props();
   const agent = $derived(data as AgentNodeData);
-  const initials = $derived(agent.displayName.slice(0, 2).toUpperCase());
-  function providerMark(provider: string) {
-    if (provider === 'anthropic') return 'A';
-    if (provider === 'google') return 'G';
-    if (provider === 'openai') return 'O';
-    return '●';
-  }
-
-  function integrationMark(name: string) {
-    const normalized = name.toLowerCase();
-    if (normalized.includes('slack')) return '#';
-    if (normalized.includes('linear')) return 'L';
-    if (normalized.includes('github')) return 'GH';
-    return name.slice(0, 2).toUpperCase();
-  }
 </script>
 
 <Handle type="target" position={Position.Left} />
 <div class="node-shell" class:disabled={!agent.enabled}>
-  <div class="avatar" class:system={agent.system}>{initials}</div>
+  <PixelAgentAvatar
+    seed={`${agent.displayName}:${agent.role}`}
+    label={agent.displayName}
+    size={36}
+  />
   <div class="min-w-0 flex-1">
     <div class="mb-1 flex items-center gap-2">
       <strong class="truncate text-base font-semibold">{agent.displayName}</strong>
@@ -52,7 +43,7 @@
     </div>
     <div class="model-row">
       <span class="provider-mark" title={agent.provider || 'Provider not configured'}>
-        {providerMark(agent.provider)}
+        <BrandIcon brand={agent.provider} size={13} />
       </span>
       <span class="model-name">{agent.model || 'Model not configured'}</span>
       <span
@@ -74,7 +65,7 @@
     {#if agent.integrationNames.length || agent.repositoryCount}
       <div class="access-row">
         {#each agent.integrationNames.slice(0, 3) as name (name)}
-          <span class="integration-mark" title={name}>{integrationMark(name)}</span>
+          <span class="integration-mark" title={name}><BrandIcon brand={name} size={12} /></span>
         {/each}
         {#if agent.integrationNames.length > 3}
           <span class="more-count">+{agent.integrationNames.length - 3}</span>
@@ -107,33 +98,6 @@
     align-items: center;
     gap: 0.75rem;
     padding: 0.8rem 0.85rem;
-  }
-  .avatar {
-    display: grid;
-    height: 2.25rem;
-    width: 2.25rem;
-    flex: none;
-    place-items: center;
-    border: 1px solid color-mix(in srgb, var(--color-brand-2) 35%, transparent);
-    border-radius: 0.7rem;
-    background: linear-gradient(
-      145deg,
-      color-mix(in srgb, var(--color-brand-2) 25%, transparent),
-      color-mix(in srgb, var(--color-brand) 15%, transparent)
-    );
-    color: var(--color-brand-2);
-    font-size: 0.65rem;
-    font-weight: 800;
-    letter-spacing: 0.06em;
-  }
-  .avatar.system {
-    border-color: color-mix(in srgb, var(--color-brand) 45%, transparent);
-    background: linear-gradient(
-      145deg,
-      color-mix(in srgb, var(--color-brand) 28%, transparent),
-      color-mix(in srgb, var(--color-brand) 18%, transparent)
-    );
-    color: var(--color-brand);
   }
   .system-pill {
     border: 1px solid color-mix(in srgb, var(--color-brand) 35%, transparent);

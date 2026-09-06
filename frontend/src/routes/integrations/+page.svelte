@@ -21,6 +21,7 @@
   import Skeleton from '$lib/components/Skeleton.svelte';
   import ResourceModal from '$lib/components/resources/ResourceModal.svelte';
   import ResourceStatus from '$lib/components/resources/ResourceStatus.svelte';
+  import BrandIcon from '$lib/components/resources/BrandIcon.svelte';
   import type {
     GitHubInstallationAccount,
     LinearWorkflowState,
@@ -357,7 +358,14 @@
                 {provider.type.replaceAll('_', ' ')}
               </p>
               <div class="my-2 flex items-center justify-between gap-3">
-                <h3 class="text-xl font-semibold">{provider.label}</h3>
+                <div class="flex items-center gap-3">
+                  <span
+                    class="border-line bg-panel-alt grid size-10 place-items-center rounded-xl border"
+                  >
+                    <BrandIcon brand={provider.name} size={22} labelled />
+                  </span>
+                  <h3 class="text-xl font-semibold">{provider.label}</h3>
+                </div>
                 <ResourceStatus
                   state={provider.active
                     ? integration(provider.name)?.display_status || 'NOT_CONFIGURED'

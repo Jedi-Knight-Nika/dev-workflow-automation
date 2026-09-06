@@ -24,6 +24,8 @@
   import { t } from '$lib/i18n/index.svelte';
   import { getTheme } from '$lib/theme.svelte';
   import { providerModelOptions } from '$lib/ai-model-catalog';
+  import BrandIcon from '$lib/components/resources/BrandIcon.svelte';
+  import PixelAgentAvatar from '$lib/components/agents/PixelAgentAvatar.svelte';
 
   let {
     workflow,
@@ -694,7 +696,7 @@
                 addMenuOpen = false;
               }}
             >
-              <span class="role-icon">{role.slice(0, 2)}</span>
+              <PixelAgentAvatar seed={`${teamId || 'default'}:${role}`} label={role} size={30} />
               <span
                 ><b>{role[0] + role.slice(1).toLowerCase()}</b><small
                   >{protectedRole && count
@@ -845,7 +847,11 @@
         aria-label={`${detailsNode.data.displayName} details`}
       >
         <header>
-          <div class="details-avatar">{detailsNode.data.role.slice(0, 2)}</div>
+          <PixelAgentAvatar
+            seed={`${detailsNode.id}:${detailsNode.data.displayName}`}
+            label={detailsNode.data.displayName}
+            size={42}
+          />
           <div>
             <p class="text-brand text-[9px] font-bold tracking-[.14em]">{detailsNode.data.role}</p>
             <h2 class="text-lg font-semibold">{t('workflow.agentDetails')}</h2>
@@ -902,24 +908,30 @@
               >
             </div>
             <div class="model-controls">
-              <select
-                value={detailsNode.data.provider}
-                onchange={(event) => changeNodeProvider(detailsNode.id, event)}
-              >
-                <option value="openai">OpenAI</option><option value="anthropic"
-                  >Anthropic / Claude</option
-                ><option value="google">Google / Gemini</option>
-              </select>
-              <select
-                value={usesManualNodeModel(detailsNode) ? '__manual__' : detailsNode.data.model}
-                onchange={(event) => chooseModel(detailsNode.id, event)}
-              >
-                <option value="">{t('workflow.selectModel')}</option>
-                {#each availableNodeModels(detailsNode) as model (model.id)}
-                  <option value={model.id}>{model.display_name} · {model.id}</option>
-                {/each}
-                <option value="__manual__">{t('workflow.enterModelIdManually')}</option>
-              </select>
+              <span class="provider-select">
+                <BrandIcon brand={detailsNode.data.provider} size={17} />
+                <select
+                  value={detailsNode.data.provider}
+                  onchange={(event) => changeNodeProvider(detailsNode.id, event)}
+                >
+                  <option value="openai">OpenAI</option><option value="anthropic"
+                    >Anthropic / Claude</option
+                  ><option value="google">Google / Gemini</option>
+                </select>
+              </span>
+              <span class="provider-select">
+                <BrandIcon brand={detailsNode.data.provider} size={17} />
+                <select
+                  value={usesManualNodeModel(detailsNode) ? '__manual__' : detailsNode.data.model}
+                  onchange={(event) => chooseModel(detailsNode.id, event)}
+                >
+                  <option value="">{t('workflow.selectModel')}</option>
+                  {#each availableNodeModels(detailsNode) as model (model.id)}
+                    <option value={model.id}>{model.display_name} · {model.id}</option>
+                  {/each}
+                  <option value="__manual__">{t('workflow.enterModelIdManually')}</option>
+                </select>
+              </span>
               {#if usesManualNodeModel(detailsNode)}
                 <input
                   value={detailsNode.data.model}
@@ -1603,17 +1615,6 @@
     font-size: 0.58rem;
     font-weight: 400;
   }
-  .role-icon {
-    display: grid;
-    width: 1.8rem;
-    height: 1.8rem;
-    place-items: center;
-    border-radius: 0.45rem;
-    background: color-mix(in srgb, var(--color-brand-2) 15%, transparent);
-    color: var(--color-brand-2);
-    font-size: 0.55rem;
-    font-weight: 800;
-  }
   .node-menu {
     position: fixed;
     z-index: 80;
@@ -1730,18 +1731,6 @@
   .details-modal > header > button:hover {
     background: color-mix(in srgb, var(--color-brand-2) 12%, var(--color-panel-alt));
     color: var(--color-heading);
-  }
-  .details-avatar {
-    display: grid;
-    width: 2.35rem;
-    height: 2.35rem;
-    place-items: center;
-    border: 1px solid color-mix(in srgb, var(--color-brand-2) 35%, transparent);
-    border-radius: 0.65rem;
-    background: color-mix(in srgb, var(--color-brand-2) 18%, transparent);
-    color: var(--color-brand-2);
-    font-size: 0.65rem;
-    font-weight: 800;
   }
   .nickname-label {
     display: block;
@@ -1908,6 +1897,22 @@
     grid-template-columns: 0.7fr 1.3fr;
     gap: 0.5rem;
     margin-top: 0.65rem;
+  }
+  .provider-select {
+    position: relative;
+    display: block;
+  }
+  .provider-select :global(.brand-icon) {
+    position: absolute;
+    z-index: 1;
+    top: 50%;
+    left: 0.7rem;
+    transform: translateY(-50%);
+    pointer-events: none;
+  }
+  .provider-select select {
+    width: 100%;
+    padding-left: 2.35rem;
   }
   .model-controls select,
   .model-controls input,

@@ -32,6 +32,8 @@
   import { listTeams } from '$lib/services/teams';
   import { t } from '$lib/i18n/index.svelte';
   import { providerModelOptions } from '$lib/ai-model-catalog';
+  import PixelAgentAvatar from '$lib/components/agents/PixelAgentAvatar.svelte';
+  import BrandIcon from '$lib/components/resources/BrandIcon.svelte';
   import type {
     AgentConfig,
     AgentKnowledge,
@@ -376,7 +378,11 @@
     {/if}
     {#each agents.filter((item) => item.role === selectedRole) as agent (agent.role)}
       <header class="border-line flex flex-wrap items-center gap-4 border-b px-5 py-4 sm:px-6">
-        <div class="agent-mark">{agent.role.slice(0, 2)}</div>
+        <PixelAgentAvatar
+          seed={`${teamId || 'default'}:${agent.role}`}
+          label={agent.role}
+          size={40}
+        />
         <div class="min-w-0">
           <div class="flex items-center gap-2">
             <h2 class="text-lg font-semibold capitalize">{agent.role.toLowerCase()}</h2>
@@ -475,32 +481,39 @@
                 </div>
               </div>
               <div class="grid gap-4 md:grid-cols-[0.7fr_1.3fr]">
-                <label class="field-label"
-                  >{t('agents.provider')}<select
-                    class="field"
-                    value={agent.provider}
-                    onchange={(event) => changeProvider(agent, event)}
-                    ><option value="openai">OpenAI</option><option value="anthropic"
-                      >Anthropic</option
-                    ><option value="google">Google</option></select
-                  ></label
-                >
+                <label class="field-label">
+                  {t('agents.provider')}
+                  <span class="icon-select">
+                    <BrandIcon brand={agent.provider} size={17} />
+                    <select
+                      class="field"
+                      value={agent.provider}
+                      onchange={(event) => changeProvider(agent, event)}
+                      ><option value="openai">OpenAI</option><option value="anthropic"
+                        >Anthropic / Claude</option
+                      ><option value="google">Google / Gemini</option></select
+                    >
+                  </span>
+                </label>
                 <label class="field-label" for={`model-${agent.role}`}
                   >{t('agents.model')}
                   <div class="flex items-start gap-2">
                     <div class="min-w-0 flex-1">
-                      <select
-                        id={`model-${agent.role}`}
-                        class="field w-full"
-                        value={usesManualModel(agent) ? '__manual__' : agent.model}
-                        onchange={(event) => changeModel(agent, event)}
-                      >
-                        <option value="">{t('workflow.selectModel')}</option>
-                        {#each availableModels(agent) as model (model.id)}
-                          <option value={model.id}>{model.display_name} · {model.id}</option>
-                        {/each}
-                        <option value="__manual__">{t('workflow.enterModelIdManually')}</option>
-                      </select>
+                      <span class="icon-select">
+                        <BrandIcon brand={agent.provider} size={17} />
+                        <select
+                          id={`model-${agent.role}`}
+                          class="field w-full"
+                          value={usesManualModel(agent) ? '__manual__' : agent.model}
+                          onchange={(event) => changeModel(agent, event)}
+                        >
+                          <option value="">{t('workflow.selectModel')}</option>
+                          {#each availableModels(agent) as model (model.id)}
+                            <option value={model.id}>{model.display_name} · {model.id}</option>
+                          {/each}
+                          <option value="__manual__">{t('workflow.enterModelIdManually')}</option>
+                        </select>
+                      </span>
                       {#if usesManualModel(agent)}
                         <input
                           class="field mt-2 w-full"
@@ -685,23 +698,6 @@
 {/if}
 
 <style>
-  .agent-mark {
-    display: grid;
-    width: 2.6rem;
-    height: 2.6rem;
-    place-items: center;
-    border: 1px solid color-mix(in srgb, var(--color-brand-2) 35%, transparent);
-    border-radius: 0.75rem;
-    background: linear-gradient(
-      145deg,
-      color-mix(in srgb, var(--color-brand-2) 25%, transparent),
-      color-mix(in srgb, var(--color-brand) 15%, transparent)
-    );
-    color: var(--color-brand-2);
-    font-size: 0.7rem;
-    font-weight: 800;
-    letter-spacing: 0.08em;
-  }
   .status-badge {
     display: flex;
     align-items: center;
@@ -826,6 +822,23 @@
   .field-label > span {
     float: right;
     color: var(--color-muted);
+  }
+  .field-label > .icon-select {
+    position: relative;
+    display: block;
+    float: none;
+    color: var(--color-heading);
+  }
+  .icon-select :global(.brand-icon) {
+    position: absolute;
+    z-index: 1;
+    top: 50%;
+    left: 0.75rem;
+    transform: translateY(-50%);
+    pointer-events: none;
+  }
+  .icon-select .field {
+    padding-left: 2.4rem;
   }
   .field {
     display: block;

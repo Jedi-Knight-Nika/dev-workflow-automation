@@ -5,6 +5,8 @@
   import ErrorBanner from '$lib/components/ErrorBanner.svelte';
   import PageHeader from '$lib/components/PageHeader.svelte';
   import Skeleton from '$lib/components/Skeleton.svelte';
+  import PixelAgentAvatar from '$lib/components/agents/PixelAgentAvatar.svelte';
+  import BrandIcon from '$lib/components/resources/BrandIcon.svelte';
   import { getDashboardSummary, getDashboardTelemetry } from '$lib/services/dashboard';
   import { listApprovals, resolveApproval } from '$lib/services/execution-policy';
   import type {
@@ -175,10 +177,15 @@
       <article class="worker panel">
         <header><span>ACTIVE WORKER</span><i class:running={dashboard.active_worker}></i></header>
         {#if dashboard.active_worker}<div class="worker-core">
-            <div class="orb">{dashboard.active_worker.role.slice(0, 2)}</div>
+            <PixelAgentAvatar
+              seed={`${dashboard.active_worker.agent_name}:${dashboard.active_worker.role}`}
+              label={dashboard.active_worker.agent_name || dashboard.active_worker.role}
+              size={64}
+            />
             <small>{dashboard.active_worker.role}</small>
             <h2>{dashboard.active_worker.agent_name || dashboard.active_worker.role}</h2>
-            <p>
+            <p class="flex items-center justify-center gap-2">
+              <BrandIcon brand={dashboard.active_worker.provider || ''} size={15} />
               {dashboard.active_worker.provider || 'provider'} / {dashboard.active_worker.model ||
                 'model pending'}
             </p>
@@ -247,9 +254,13 @@
           </header>
           <div class="current">
             <small>CURRENT TASK</small><b>{team.current_task_label || 'No active task'}</b
-            >{#if team.agent_name}<span
-                >{team.agent_name} · {team.role}<br />{team.provider} / {team.model}</span
-              >{/if}
+            >{#if team.agent_name}<span>
+                {team.agent_name} · {team.role}<br />
+                <span class="inline-flex items-center gap-1.5">
+                  <BrandIcon brand={team.provider || ''} size={12} />
+                  {team.provider} / {team.model}
+                </span>
+              </span>{/if}
           </div>
           <div class="team-stats">
             <div><b>{compact.format(team.tokens)}</b><small>tokens</small></div>
