@@ -2,6 +2,7 @@ from pathlib import Path
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.db.models import AccountSettings
 from app.infrastructure.git.workspaces import cleanup_archived_workspaces
 from app.infrastructure.persistence.job_operations import recover_expired_jobs
 from app.infrastructure.reconciliation import reconcile_startup
@@ -22,6 +23,14 @@ class SqlAlchemyStartupMaintenance:
         async with self._session_factory() as session:
             await recover_expired_jobs(session)
             await reconcile_startup(session)
+            account = await session.get(AccountSettings, "default")
             await cleanup_archived_workspaces(
-                session, self._workspace_root, self._archived_workspace_retention_days
+                session,
+                self._workspace_root,
+                account.completed_workspace_retention_days
+                if account
+                else self._archived_workspace_retention_days,
+                account.failed_workspace_retention_days
+                if account
+                else self._archived_workspace_retention_days,
             )

@@ -95,6 +95,8 @@ class TeamExecutionPolicy:
 
     def outcome(self, capability: str) -> Decision:
         if capability == "MERGE_PR":
+            if self.settings.get(capability) == Decision.DENY:
+                return Decision.DENY
             return Decision.REQUIRE_HUMAN
         if capability == "NETWORK_UNRESTRICTED":
             return Decision.DENY

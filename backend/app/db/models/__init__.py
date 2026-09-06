@@ -34,6 +34,7 @@ from .notifications import (
     TelegramConnectionToken,
     TelegramUpdate,
 )
+from .settings import AccountSettings, SettingsAuditEvent
 from .tasks import (
     AgentCheckpoint,
     ExternalTaskSnapshot,
@@ -64,6 +65,7 @@ from .workflows import (
 
 __all__ = [
     "AIAgent",
+    "AccountSettings",
     "AgentCheckpoint",
     "AgentConfig",
     "AgentKnowledgeChunk",
@@ -84,6 +86,7 @@ __all__ = [
     "Repository",
     "ReviewFinding",
     "Role",
+    "SettingsAuditEvent",
     "Task",
     "TaskAssignment",
     "TaskEvent",

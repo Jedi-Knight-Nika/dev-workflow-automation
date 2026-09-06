@@ -30,6 +30,14 @@ from .integrations import (
     TelegramConfigure,
     WebhookHealthRead,
 )
+from .settings import (
+    AIDefaultSettings,
+    ExecutionDefaultSettings,
+    GeneralSettings,
+    KnowledgeSettings,
+    SafetyDefaultSettings,
+    StorageSettings,
+)
 from .tasks import (
     EventRead,
     ExternalTaskRead,
@@ -65,6 +73,7 @@ from .workflows import (
 )
 
 __all__ = [
+    "AIDefaultSettings",
     "AgentConfigRead",
     "AgentConfigUpdate",
     "AgentKnowledgeCreate",
@@ -73,14 +82,17 @@ __all__ = [
     "DashboardActivityRead",
     "DiscoveredRepository",
     "EventRead",
+    "ExecutionDefaultSettings",
     "ExecutionPolicyRead",
     "ExecutionPolicyWrite",
     "ExternalTaskRead",
+    "GeneralSettings",
     "IntegrationRead",
     "IntegrationUpdate",
     "JobCreate",
     "JobRead",
     "KnowledgeSearchResult",
+    "KnowledgeSettings",
     "LinearMemberRead",
     "LinearWorkflowStateRead",
     "MergeResult",
@@ -93,6 +105,8 @@ __all__ = [
     "RoleClone",
     "RoleRead",
     "RoleWrite",
+    "SafetyDefaultSettings",
+    "StorageSettings",
     "TaskAssignmentCreate",
     "TaskAssignmentRead",
     "TaskCreate",

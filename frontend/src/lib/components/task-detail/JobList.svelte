@@ -4,6 +4,14 @@
   import { t } from '$lib/i18n/index.svelte';
 
   let { jobs }: { jobs: Job[] } = $props();
+
+  function stateClass(state: string): string {
+    if (state === 'RUNNING' || state === 'CLAIMED') return 'text-brand-2';
+    if (state === 'SUCCEEDED') return 'text-accent';
+    if (state === 'FAILED' || state === 'TIMED_OUT' || state === 'CANCELLED') return 'text-danger';
+    if (state === 'RETRY_WAIT') return 'text-warning';
+    return 'text-muted';
+  }
 </script>
 
 <section class="border-line rounded-xl border p-5">

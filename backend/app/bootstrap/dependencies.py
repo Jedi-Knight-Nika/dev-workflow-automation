@@ -13,6 +13,7 @@ from app.infrastructure.integration_discovery import EncryptedIntegrationDiscove
 from app.infrastructure.integration_management import EncryptedIntegrationManagementWorkflow
 from app.infrastructure.knowledge_search import SqlAlchemyKnowledgeSearchWorkflow
 from app.infrastructure.persistence import SqlAlchemyUnitOfWork
+from app.infrastructure.persistence.account_settings import SqlAlchemyAccountSettingsStore
 from app.infrastructure.persistence.agent_configuration import SqlAlchemyAgentConfigurationWorkflow
 from app.infrastructure.persistence.dashboard_queries import SqlAlchemyDashboardQueries
 from app.infrastructure.persistence.event_queries import SqlAlchemyEventQueries
@@ -48,6 +49,12 @@ def get_unit_of_work(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> SqlAlchemyUnitOfWork:
     return SqlAlchemyUnitOfWork(session)
+
+
+def get_account_settings_store(
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> SqlAlchemyAccountSettingsStore:
+    return SqlAlchemyAccountSettingsStore(session)
 
 
 def get_event_queries() -> QueryEvents:

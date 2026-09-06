@@ -135,6 +135,70 @@ export type TerminalAccess = {
   rows: number;
 };
 
+export type AccountSettings = {
+  general: {
+    display_name: string;
+    timezone: string;
+    date_format: 'YYYY-MM-DD' | 'DD/MM/YYYY' | 'MM/DD/YYYY';
+    time_format: '12H' | '24H';
+    default_landing_page: 'dashboard' | 'tasks' | 'teams';
+    default_task_view: 'board' | 'list';
+    appearance: 'system' | 'light' | 'dark';
+    compact_dashboard: boolean;
+  };
+  ai: {
+    default_provider_id: string | null;
+    default_model: string | null;
+    default_reasoning_level: 'default' | 'low' | 'medium' | 'high' | 'max';
+    default_max_output_tokens: number | null;
+    provider_failure_behavior: 'PAUSE_AND_NOTIFY' | 'USE_CONFIGURED_FALLBACK';
+    structured_output_retry_limit: number;
+  };
+  execution: {
+    default_execution_mode: 'CONSERVATIVE' | 'AUTONOMOUS' | 'CUSTOM';
+    default_worker_runtime: 'LOCAL_PROCESS' | 'DOCKER' | 'WSL2';
+    max_concurrent_workers: number;
+    default_job_timeout_seconds: number;
+  };
+  safety: {
+    default_merge_policy: PolicyChoice;
+    default_unknown_network_policy: PolicyChoice;
+    default_dependency_install_policy: PolicyChoice;
+    default_push_task_branch_policy: PolicyChoice;
+  };
+  knowledge: {
+    auto_index_repositories: boolean;
+    incremental_index_after_merge: boolean;
+    index_source_code: boolean;
+    index_tests: boolean;
+    index_documentation: boolean;
+    ignore_generated_files: boolean;
+    context_strategy: 'MINIMAL' | 'BALANCED' | 'DEEP';
+  };
+  storage: {
+    completed_workspace_retention_days: number;
+    failed_workspace_retention_days: number;
+    worker_log_retention_days: number;
+    audit_event_retention_days: number;
+    monthly_cost_warning: number | null;
+    monthly_cost_hard_stop: number | null;
+  };
+  security: {
+    secret_masking_enabled: boolean;
+    fresh_session_per_job: boolean;
+    locked_rules: Array<{
+      key: string;
+      effective_value: 'DENY';
+      source: 'PLATFORM';
+      editable: false;
+    }>;
+  };
+  settings_version: number;
+  updated_at: string;
+};
+
+export type PolicyChoice = 'ALLOW' | 'DENY' | 'REQUIRE_HUMAN';
+
 export type AgentKnowledge = {
   id: string;
   role: string;

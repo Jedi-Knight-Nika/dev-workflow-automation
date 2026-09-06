@@ -1,0 +1,6 @@
+from typing import Any, Protocol
+
+
+class AccountSettingsStore(Protocol):
+    async def get(self) -> dict[str, Any]: ...
+    async def update(self, section: str, values: dict[str, Any]) -> dict[str, Any]: ...

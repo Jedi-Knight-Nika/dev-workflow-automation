@@ -20,6 +20,7 @@ from app.api.memory import router as memory_router
 from app.api.notifications import router as notifications_router
 from app.api.notifications import webhook_router as telegram_webhook_router
 from app.api.roles import router as roles_router
+from app.api.settings import router as settings_router
 from app.api.tasks import router as tasks_router
 from app.api.teams import router as teams_router
 from app.api.terminals import router as terminals_router
@@ -71,6 +72,7 @@ app.include_router(dashboard_router, prefix="/api/v1")
 app.include_router(tasks_router, prefix="/api/v1")
 app.include_router(teams_router, prefix="/api/v1")
 app.include_router(roles_router, prefix="/api/v1")
+app.include_router(settings_router, prefix="/api/v1")
 app.include_router(terminals_router, prefix="/api/v1")
 app.include_router(control_plane_router, prefix="/api/v1")
 app.include_router(events_router, prefix="/api/v1")

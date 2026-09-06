@@ -6,11 +6,11 @@ import shutil
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from sqlalchemy import exists, select
+from sqlalchemy import exists, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
-from app.db.models import Integration, Repository, Task, WorkspaceLease
+from app.db.models import Integration, Repository, Task, TaskState, WorkspaceLease
 from app.infrastructure.security.crypto import cipher
 from app.integrations.github_auth import resolve_github_auth
 
@@ -121,16 +121,26 @@ async def prepare_workspace(session: AsyncSession, task: Task, repository: Repos
 
 
 async def cleanup_archived_workspaces(
-    session: AsyncSession, workspace_root: Path, retention_days: int
+    session: AsyncSession,
+    workspace_root: Path,
+    completed_retention_days: int,
+    failed_retention_days: int | None = None,
 ) -> int:
     """Remove only old, archived, clean worktrees that have no active lease."""
-    cutoff = datetime.now(UTC) - timedelta(days=retention_days)
+    completed_cutoff = datetime.now(UTC) - timedelta(days=completed_retention_days)
+    failed_cutoff = datetime.now(UTC) - timedelta(
+        days=failed_retention_days or completed_retention_days
+    )
     tasks = list(
         (
             await session.scalars(
                 select(Task).where(
                     Task.archived_at.is_not(None),
-                    Task.archived_at <= cutoff,
+                    or_(
+                        (Task.state == TaskState.MERGED) & (Task.archived_at <= completed_cutoff),
+                        Task.state.in_((TaskState.CANCELLED, TaskState.FAILED))
+                        & (Task.archived_at <= failed_cutoff),
+                    ),
                     Task.workspace_path.is_not(None),
                     ~exists().where(WorkspaceLease.task_id == Task.id),
                 )

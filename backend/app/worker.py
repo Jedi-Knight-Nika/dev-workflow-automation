@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings, get_settings
 from app.db.models import (
+    AccountSettings,
     AgentConfig,
     AIAgent,
     ExecutionPolicy,
@@ -117,6 +118,7 @@ async def resolve_agent_config(
     session: AsyncSession, task: Task, role: JobRole
 ) -> ResolvedAgentConfig | None:
     fallback = await session.get(AgentConfig, role)
+    account = await session.get(AccountSettings, "default")
     node = None
     if task.team_id:
         node = await session.scalar(
@@ -145,8 +147,13 @@ async def resolve_agent_config(
             return None
         node_configuration = dict(fallback.configuration or {}) if fallback else {}
         node_configuration.update(
-            reasoning_effort=node.reasoning_effort,
-            max_output_tokens=node.max_output_tokens,
+            reasoning_effort=(
+                account.default_reasoning_level
+                if account and node.reasoning_effort == "default"
+                else node.reasoning_effort
+            ),
+            max_output_tokens=node.max_output_tokens
+            or (account.default_max_output_tokens if account else None),
             temperature=float(node.temperature) if node.temperature is not None else None,
             timeout_minutes=node.timeout_minutes,
             structured_output_retries=node.max_retries,
@@ -160,10 +167,12 @@ async def resolve_agent_config(
             (agent.provider if agent and agent.provider else None)
             or node.provider
             or (role_record.default_provider if role_record else None)
+            or (account.default_provider_id if account else None)
             or "openai",
             (agent.model if agent and agent.model else None)
             or node.model
             or (role_record.default_model if role_record else None)
+            or (account.default_model if account else None)
             or "",
             "\n\n".join(
                 filter(
@@ -199,12 +208,44 @@ async def resolve_agent_config(
             tuple(role_record.allowed_results if role_record else ()),
         )
     if fallback is None or not fallback.enabled or not fallback.model:
-        return None
+        if account is None or not account.default_model:
+            return None
+        configuration: dict[str, Any] = {
+            "reasoning_effort": account.default_reasoning_level,
+            "max_output_tokens": account.default_max_output_tokens,
+            "structured_output_retries": account.structured_output_retry_limit,
+            "context_depth": {
+                "MINIMAL": "low",
+                "BALANCED": "normal",
+                "DEEP": "deep",
+            }[account.context_strategy],
+        }
+        return ResolvedAgentConfig(
+            account.default_provider_id or "openai",
+            account.default_model,
+            ROLE_INSTRUCTIONS[role.value],
+            configuration,
+            (),
+        )
+    fallback_configuration = dict(fallback.configuration or {})
+    if account:
+        fallback_configuration.setdefault("reasoning_effort", account.default_reasoning_level)
+        fallback_configuration.setdefault(
+            "structured_output_retries", account.structured_output_retry_limit
+        )
+        fallback_configuration.setdefault(
+            "context_depth",
+            {"MINIMAL": "low", "BALANCED": "normal", "DEEP": "deep"}[account.context_strategy],
+        )
+        if account.default_max_output_tokens is not None:
+            fallback_configuration.setdefault(
+                "max_output_tokens", account.default_max_output_tokens
+            )
     return ResolvedAgentConfig(
-        fallback.provider,
-        fallback.model,
+        fallback.provider or (account.default_provider_id if account else None) or "openai",
+        fallback.model or (account.default_model if account else None) or "",
         str(fallback.configuration.get("system_prompt") or ROLE_INSTRUCTIONS[role.value]),
-        dict(fallback.configuration or {}),
+        fallback_configuration,
         (),
     )
 
@@ -298,6 +339,7 @@ async def enforce_spending_budget(
     configuration: dict[str, Any],
     pending_attempts: list[ProviderAttempt],
 ) -> None:
+    account = await session.get(AccountSettings, "default")
     pending_tokens = sum(
         (attempt.response.input_tokens or 0) + (attempt.response.output_tokens or 0)
         for attempt in pending_attempts
@@ -333,11 +375,17 @@ async def enforce_spending_budget(
         ),
     ]
     if task.team_id is not None:
+        team_cost_limit = settings.max_team_cost_usd
+        if account and account.monthly_cost_hard_stop is not None:
+            account_limit = float(account.monthly_cost_hard_stop)
+            team_cost_limit = (
+                min(team_cost_limit, account_limit) if team_cost_limit else account_limit
+            )
         scopes.append(
             (
                 "team",
                 settings.max_team_tokens,
-                settings.max_team_cost_usd,
+                team_cost_limit,
                 Task.team_id == task.team_id,
             )
         )

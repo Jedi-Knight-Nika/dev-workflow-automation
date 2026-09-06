@@ -9,7 +9,7 @@ from app.application.ports.repository_management import (
     ManagedRepositoryNotFound,
     RepositoryView,
 )
-from app.db.models import IndexStatus, Repository
+from app.db.models import AccountSettings, IndexStatus, Repository
 
 
 class SqlAlchemyRepositoryManagementWorkflow:
@@ -54,6 +54,8 @@ class SqlAlchemyRepositoryManagementWorkflow:
         return [await self._view(item) for item in items]
 
     async def create(self, command: CreateRepositoryCommand) -> RepositoryView:
+        settings = await self._session.get(AccountSettings, "default")
+        auto_index = settings is None or settings.auto_index_repositories
         item = Repository(
             provider=command.provider,
             external_repo_id=command.external_repo_id,
@@ -61,7 +63,7 @@ class SqlAlchemyRepositoryManagementWorkflow:
             name=command.name,
             clone_url=command.clone_url,
             default_branch=command.default_branch,
-            index_status=IndexStatus.QUEUED,
+            index_status=IndexStatus.QUEUED if auto_index else IndexStatus.NOT_INDEXED,
             index_error=None,
         )
         self._session.add(item)

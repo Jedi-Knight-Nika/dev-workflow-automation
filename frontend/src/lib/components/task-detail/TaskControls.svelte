@@ -69,7 +69,13 @@
   <Button disabled={commanding || task.manual_takeover} onclick={() => onTaskCommand('pause')}
     >{t('taskDetail.pause')}</Button
   >
-  <Button variant="warning" disabled={commanding} onclick={() => onTaskCommand('cancel')}
-    >{t('taskDetail.cancel')}</Button
+  <Button
+    variant="danger"
+    disabled={commanding}
+    onclick={() => {
+      if (confirm('Cancel this task? This stops all work and cannot be undone.')) {
+        onTaskCommand('cancel');
+      }
+    }}>{t('taskDetail.cancel')}</Button
   >
 </section>

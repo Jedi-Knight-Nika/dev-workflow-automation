@@ -14,6 +14,8 @@
   --color-warning: #ffb648;
   --color-brand: #b26bff;
   --color-brand-2: #3fd8ff;
+  --color-bg: var(--color-panel-alt);
+  --color-soft: color-mix(in srgb, var(--color-brand) 8%, var(--color-panel-alt));
 
   --animate-fade-in-up: fade-in-up 0.4s cubic-bezier(0.16, 1, 0.3, 1) both;
   --animate-fade-in: fade-in 0.2s ease both;

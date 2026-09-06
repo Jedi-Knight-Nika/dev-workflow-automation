@@ -5,7 +5,13 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.application.ports.execution_policy import ApprovalView, ToolEventView
-from app.db.models import ApprovalRequest, ExecutionPolicy, Team, ToolExecutionEvent
+from app.db.models import (
+    AccountSettings,
+    ApprovalRequest,
+    ExecutionPolicy,
+    Team,
+    ToolExecutionEvent,
+)
 from app.domain.security import Decision, ExecutionMode, TeamExecutionPolicy
 
 
@@ -20,9 +26,20 @@ class SqlAlchemyExecutionPolicyStore:
             select(ExecutionPolicy).where(ExecutionPolicy.team_id == team_id)
         )
         if record is None:
-            record = ExecutionPolicy(team_id=team_id)
-            self._session.add(record)
-            await self._session.commit()
+            account = await self._session.get(AccountSettings, "default")
+            if account is None:
+                return TeamExecutionPolicy()
+            return TeamExecutionPolicy(
+                ExecutionMode(account.default_execution_mode),
+                {
+                    "INSTALL_DEPENDENCIES": Decision(account.default_dependency_install_policy),
+                    "PUSH_TASK_BRANCH": Decision(account.default_push_task_branch_policy),
+                    "MERGE_PR": Decision(account.default_merge_policy),
+                },
+                (),
+                min(account.default_job_timeout_seconds, 7200),
+                1_000_000,
+            )
         return self._domain(record)
 
     async def save_policy(
