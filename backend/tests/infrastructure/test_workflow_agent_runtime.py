@@ -1,10 +1,14 @@
 import uuid
+from datetime import UTC, datetime
+from types import SimpleNamespace
+from typing import cast
 
 import pytest
 
-from app.db.models import AIAgent, Role
+from app.db.models import AIAgent, Role, WorkflowNode
 from app.domain.workflows import WorkflowNodeData
 from app.infrastructure.persistence.workflow_designer import (
+    _normalized_node_state,
     _runtime_overrides,
     _validate_agent_runtime,
 )
@@ -69,3 +73,50 @@ def test_disabled_or_unconfigured_agent_can_be_saved_for_later_setup() -> None:
     agent, role = records(item)
 
     _validate_agent_runtime(item, agent, role)
+
+
+def persisted_node(item: WorkflowNodeData) -> WorkflowNode:
+    return cast(
+        WorkflowNode,
+        SimpleNamespace(
+            integration_mode=item.integration_mode,
+            poll_interval_seconds=item.poll_interval_seconds,
+            filter_assignee_id=item.filter_assignee_id,
+            filter_state_ids=list(item.filter_state_ids),
+            integration_ids=list(item.integration_ids),
+            integration_sync_status="READY",
+            integration_sync_error=None,
+            integration_last_synced_at=datetime.now(UTC),
+            provider=item.provider,
+            model=item.model,
+            reasoning_effort=item.reasoning_effort,
+            max_output_tokens=item.max_output_tokens,
+            temperature=item.temperature,
+            model_validation_status="VALID",
+            model_validation_message="Model is available",
+            model_validated_at=datetime.now(UTC),
+        ),
+    )
+
+
+def test_model_change_invalidates_stale_validation_result() -> None:
+    original = node(model="claude-old")
+    changed = node(model="claude-new")
+
+    normalized = _normalized_node_state(changed, persisted_node(original))
+
+    assert normalized.model_validation_status == "NOT_CONFIGURED"
+    assert normalized.model_validation_message is None
+    assert normalized.model_validated_at is None
+
+
+def test_unrelated_node_change_preserves_model_validation_result() -> None:
+    original = node()
+    changed = node(system_prompt="More review focus")
+    current = persisted_node(original)
+
+    normalized = _normalized_node_state(changed, current)
+
+    assert normalized.model_validation_status == "VALID"
+    assert normalized.model_validation_message == "Model is available"
+    assert normalized.model_validated_at == current.model_validated_at

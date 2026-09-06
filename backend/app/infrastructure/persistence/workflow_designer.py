@@ -42,6 +42,49 @@ def _validate_agent_runtime(node: WorkflowNodeData, agent: AIAgent, role: Role) 
         raise ValueError(f"Agent {agent.name} runtime is invalid: {exc}") from exc
 
 
+def _normalized_node_state(
+    item: WorkflowNodeData, current: WorkflowNode | None
+) -> WorkflowNodeData:
+    if current is None:
+        return replace(
+            item,
+            integration_sync_status="IDLE",
+            integration_sync_error=None,
+            integration_last_synced_at=None,
+            model_validation_status="NOT_CONFIGURED",
+            model_validation_message=None,
+            model_validated_at=None,
+        )
+    schedule_changed = (
+        current.integration_mode != item.integration_mode
+        or current.poll_interval_seconds != item.poll_interval_seconds
+        or current.filter_assignee_id != item.filter_assignee_id
+        or tuple(current.filter_state_ids or []) != item.filter_state_ids
+        or tuple(current.integration_ids or []) != item.integration_ids
+    )
+    model_configuration_changed = (
+        current.provider != item.provider
+        or current.model != item.model
+        or current.reasoning_effort != item.reasoning_effort
+        or current.max_output_tokens != item.max_output_tokens
+        or (float(current.temperature) if current.temperature is not None else None)
+        != item.temperature
+    )
+    return replace(
+        item,
+        integration_sync_status="IDLE" if schedule_changed else current.integration_sync_status,
+        integration_sync_error=None if schedule_changed else current.integration_sync_error,
+        integration_last_synced_at=None if schedule_changed else current.integration_last_synced_at,
+        model_validation_status=(
+            "NOT_CONFIGURED" if model_configuration_changed else current.model_validation_status
+        ),
+        model_validation_message=(
+            None if model_configuration_changed else current.model_validation_message
+        ),
+        model_validated_at=None if model_configuration_changed else current.model_validated_at,
+    )
+
+
 def default_graph(team_id: uuid.UUID = WORKFLOW_ID) -> WorkflowGraphData:
     nodes: tuple[WorkflowNodeData, ...] = (
         WorkflowNodeData(
@@ -139,29 +182,7 @@ class SqlAlchemyWorkflowDesigner:
         normalized_nodes: list[WorkflowNodeData] = []
         for item in graph.nodes:
             current = current_nodes.get(item.id)
-            schedule_changed = current is None or (
-                current.integration_mode != item.integration_mode
-                or current.poll_interval_seconds != item.poll_interval_seconds
-                or current.filter_assignee_id != item.filter_assignee_id
-                or tuple(current.filter_state_ids or []) != item.filter_state_ids
-                or tuple(current.integration_ids or []) != item.integration_ids
-            )
-            if current is None or schedule_changed:
-                sync_status = "IDLE"
-                sync_error = None
-                last_synced_at = None
-            else:
-                sync_status = current.integration_sync_status
-                sync_error = current.integration_sync_error
-                last_synced_at = current.integration_last_synced_at
-            normalized_nodes.append(
-                replace(
-                    item,
-                    integration_sync_status=sync_status,
-                    integration_sync_error=sync_error,
-                    integration_last_synced_at=last_synced_at,
-                )
-            )
+            normalized_nodes.append(_normalized_node_state(item, current))
         graph = WorkflowGraphData(graph.version, tuple(normalized_nodes), graph.edges)
         await self._session.execute(
             delete(WorkflowEdge).where(WorkflowEdge.workflow_id == definition.id)
