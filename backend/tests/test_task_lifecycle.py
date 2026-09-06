@@ -124,6 +124,22 @@ async def test_takeover_rejects_terminal_task() -> None:
 
 
 @pytest.mark.asyncio
+async def test_only_terminal_tasks_can_be_archived() -> None:
+    active = FakeLifecycleUnitOfWork(context(state=TaskState.IMPLEMENTING))
+    with pytest.raises(InvalidTaskTransition, match="Only terminal"):
+        await ChangeTaskLifecycle(lambda: active).execute(  # type: ignore[arg-type,union-attr]
+            active.context.task_id, LifecycleAction.ARCHIVE
+        )
+
+    terminal = FakeLifecycleUnitOfWork(context(state=TaskState.MERGED))
+    await ChangeTaskLifecycle(lambda: terminal).execute(  # type: ignore[arg-type,union-attr]
+        terminal.context.task_id, LifecycleAction.ARCHIVE
+    )
+    assert terminal.directive == LifecycleDirective(TaskState.MERGED, False, True, True)
+    assert terminal.committed
+
+
+@pytest.mark.asyncio
 async def test_missing_task_is_reported() -> None:
     unit = FakeLifecycleUnitOfWork(None)
     with pytest.raises(TaskNotFound):

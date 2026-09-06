@@ -17,6 +17,7 @@ from app.infrastructure.persistence.job_operations import (
     record_event,
     release_workspace_lease,
 )
+from app.infrastructure.persistence.workflow_routing import route_completed_job
 
 
 class SqlAlchemyIntakeCompletionUnitOfWork:
@@ -89,6 +90,17 @@ class SqlAlchemyIntakeCompletionUnitOfWork:
         task = await session.get(Task, context.task_id)
         if task is None:
             raise RuntimeError("Task disappeared during Intake completion")
+        route = await route_completed_job(
+            session, task, context.job_id, context.outcome, {"intake": context.data}
+        )
+        if route is not None:
+            await record_event(
+                session,
+                task.id,
+                "JOB_SUCCEEDED",
+                {"job_id": str(context.job_id), "result": context.outcome},
+            )
+            return
         if directive == CompletionDirective.INTAKE_NEEDS_HUMAN:
             task.state = TaskState.NEEDS_HUMAN
             await record_event(

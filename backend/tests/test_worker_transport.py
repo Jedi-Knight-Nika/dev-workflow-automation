@@ -17,6 +17,7 @@ def test_docker_worker_is_hardened_and_receives_only_job_id() -> None:
     assert spec["HostConfig"]["PidsLimit"] == 128
     assert all("GITHUB_WEBHOOK_SECRET" not in value for value in spec["Env"])
     assert all("DATABASE_URL_SYNC" not in value for value in spec["Env"])
+    assert "MAX_TASK_TOKENS=0" in spec["Env"]
 
 
 def test_docker_worker_uses_dedicated_credentials_and_optional_proxy() -> None:

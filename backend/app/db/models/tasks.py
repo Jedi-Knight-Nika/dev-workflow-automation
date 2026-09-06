@@ -55,6 +55,7 @@ class Task(Base):
     due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
     project_name: Mapped[str | None] = mapped_column(String(255))
     labels: Mapped[list[str]] = mapped_column(JSON, default=list)
     estimate: Mapped[float | None] = mapped_column(Numeric(8, 2))

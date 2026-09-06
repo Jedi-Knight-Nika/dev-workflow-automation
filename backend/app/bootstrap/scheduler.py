@@ -3,6 +3,7 @@ from app.application.jobs import (
     CompleteFailedJob,
     CompleteIntakeJob,
     CompleteReviewerJob,
+    CompleteTesterJob,
     CompleteThinkerJob,
 )
 from app.application.manage_worker_presence import ManageWorkerPresence
@@ -28,6 +29,9 @@ from app.infrastructure.persistence.job_completion import (
 )
 from app.infrastructure.persistence.reviewer_completion import (
     SqlAlchemyReviewerCompletionUnitOfWorkFactory,
+)
+from app.infrastructure.persistence.tester_completion import (
+    SqlAlchemyTesterCompletionUnitOfWorkFactory,
 )
 from app.infrastructure.persistence.thinker_completion import (
     SqlAlchemyThinkerCompletionUnitOfWorkFactory,
@@ -61,6 +65,7 @@ def create_scheduler(settings: Settings) -> Scheduler:
             settings.max_thinker_jobs_per_task,
         )
     )
+    tester_completer = CompleteTesterJob(SqlAlchemyTesterCompletionUnitOfWorkFactory(SessionLocal))
     reviewer_completer = CompleteReviewerJob(
         SqlAlchemyReviewerCompletionUnitOfWorkFactory(
             SessionLocal,
@@ -72,7 +77,13 @@ def create_scheduler(settings: Settings) -> Scheduler:
     )
     delivery_processor = ProcessDeliveries(SqlAlchemyDeliveryProcessor(SessionLocal))
     index_processor = ProcessIndexes(SqlAlchemyIndexProcessor(SessionLocal))
-    startup_maintenance = RunStartupMaintenance(SqlAlchemyStartupMaintenance(SessionLocal))
+    startup_maintenance = RunStartupMaintenance(
+        SqlAlchemyStartupMaintenance(
+            SessionLocal,
+            settings.workspace_root,
+            settings.archived_workspace_retention_days,
+        )
+    )
     worker_presence = ManageWorkerPresence(SqlAlchemyWorkerPresence(SessionLocal, worker_id))
     job_dispatch = DispatchJobs(
         SqlAlchemyJobDispatch(SessionLocal, worker_id, settings.worker_lease_seconds)
@@ -86,6 +97,7 @@ def create_scheduler(settings: Settings) -> Scheduler:
         intake_completer,
         thinker_completer,
         executor_completer,
+        tester_completer,
         reviewer_completer,
         delivery_processor,
         index_processor,

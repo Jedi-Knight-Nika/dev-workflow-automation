@@ -44,17 +44,24 @@ async def publish_pull_request(
     auth = await resolve_github_auth(cipher.decrypt(integration.encrypted_credentials))
     client = GitHubClient(auth.token, auth.installation)
     if task.pull_request_number is None:
-        pull_request = await client.create_pull_request(
-            repository.owner,
-            repository.name,
-            task.branch_name,
-            repository.default_branch,
-            task.title,
-            task.description or "Automated implementation prepared by Engineering Worker.",
+        pull_request = await client.find_open_pull_request(
+            repository.owner, repository.name, task.branch_name
         )
+        if pull_request is None:
+            pull_request = await client.create_pull_request(
+                repository.owner,
+                repository.name,
+                task.branch_name,
+                repository.default_branch,
+                task.title,
+                task.description or "Automated implementation prepared by Engineering Worker.",
+            )
+            event_type = "PULL_REQUEST_CREATED"
+        else:
+            event_type = "PULL_REQUEST_RECOVERED"
         task.pull_request_number = pull_request.number
         task.pull_request_url = pull_request.url
-        event_type = "PULL_REQUEST_CREATED"
+        await session.commit()
     else:
         pull_request = await client.get_pull_request(
             repository.owner, repository.name, task.pull_request_number

@@ -260,3 +260,24 @@ class ContextCompiler:
             "diff": await run_git("diff", "--no-ext-diff", cwd=workspace),
         }
         return await self._finish(task, job, context, started)
+
+    async def compile_for_tester(
+        self,
+        task: Task,
+        job: Job,
+        repository: Repository,
+        workspace: Path,
+        checks: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        started = time.monotonic()
+        context = self._base(task, job)
+        context["task_memory"] = await self._persistent_memory(task, JobRole.TESTER)
+        context["technical_plan"] = await self._plan(task)
+        context["open_findings"] = await self._findings(task)
+        context["validation_results"] = checks
+        context["repository"] = {
+            "branch": task.branch_name,
+            "revision": task.current_revision,
+            "diff": await run_git("diff", "--no-ext-diff", cwd=workspace),
+        }
+        return await self._finish(task, job, context, started)

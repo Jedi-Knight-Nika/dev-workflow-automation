@@ -69,16 +69,46 @@ class LinearClient:
             raise TypeError("Linear returned an invalid GraphQL response")
         return data
 
+    async def _connection_nodes(
+        self,
+        query: str,
+        connection_name: str,
+        variables: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Read a complete Linear GraphQL connection using its opaque cursor."""
+        nodes: list[dict[str, Any]] = []
+        cursor: str | None = None
+        while True:
+            page_variables = dict(variables or {})
+            page_variables["after"] = cursor
+            data = await self._graphql(query, page_variables)
+            connection = data.get(connection_name)
+            if not isinstance(connection, dict):
+                raise TypeError(f"Linear returned an invalid {connection_name} connection")
+            batch = connection.get("nodes", [])
+            if not isinstance(batch, list):
+                raise TypeError(f"Linear returned invalid {connection_name} nodes")
+            nodes.extend(node for node in batch if isinstance(node, dict))
+            page_info = connection.get("pageInfo") or {}
+            if not page_info.get("hasNextPage"):
+                return nodes
+            next_cursor = page_info.get("endCursor")
+            if not isinstance(next_cursor, str) or not next_cursor or next_cursor == cursor:
+                raise RuntimeError(
+                    f"Linear {connection_name} pagination returned an invalid cursor"
+                )
+            cursor = next_cursor
+
     async def list_workflow_states(self) -> list[LinearWorkflowState]:
         query = """
-        query WorkflowStates {
-          workflowStates(first: 250) {
+        query WorkflowStates($after: String) {
+          workflowStates(first: 250, after: $after) {
             nodes { id name type team { id name key } }
+            pageInfo { hasNextPage endCursor }
           }
         }
         """
-        data = await self._graphql(query)
-        nodes = data.get("workflowStates", {}).get("nodes", [])
+        nodes = await self._connection_nodes(query, "workflowStates")
         states: list[LinearWorkflowState] = []
         for node in nodes:
             team = node.get("team") or {}
@@ -95,8 +125,16 @@ class LinearClient:
         return sorted(states, key=lambda state: (state["team_name"], state["name"]))
 
     async def list_members(self) -> list[LinearMember]:
-        data = await self._graphql(
-            """query Members { users(first: 250) { nodes { id name email active } } }"""
+        nodes = await self._connection_nodes(
+            """
+            query Members($after: String) {
+              users(first: 250, after: $after) {
+                nodes { id name email active }
+                pageInfo { hasNextPage endCursor }
+              }
+            }
+            """,
+            "users",
         )
         return sorted(
             [
@@ -106,16 +144,16 @@ class LinearClient:
                     "email": str(node.get("email") or ""),
                     "active": bool(node.get("active", True)),
                 }
-                for node in data.get("users", {}).get("nodes", [])
+                for node in nodes
             ],
             key=lambda member: member["name"].lower(),
         )
 
     async def list_issues(self, assignee_id: str, state_ids: list[str]) -> list[LinearIssue]:
-        data = await self._graphql(
+        nodes = await self._connection_nodes(
             """
-            query AssignedIssues($assigneeId: ID!, $stateIds: [ID!]!) {
-              issues(first: 100, filter: {
+            query AssignedIssues($assigneeId: ID!, $stateIds: [ID!]!, $after: String) {
+              issues(first: 100, after: $after, filter: {
                 assignee: { id: { eq: $assigneeId } },
                 state: { id: { in: $stateIds } }
               }) {
@@ -129,13 +167,15 @@ class LinearClient:
                   project { id name }
                   labels { nodes { id name color } }
                 }
+                pageInfo { hasNextPage endCursor }
               }
             }
             """,
+            "issues",
             {"assigneeId": assignee_id, "stateIds": state_ids},
         )
         issues: list[LinearIssue] = []
-        for node in data.get("issues", {}).get("nodes", []):
+        for node in nodes:
             assignee = node.get("assignee") or {}
             state = node.get("state") or {}
             issues.append(

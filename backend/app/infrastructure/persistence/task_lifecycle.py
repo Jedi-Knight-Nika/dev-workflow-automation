@@ -1,5 +1,6 @@
 import types
 import uuid
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Self
 
@@ -82,6 +83,8 @@ class SqlAlchemyTaskLifecycleUnitOfWork:
         session = self._active()
         self._task.state = TaskRecordState(directive.state.value)
         self._task.manual_takeover = directive.manual_takeover
+        if directive.archive:
+            self._task.archived_at = datetime.now(UTC)
         if revision is not None:
             self._task.current_revision = revision
         cancelled_jobs = 0
@@ -99,7 +102,9 @@ class SqlAlchemyTaskLifecycleUnitOfWork:
                 job.state = JobState.CANCELLED
             cancelled_jobs = len(queued)
         payload: dict[str, Any]
-        if directive.state == TaskState.CANCELLED:
+        if directive.archive:
+            event_type, payload = "TASK_ARCHIVED", {}
+        elif directive.state == TaskState.CANCELLED:
             event_type, payload = "TASK_CANCELLED", {"cancelled_jobs": cancelled_jobs}
         elif directive.manual_takeover:
             event_type, payload = (

@@ -1,3 +1,4 @@
+import re
 import shlex
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -127,6 +128,11 @@ class PolicyDecision:
     effective_permission: str | None = None
 
 
+def _command_name(word: str) -> str:
+    name = word.casefold().rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+    return name.removesuffix(".exe").removesuffix(".cmd").removesuffix(".bat")
+
+
 def evaluate(policy: TeamExecutionPolicy, request: ActionRequest) -> PolicyDecision:
     if request.required_permission not in CAPABILITY_CATALOG:
         return PolicyDecision(Decision.DENY, "platform.capability.unknown", "Unknown capability")
@@ -137,11 +143,17 @@ def evaluate(policy: TeamExecutionPolicy, request: ActionRequest) -> PolicyDecis
             f"Effective Role configuration does not grant {request.required_permission}",
         )
     if request.command:
-        executable = request.command[0].casefold()
-        executable = executable.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
-        if executable in HARD_DENIED_COMMANDS:
+        command_words = {
+            _command_name(word)
+            for argument in request.command
+            for word in re.findall(r"[A-Za-z0-9_.\\/:-]+", argument)
+        }
+        forbidden = sorted(command_words & HARD_DENIED_COMMANDS)
+        if forbidden:
             return PolicyDecision(
-                Decision.DENY, "platform.command.forbidden", f"{executable} is hard-denied"
+                Decision.DENY,
+                "platform.command.forbidden",
+                f"{forbidden[0]} is hard-denied",
             )
         rendered = " ".join(shlex.quote(part) for part in request.command).casefold()
         if "/var/run/docker.sock" in rendered or "\\.\\pipe\\docker_engine" in rendered:

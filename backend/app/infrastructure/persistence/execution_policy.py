@@ -62,7 +62,7 @@ class SqlAlchemyExecutionPolicyStore:
     async def resolve_approval(
         self, approval_id: uuid.UUID, approved: bool, resolved_by: str, scope: str
     ) -> ApprovalView:
-        record = await self._session.get(ApprovalRequest, approval_id)
+        record = await self._session.get(ApprovalRequest, approval_id, with_for_update=True)
         if record is None:
             raise LookupError("Approval request not found")
         if record.state != "PENDING" or record.expires_at <= datetime.now(UTC):

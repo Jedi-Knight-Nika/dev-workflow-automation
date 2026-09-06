@@ -18,6 +18,12 @@ def docker_container_spec(settings: Settings, job_id: uuid.UUID) -> dict[str, An
         f"APP_SECRET_KEY={settings.app_secret_key}",
         f"WORKSPACE_ROOT={settings.workspace_root}",
         "SCHEDULER_ENABLED=false",
+        f"MAX_JOB_TOKENS={settings.max_job_tokens}",
+        f"MAX_TASK_TOKENS={settings.max_task_tokens}",
+        f"MAX_TEAM_TOKENS={settings.max_team_tokens}",
+        f"MAX_JOB_COST_USD={settings.max_job_cost_usd}",
+        f"MAX_TASK_COST_USD={settings.max_task_cost_usd}",
+        f"MAX_TEAM_COST_USD={settings.max_team_cost_usd}",
     ]
     if settings.worker_egress_proxy:
         environment.extend(

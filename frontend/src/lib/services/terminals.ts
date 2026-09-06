@@ -10,9 +10,14 @@ export function openTerminal(taskId: string, nodeId: string): Promise<TerminalAc
 
 export function terminalWebSocketUrl(access: TerminalAccess): string {
   const base = API_URL || window.location.origin;
-  const url = new URL(`/api/v1/terminal/${access.session_id}/stream`, base.replace(/^http/, 'ws'));
-  url.searchParams.set('token', access.token);
-  return url.toString();
+  return new URL(
+    `/api/v1/terminal/${access.session_id}/stream`,
+    base.replace(/^http/, 'ws')
+  ).toString();
+}
+
+export function terminalWebSocketProtocols(access: TerminalAccess): string[] {
+  return ['terminal', access.token];
 }
 
 export function closeTerminal(sessionId: string): Promise<void> {

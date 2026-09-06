@@ -42,6 +42,8 @@ class TerminalSession(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     exit_code: Mapped[int | None] = mapped_column(Integer)
+    runtime_owner_id: Mapped[str | None] = mapped_column(String(255))
+    runtime_heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class TerminalEvent(Base):

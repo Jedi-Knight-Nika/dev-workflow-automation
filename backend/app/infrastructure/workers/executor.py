@@ -73,6 +73,34 @@ class ReviewerProposal(BaseModel):
         return self
 
 
+class TesterProposal(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    result: Literal[
+        "TEST_PASS",
+        "TEST_FAILED",
+        "TEST_ENVIRONMENT_FAILURE",
+        "TEST_INCOMPLETE",
+        "NEEDS_HUMAN",
+        "BLOCKED",
+    ]
+    summary: str
+    findings: list[ReviewFinding] = Field(default_factory=list)
+    reason: str | None = None
+
+    @model_validator(mode="after")
+    def validate_outcome(self) -> "TesterProposal":
+        if self.result == "TEST_PASS" and self.findings:
+            raise ValueError("TEST_PASS must not include findings")
+        if self.result == "TEST_FAILED" and not self.findings:
+            raise ValueError("TEST_FAILED requires concrete findings")
+        if (
+            self.result in {"TEST_ENVIRONMENT_FAILURE", "TEST_INCOMPLETE", "NEEDS_HUMAN", "BLOCKED"}
+            and not self.reason
+        ):
+            raise ValueError(f"{self.result} requires a reason")
+        return self
+
+
 def credential_subprocess_environment(values: dict[str, str]) -> dict[str, str]:
     allowed = {
         "NODE_AUTH_TOKEN",

@@ -16,7 +16,7 @@ class SqlAlchemyTaskQueries:
         self._session = session
 
     async def list(self, limit: int, filters: TaskListFilters) -> list[TaskView]:
-        statement: Select[tuple[Task]] = select(Task)
+        statement: Select[tuple[Task]] = select(Task).where(Task.archived_at.is_(None))
         if filters.search:
             pattern = f"%{filters.search.strip()}%"
             statement = statement.where(

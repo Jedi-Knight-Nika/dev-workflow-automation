@@ -6,7 +6,12 @@
   import ErrorBanner from '$lib/components/ErrorBanner.svelte';
   import type { AgentConfig, TerminalAccess } from '$lib/types';
   import { runTaskCommand } from '$lib/services/tasks';
-  import { closeTerminal, openTerminal, terminalWebSocketUrl } from '$lib/services/terminals';
+  import {
+    closeTerminal,
+    openTerminal,
+    terminalWebSocketProtocols,
+    terminalWebSocketUrl
+  } from '$lib/services/terminals';
   import { t } from '$lib/i18n/index.svelte';
 
   let { agent, nodeId, onClose }: { agent: AgentConfig; nodeId: string; onClose: () => void } =
@@ -45,7 +50,7 @@
       terminal.loadAddon(fit);
       terminal.open(host);
       fit.fit();
-      socket = new WebSocket(terminalWebSocketUrl(access));
+      socket = new WebSocket(terminalWebSocketUrl(access), terminalWebSocketProtocols(access));
       socket.onopen = () => {
         connected = true;
         socket?.send(

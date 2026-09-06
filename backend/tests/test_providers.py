@@ -6,6 +6,7 @@ import pytest
 
 from app.db.models import JobRole
 from app.infrastructure.workers.structured_output import (
+    ProviderAttempt,
     parse_model_data,
     run_with_structured_repair,
 )
@@ -177,6 +178,29 @@ async def test_structured_output_repairs_are_bounded() -> None:
             JobRole.REVIEWER,
         )
     assert len(provider.prompts) == 3
+
+
+@pytest.mark.asyncio
+async def test_budget_hook_runs_before_every_provider_attempt() -> None:
+    provider = SequenceProvider(
+        [
+            "bad",
+            '{"result":"PASS","summary":"Clean","findings":[]}',
+        ]
+    )
+    observed_attempt_counts: list[int] = []
+
+    async def check_budget(attempts: list[ProviderAttempt]) -> None:
+        observed_attempt_counts.append(len(attempts))
+
+    await run_with_structured_repair(
+        provider,
+        ProviderRequest(model="test", system="review", prompt="context"),
+        JobRole.REVIEWER,
+        before_attempt=check_budget,
+    )
+
+    assert observed_attempt_counts == [0, 1]
 
 
 from app.worker import estimate_cost_usd

@@ -62,6 +62,24 @@ def test_hard_denied_commands_cannot_be_enabled(command: tuple[str, ...]) -> Non
     )
 
 
+@pytest.mark.parametrize(
+    "command",
+    [
+        ("bash", "-c", "sudo systemctl reboot"),
+        ("sh", "-c", "docker run image"),
+        ("env", "sudo", "shutdown"),
+        ("pwsh", "-Command", "Start-Process runas"),
+    ],
+)
+def test_hard_denied_commands_cannot_hide_behind_an_interpreter(
+    command: tuple[str, ...],
+) -> None:
+    assert (
+        evaluate(TeamExecutionPolicy(), request("RUN_COMMANDS", command=command)).decision
+        == Decision.DENY
+    )
+
+
 def test_missing_role_permission_is_denied() -> None:
     action = ActionRequest("filesystem", "write", "WRITE_REPOSITORY", frozenset())
     assert evaluate(TeamExecutionPolicy(), action).decision == Decision.DENY

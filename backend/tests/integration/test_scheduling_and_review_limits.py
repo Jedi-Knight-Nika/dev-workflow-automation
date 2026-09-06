@@ -15,13 +15,16 @@ from app.db.models import (
     TaskState,
     Team,
     WorkflowDefinition,
+    WorkflowEdge,
     WorkflowNode,
+    WorkflowTransition,
 )
 from app.domain.jobs import CompletionDirective
 from app.infrastructure.persistence.job_operations import claim_next_job
 from app.infrastructure.persistence.reviewer_completion import (
     SqlAlchemyReviewerCompletionUnitOfWork,
 )
+from app.infrastructure.persistence.workflow_routing import route_completed_job
 
 pytestmark = pytest.mark.asyncio
 
@@ -166,5 +169,106 @@ async def test_review_cycle_limit_routes_task_to_human_attention(
             assert task is not None and task.state == TaskState.NEEDS_HUMAN
             assert list(repair_jobs) == []
             assert "REVIEW_CYCLE_LIMIT_REACHED" in event_types
+    finally:
+        await _delete_test_team(postgres_session_factory, team_id)
+
+
+async def test_pinned_workflow_edge_creates_configured_next_job(
+    postgres_session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    team_id = uuid.uuid4()
+    workflow_id = uuid.uuid4()
+    source_id = uuid.uuid4()
+    target_id = uuid.uuid4()
+    edge_id = uuid.uuid4()
+    task_id = uuid.uuid4()
+    job_id = uuid.uuid4()
+    try:
+        async with postgres_session_factory() as session:
+            session.add(Team(id=team_id, name=f"route-test-{team_id}"))
+            await session.flush()
+            session.add(
+                WorkflowDefinition(
+                    id=workflow_id,
+                    team_id=team_id,
+                    version=3,
+                    name="Configured routing integration workflow",
+                )
+            )
+            session.add_all(
+                [
+                    WorkflowNode(
+                        id=source_id,
+                        workflow_id=workflow_id,
+                        role=JobRole.THINKER.value,
+                        label="Planner",
+                        position_x=0,
+                        position_y=0,
+                    ),
+                    WorkflowNode(
+                        id=target_id,
+                        workflow_id=workflow_id,
+                        role=JobRole.EXECUTOR.value,
+                        label="Builder",
+                        position_x=100,
+                        position_y=0,
+                    ),
+                ]
+            )
+            await session.flush()
+            session.add(
+                WorkflowEdge(
+                    id=edge_id,
+                    workflow_id=workflow_id,
+                    source_node_id=source_id,
+                    target_node_id=target_id,
+                    outcome="PLAN_READY",
+                    job_type="CUSTOM_IMPLEMENTATION",
+                )
+            )
+            session.add(
+                Task(
+                    id=task_id,
+                    title="Use configured workflow route",
+                    team_id=team_id,
+                    workflow_id=workflow_id,
+                    workflow_version=3,
+                )
+            )
+            await session.flush()
+            session.add(
+                Job(
+                    id=job_id,
+                    task_id=task_id,
+                    workflow_node_id=source_id,
+                    team_workflow_version=3,
+                    role=JobRole.THINKER,
+                    action="CREATE_PLAN",
+                    state=JobState.SUCCEEDED,
+                )
+            )
+            await session.commit()
+
+        async with postgres_session_factory() as session:
+            task = await session.get(Task, task_id, with_for_update=True)
+            assert task is not None
+            route = await route_completed_job(
+                session, task, job_id, "PLAN_READY", {"plan": "ready"}
+            )
+            await session.commit()
+            assert route is not None
+
+        async with postgres_session_factory() as session:
+            next_job = await session.scalar(
+                select(Job).where(Job.task_id == task_id, Job.id != job_id)
+            )
+            transition = await session.scalar(
+                select(WorkflowTransition).where(WorkflowTransition.job_id == job_id)
+            )
+            assert next_job is not None
+            assert next_job.role == JobRole.EXECUTOR
+            assert next_job.action == "CUSTOM_IMPLEMENTATION"
+            assert next_job.workflow_node_id == target_id
+            assert transition is not None and transition.matched_edge_id == edge_id
     finally:
         await _delete_test_team(postgres_session_factory, team_id)

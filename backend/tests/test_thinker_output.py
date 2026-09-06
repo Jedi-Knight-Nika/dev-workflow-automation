@@ -43,3 +43,19 @@ def test_thinker_accepts_human_escalation() -> None:
         '{"result":"NEEDS_HUMAN","reason":"Conflicting business invariants"}',
     )
     assert result["reason"] == "Conflicting business invariants"
+
+
+def test_tester_accepts_passing_validation() -> None:
+    result = validate_role_output(
+        JobRole.TESTER,
+        '{"result":"TEST_PASS","summary":"All validation passed","findings":[]}',
+    )
+    assert result["result"] == "TEST_PASS"
+
+
+def test_tester_failure_requires_a_concrete_finding() -> None:
+    with pytest.raises(ValidationError, match="concrete findings"):
+        validate_role_output(
+            JobRole.TESTER,
+            '{"result":"TEST_FAILED","summary":"Validation failed","findings":[]}',
+        )

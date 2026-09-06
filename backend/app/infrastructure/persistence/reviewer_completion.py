@@ -19,6 +19,7 @@ from app.infrastructure.persistence.job_operations import (
     release_workspace_lease,
 )
 from app.infrastructure.persistence.reviews import persist_review_result
+from app.infrastructure.persistence.workflow_routing import route_completed_job
 from app.infrastructure.pull_requests.operations import publish_pull_request
 
 log = structlog.get_logger()
@@ -102,6 +103,28 @@ class SqlAlchemyReviewerCompletionUnitOfWork:
         task = await session.get(Task, context.task_id)
         if task is None:
             raise RuntimeError("Task disappeared during Reviewer completion")
+        if directive in {
+            CompletionDirective.REVIEW_REPAIR,
+            CompletionDirective.REVIEW_REPLAN,
+        } and await self._review_cycle_limit_reached(task, context):
+            await record_event(
+                session,
+                task.id,
+                "JOB_SUCCEEDED",
+                {"job_id": str(context.job_id), "result": context.outcome},
+            )
+            return False
+        route = await route_completed_job(
+            session, task, context.job_id, context.outcome, {"reviewer_result": context.result}
+        )
+        if route is not None:
+            await record_event(
+                session,
+                task.id,
+                "JOB_SUCCEEDED",
+                {"job_id": str(context.job_id), "result": context.outcome},
+            )
+            return route.publish
         should_publish = False
         if directive == CompletionDirective.REVIEW_PUBLISH:
             task.state = TaskState.WAITING_GITHUB
@@ -128,11 +151,9 @@ class SqlAlchemyReviewerCompletionUnitOfWork:
             )
             await record_event(session, task.id, event_type, details)
         elif directive == CompletionDirective.REVIEW_REPAIR:
-            if not await self._review_cycle_limit_reached(task, context):
-                await self._enqueue_repair(task, context)
+            await self._enqueue_repair(task, context)
         elif directive == CompletionDirective.REVIEW_REPLAN:
-            if not await self._review_cycle_limit_reached(task, context):
-                await self._enqueue_replan(task, context)
+            await self._enqueue_replan(task, context)
         await record_event(
             session,
             task.id,

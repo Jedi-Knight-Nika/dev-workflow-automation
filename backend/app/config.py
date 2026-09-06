@@ -24,8 +24,10 @@ class Settings(BaseSettings):
     database_pool_timeout_seconds: int = Field(default=30, ge=1, le=300)
     app_secret_key: str = Field(default="development-only-secret-change-me", min_length=16)
     workspace_root: Path = Path("./workspaces")
+    archived_workspace_retention_days: int = Field(default=30, ge=1, le=3650)
     scheduler_enabled: bool = True
     scheduler_poll_seconds: float = 1.0
+    scheduler_max_concurrent_jobs: int = Field(default=2, ge=1, le=32)
     worker_timeout_seconds: int = 300
     docker_api_timeout_seconds: int = Field(default=30, ge=1, le=300)
     worker_lease_seconds: int = 330
@@ -37,6 +39,12 @@ class Settings(BaseSettings):
     max_external_review_repairs_per_task: int = 3
     max_job_attempts: int = 3
     job_retry_base_seconds: int = 5
+    max_job_tokens: int = Field(default=0, ge=0)
+    max_task_tokens: int = Field(default=0, ge=0)
+    max_team_tokens: int = Field(default=0, ge=0)
+    max_job_cost_usd: float = Field(default=0, ge=0)
+    max_task_cost_usd: float = Field(default=0, ge=0)
+    max_team_cost_usd: float = Field(default=0, ge=0)
     worker_transport: Literal["local", "docker"] = "local"
     docker_socket: Path = Path("/var/run/docker.sock")
     worker_container_image: str = "autonomous-engineering-worker-runtime:latest"

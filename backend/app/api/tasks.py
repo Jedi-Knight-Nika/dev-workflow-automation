@@ -337,6 +337,14 @@ async def resume_task(
     return await _change_lifecycle(task_id, LifecycleAction.RESUME, factory)
 
 
+@router.post("/{task_id}/archive", response_model=TaskRead)
+async def archive_task(
+    task_id: uuid.UUID,
+    factory: TaskLifecycleUnitOfWorkFactory = Depends(get_task_lifecycle_factory),
+) -> TaskRead:
+    return await _change_lifecycle(task_id, LifecycleAction.ARCHIVE, factory)
+
+
 async def _change_lifecycle(
     task_id: uuid.UUID, action: LifecycleAction, factory: TaskLifecycleUnitOfWorkFactory
 ) -> TaskRead:

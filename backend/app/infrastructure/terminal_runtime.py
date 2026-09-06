@@ -4,6 +4,7 @@ import os
 import pty
 import re
 import signal
+import socket
 import struct
 import subprocess
 import termios
@@ -13,7 +14,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from fastapi import WebSocket
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 
 from app.db.models import Task, TerminalEvent, TerminalSession
 from app.db.session import SessionLocal
@@ -37,6 +38,7 @@ class LiveTerminal:
 
 class LocalPtyTerminalRuntime:
     def __init__(self) -> None:
+        self._owner_id = f"{socket.gethostname()}:{os.getpid()}"
         self._sessions: dict[uuid.UUID, LiveTerminal] = {}
         self._locks: dict[uuid.UUID, asyncio.Lock] = {}
 
@@ -50,7 +52,7 @@ class LocalPtyTerminalRuntime:
                 self._sessions[session_id] = live
                 live.reader_task = asyncio.create_task(self._read_output(session_id, live))
             live.subscribers.add(websocket)
-        await websocket.accept()
+        await websocket.accept(subprotocol="terminal")
         if live.history:
             await websocket.send_json({"type": "output", "data": live.history})
         await websocket.send_json({"type": "status", "status": "CONNECTED"})
@@ -77,9 +79,30 @@ class LocalPtyTerminalRuntime:
         finally:
             live.subscribers.discard(websocket)
 
+    async def terminate(self, session_id: uuid.UUID) -> None:
+        """Terminate the live PTY process when its durable session is closed."""
+        lock = self._locks.setdefault(session_id, asyncio.Lock())
+        async with lock:
+            live = self._sessions.get(session_id)
+            if live is None:
+                return
+            if live.process.poll() is None:
+                os.killpg(live.process.pid, signal.SIGTERM)
+        try:
+            await asyncio.wait_for(asyncio.to_thread(live.process.wait), timeout=2)
+        except TimeoutError:
+            if live.process.poll() is None:
+                os.killpg(live.process.pid, signal.SIGKILL)
+            await asyncio.to_thread(live.process.wait)
+        if live.reader_task is not None and live.reader_task is not asyncio.current_task():
+            try:
+                await asyncio.wait_for(asyncio.shield(live.reader_task), timeout=2)
+            except TimeoutError:
+                live.reader_task.cancel()
+
     async def _authorize(self, session_id: uuid.UUID, token: str) -> tuple[TerminalSession, Path]:
         async with SessionLocal() as session:
-            terminal = await session.get(TerminalSession, session_id)
+            terminal = await session.get(TerminalSession, session_id, with_for_update=True)
             if (
                 terminal is None
                 or terminal.status != "OPEN"
@@ -87,9 +110,14 @@ class LocalPtyTerminalRuntime:
                 or terminal.token_hash != terminal_token_hash(token)
             ):
                 raise PermissionError("Terminal session is invalid or expired")
+            if terminal.runtime_owner_id not in {None, self._owner_id}:
+                raise PermissionError("Terminal session is owned by another runtime instance")
             task = await session.get(Task, terminal.task_id)
             if task is None or not task.manual_takeover or not task.workspace_path:
                 raise PermissionError("Task is not under manual control")
+            terminal.runtime_owner_id = self._owner_id
+            terminal.runtime_heartbeat_at = datetime.now(UTC)
+            await session.commit()
             return terminal, Path(task.workspace_path)
 
     def _start(self, terminal: TerminalSession, workspace: Path) -> LiveTerminal:
@@ -117,7 +145,14 @@ class LocalPtyTerminalRuntime:
         return LiveTerminal(process, master_fd)
 
     async def _read_output(self, session_id: uuid.UUID, live: LiveTerminal) -> None:
+        last_heartbeat = 0.0
         while live.process.poll() is None:
+            now = asyncio.get_running_loop().time()
+            if now - last_heartbeat >= 1:
+                if not await self._heartbeat(session_id):
+                    os.killpg(live.process.pid, signal.SIGTERM)
+                    break
+                last_heartbeat = now
             try:
                 data = await asyncio.to_thread(os.read, live.master_fd, 16_384)
             except (BlockingIOError, OSError):
@@ -134,20 +169,52 @@ class LocalPtyTerminalRuntime:
                 except RuntimeError:
                     live.subscribers.discard(websocket)
             await self._audit(session_id, "OUTPUT", {"data": output[-16_384:]})
+        if live.process.poll() is None:
+            try:
+                await asyncio.wait_for(asyncio.to_thread(live.process.wait), timeout=2)
+            except TimeoutError:
+                os.killpg(live.process.pid, signal.SIGKILL)
+                await asyncio.to_thread(live.process.wait)
         exit_code = live.process.returncode
         await self._audit(session_id, "EXIT", {"exit_code": exit_code})
         async with SessionLocal() as session:
             terminal = await session.get(TerminalSession, session_id)
             if terminal:
-                terminal.status = "EXITED"
+                if terminal.status == "OPEN":
+                    terminal.status = "EXITED"
                 terminal.exit_code = exit_code
-                terminal.closed_at = datetime.now(UTC)
+                terminal.closed_at = terminal.closed_at or datetime.now(UTC)
                 await session.commit()
+        self._sessions.pop(session_id, None)
+        self._locks.pop(session_id, None)
+        try:
+            os.close(live.master_fd)
+        except OSError:
+            pass
+
+    async def _heartbeat(self, session_id: uuid.UUID) -> bool:
+        async with SessionLocal() as session:
+            terminal = await session.get(TerminalSession, session_id, with_for_update=True)
+            if (
+                terminal is None
+                or terminal.status != "OPEN"
+                or terminal.expires_at < datetime.now(UTC)
+                or terminal.runtime_owner_id != self._owner_id
+            ):
+                return False
+            terminal.runtime_heartbeat_at = datetime.now(UTC)
+            await session.commit()
+            return True
 
     async def _audit(
         self, session_id: uuid.UUID, event_type: str, payload: dict[str, object]
     ) -> None:
         async with SessionLocal() as session:
+            if session.get_bind().dialect.name == "postgresql":
+                await session.execute(
+                    text("SELECT pg_advisory_xact_lock(hashtextextended(:session_id, 0))"),
+                    {"session_id": str(session_id)},
+                )
             sequence = (
                 int(
                     await session.scalar(

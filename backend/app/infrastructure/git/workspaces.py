@@ -3,15 +3,18 @@ import base64
 import os
 import re
 import shutil
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from sqlalchemy import select
+from sqlalchemy import exists, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
-from app.db.models import Integration, Repository, Task
+from app.db.models import Integration, Repository, Task, WorkspaceLease
 from app.infrastructure.security.crypto import cipher
 from app.integrations.github_auth import resolve_github_auth
+
+from .locking import repository_lock
 
 
 class GitCommandError(RuntimeError):
@@ -65,6 +68,11 @@ async def github_token(session: AsyncSession) -> str | None:
 
 
 async def prepare_repository_cache(session: AsyncSession, repository: Repository) -> Path:
+    async with repository_lock(session, repository.id):
+        return await _prepare_repository_cache(session, repository)
+
+
+async def _prepare_repository_cache(session: AsyncSession, repository: Repository) -> Path:
     settings = get_settings()
     repositories_root = settings.workspace_root.resolve() / "_repositories"
     repositories_root.mkdir(parents=True, exist_ok=True)
@@ -88,24 +96,76 @@ async def prepare_workspace(session: AsyncSession, task: Task, repository: Repos
     root = settings.workspace_root.resolve()
     worktrees_root = root / "tasks"
     worktrees_root.mkdir(parents=True, exist_ok=True)
-    cache = await prepare_repository_cache(session, repository)
-    workspace = worktrees_root / str(task.id)
+    async with repository_lock(session, repository.id):
+        cache = await _prepare_repository_cache(session, repository)
+        workspace = worktrees_root / str(task.id)
 
-    branch = task_branch(task)
-    if not workspace.exists():
-        await run_git(
-            "worktree",
-            "add",
-            "-B",
-            branch,
-            str(workspace),
-            f"origin/{repository.default_branch}",
-            cwd=cache,
-        )
-    revision = await run_git("rev-parse", "HEAD", cwd=workspace)
-    task.repository_id = repository.id
-    task.branch_name = branch
-    task.workspace_path = str(workspace)
-    task.current_revision = revision
-    await session.commit()
+        branch = task_branch(task)
+        if not workspace.exists():
+            await run_git(
+                "worktree",
+                "add",
+                "-B",
+                branch,
+                str(workspace),
+                f"origin/{repository.default_branch}",
+                cwd=cache,
+            )
+        revision = await run_git("rev-parse", "HEAD", cwd=workspace)
+        task.repository_id = repository.id
+        task.branch_name = branch
+        task.workspace_path = str(workspace)
+        task.current_revision = revision
+        await session.commit()
     return workspace
+
+
+async def cleanup_archived_workspaces(
+    session: AsyncSession, workspace_root: Path, retention_days: int
+) -> int:
+    """Remove only old, archived, clean worktrees that have no active lease."""
+    cutoff = datetime.now(UTC) - timedelta(days=retention_days)
+    tasks = list(
+        (
+            await session.scalars(
+                select(Task).where(
+                    Task.archived_at.is_not(None),
+                    Task.archived_at <= cutoff,
+                    Task.workspace_path.is_not(None),
+                    ~exists().where(WorkspaceLease.task_id == Task.id),
+                )
+            )
+        ).all()
+    )
+    tasks_root = (workspace_root.resolve() / "tasks").resolve()
+    removed = 0
+    for task in tasks:
+        workspace = Path(task.workspace_path or "").resolve()
+        if not workspace.is_relative_to(tasks_root):
+            continue
+        if workspace.exists():
+            try:
+                if await run_git("status", "--porcelain", cwd=workspace):
+                    continue
+            except GitCommandError:
+                continue
+        repository = (
+            await session.get(Repository, task.repository_id) if task.repository_id else None
+        )
+        try:
+            if workspace.exists() and repository is not None and repository.local_path:
+                cache = Path(repository.local_path).resolve()
+                repositories_root = (workspace_root.resolve() / "_repositories").resolve()
+                if not cache.is_relative_to(repositories_root):
+                    continue
+                async with repository_lock(session, repository.id):
+                    await run_git("worktree", "remove", "--force", str(workspace), cwd=cache)
+            elif workspace.exists():
+                shutil.rmtree(workspace)
+        except GitCommandError:
+            continue
+        task.workspace_path = None
+        removed += 1
+    if removed:
+        await session.commit()
+    return removed

@@ -17,6 +17,7 @@ from app.infrastructure.persistence.job_operations import (
     record_event,
     release_workspace_lease,
 )
+from app.infrastructure.persistence.workflow_routing import route_completed_job
 
 
 class SqlAlchemyExecutorCompletionUnitOfWork:
@@ -91,6 +92,17 @@ class SqlAlchemyExecutorCompletionUnitOfWork:
         task = await session.get(Task, context.task_id)
         if task is None:
             raise RuntimeError("Task disappeared during Executor completion")
+        route = await route_completed_job(
+            session, task, context.job_id, context.outcome, {"executor_result": context.result}
+        )
+        if route is not None:
+            await record_event(
+                session,
+                task.id,
+                "JOB_SUCCEEDED",
+                {"job_id": str(context.job_id), "result": context.outcome},
+            )
+            return
         if directive == CompletionDirective.EXECUTOR_REVIEW:
             task.state = TaskState.LOCAL_VALIDATION
             await enqueue_job(

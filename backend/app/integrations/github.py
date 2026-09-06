@@ -20,23 +20,31 @@ class GitHubClient:
         }
 
     async def list_repositories(self) -> list[DiscoveredRepository]:
+        repositories: list[dict[str, Any]] = []
         async with httpx.AsyncClient(timeout=30, headers=self.headers) as client:
-            if self.installation:
-                response = await client.get(
-                    "https://api.github.com/installation/repositories", params={"per_page": 100}
+            page = 1
+            while True:
+                params: dict[str, Any] = {"per_page": 100, "page": page}
+                if not self.installation:
+                    params.update(
+                        {
+                            "sort": "full_name",
+                            "affiliation": "owner,collaborator,organization_member",
+                        }
+                    )
+                endpoint = (
+                    "https://api.github.com/installation/repositories"
+                    if self.installation
+                    else "https://api.github.com/user/repos"
                 )
-            else:
-                response = await client.get(
-                    "https://api.github.com/user/repos",
-                    params={
-                        "per_page": 100,
-                        "sort": "full_name",
-                        "affiliation": "owner,collaborator,organization_member",
-                    },
-                )
-            response.raise_for_status()
-            body: Any = response.json()
-            data: list[dict[str, Any]] = body["repositories"] if self.installation else body
+                response = await client.get(endpoint, params=params)
+                response.raise_for_status()
+                body: Any = response.json()
+                batch: list[dict[str, Any]] = body["repositories"] if self.installation else body
+                repositories.extend(batch)
+                if len(batch) < 100:
+                    break
+                page += 1
         return [
             DiscoveredRepository(
                 external_repo_id=str(item["id"]),
@@ -47,8 +55,30 @@ class GitHubClient:
                 default_branch=item["default_branch"],
                 private=item["private"],
             )
-            for item in data
+            for item in repositories
         ]
+
+    async def find_open_pull_request(
+        self, owner: str, repository: str, head_branch: str
+    ) -> PullRequestRead | None:
+        async with httpx.AsyncClient(timeout=30, headers=self.headers) as client:
+            response = await client.get(
+                f"https://api.github.com/repos/{owner}/{repository}/pulls",
+                params={"state": "open", "head": f"{owner}:{head_branch}", "per_page": 1},
+            )
+            response.raise_for_status()
+            items: list[dict[str, Any]] = response.json()
+        if not items:
+            return None
+        data = items[0]
+        return PullRequestRead(
+            number=data["number"],
+            url=data["html_url"],
+            state=data["state"],
+            head_sha=data["head"]["sha"],
+            merged=bool(data.get("merged", False)),
+            merge_commit_sha=data.get("merge_commit_sha"),
+        )
 
     async def create_pull_request(
         self, owner: str, repository: str, head: str, base: str, title: str, body: str

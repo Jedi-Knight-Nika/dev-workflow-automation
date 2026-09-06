@@ -50,6 +50,8 @@ async def enqueue_job(
     action: str,
     priority: int | None = None,
     payload: dict[str, Any] | None = None,
+    workflow_node: WorkflowNode | None = None,
+    workflow_version: int | None = None,
 ) -> Job:
     job = Job(
         task_id=task.id,
@@ -59,7 +61,13 @@ async def enqueue_job(
         payload=payload or {},
     )
     session.add(job)
-    await _pin_job_to_workflow(session, task, job)
+    if workflow_node is None:
+        await _pin_job_to_workflow(session, task, job)
+    else:
+        job.workflow_node_id = workflow_node.id
+        job.agent_id = workflow_node.agent_id
+        job.team_workflow_version = workflow_version
+        task.current_workflow_node_id = workflow_node.id
     task.state = ROLE_TASK_STATE[role]
     await record_event(
         session,

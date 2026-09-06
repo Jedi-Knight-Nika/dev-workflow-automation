@@ -1,4 +1,6 @@
+import asyncio
 import uuid
+from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
@@ -54,6 +56,7 @@ async def test_reclaimed_job_resumes_durable_result_without_worker_execution() -
         unused,
         unused,
         unused,
+        unused,
     )
     claimed = ClaimedJob(
         job_id,
@@ -73,3 +76,58 @@ async def test_reclaimed_job_resumes_durable_result_without_worker_execution() -
 
     assert not runner.called
     assert len(executor_completer.commands) == 1
+
+
+@pytest.mark.asyncio
+async def test_scheduler_runs_jobs_up_to_configured_bound() -> None:
+    jobs = [ClaimedJob(uuid.uuid4(), uuid.uuid4()), ClaimedJob(uuid.uuid4(), uuid.uuid4())]
+
+    class Dispatch:
+        async def claim(self) -> ClaimedJob | None:
+            return jobs.pop(0) if jobs else None
+
+    class NoOp:
+        async def execute(self) -> None:
+            return None
+
+    settings = SimpleNamespace(scheduler_max_concurrent_jobs=2, scheduler_poll_seconds=0.01)
+    unused = cast(Any, object())
+    scheduler = Scheduler(
+        cast(Any, settings),
+        "test-scheduler",
+        cast(Any, Dispatch()),
+        unused,
+        unused,
+        unused,
+        unused,
+        unused,
+        unused,
+        unused,
+        cast(Any, NoOp()),
+        unused,
+        unused,
+        unused,
+        cast(Any, NoOp()),
+    )
+    release = asyncio.Event()
+    both_started = asyncio.Event()
+    active = 0
+    peak = 0
+
+    async def execute(_job: ClaimedJob) -> None:
+        nonlocal active, peak
+        active += 1
+        peak = max(peak, active)
+        if active == 2:
+            both_started.set()
+        await release.wait()
+        active -= 1
+
+    scheduler._execute = execute  # type: ignore[method-assign]
+    run_task = asyncio.create_task(scheduler._run())
+    await asyncio.wait_for(both_started.wait(), timeout=1)
+    scheduler._stop.set()
+    release.set()
+    await asyncio.wait_for(run_task, timeout=1)
+
+    assert peak == 2

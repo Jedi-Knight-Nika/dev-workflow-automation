@@ -12,6 +12,7 @@ from app.application.jobs import (
     CompleteFailedJob,
     CompleteIntakeJob,
     CompleteReviewerJob,
+    CompleteTesterJob,
     CompleteThinkerJob,
 )
 from app.application.manage_worker_presence import ManageWorkerPresence
@@ -20,6 +21,7 @@ from app.application.ports.intake_completion import IntakeCompletionCommand
 from app.application.ports.job_completion import FailedJobCommand
 from app.application.ports.job_dispatch import ClaimedJob
 from app.application.ports.reviewer_completion import ReviewerCompletionCommand
+from app.application.ports.tester_completion import TesterCompletionCommand
 from app.application.ports.thinker_completion import ThinkerCompletionCommand
 from app.application.ports.worker_runtime import WorkerRunner
 from app.application.process_deliveries import ProcessDeliveries
@@ -45,6 +47,7 @@ class Scheduler:
         intake_job_completer: CompleteIntakeJob,
         thinker_job_completer: CompleteThinkerJob,
         executor_job_completer: CompleteExecutorJob,
+        tester_job_completer: CompleteTesterJob,
         reviewer_job_completer: CompleteReviewerJob,
         delivery_processor: ProcessDeliveries,
         index_processor: ProcessIndexes,
@@ -59,6 +62,7 @@ class Scheduler:
         self._intake_job_completer = intake_job_completer
         self._thinker_job_completer = thinker_job_completer
         self._executor_job_completer = executor_job_completer
+        self._tester_job_completer = tester_job_completer
         self._reviewer_job_completer = reviewer_job_completer
         self._delivery_processor = delivery_processor
         self._index_processor = index_processor
@@ -70,6 +74,7 @@ class Scheduler:
         self._loop_task: asyncio.Task[None] | None = None
         self._index_task: asyncio.Task[None] | None = None
         self._heartbeat_task: asyncio.Task[None] | None = None
+        self._job_tasks: set[asyncio.Task[None]] = set()
 
     async def start(self) -> None:
         await self._startup_maintenance.execute()
@@ -104,20 +109,47 @@ class Scheduler:
                 pass
 
     async def _run(self) -> None:
-        while not self._stop.is_set():
-            try:
-                await self._task_reconciler.execute()
-                await self._delivery_processor.execute()
-                job = await self._job_dispatch.claim()
-                if job:
-                    await self._execute(job)
-                else:
+        try:
+            while not self._stop.is_set():
+                try:
+                    self._job_tasks = {task for task in self._job_tasks if not task.done()}
+                    await self._task_reconciler.execute()
+                    await self._delivery_processor.execute()
+                    claimed_any = False
+                    while len(self._job_tasks) < self.settings.scheduler_max_concurrent_jobs:
+                        job = await self._job_dispatch.claim()
+                        if job is None:
+                            break
+                        claimed_any = True
+                        task = asyncio.create_task(
+                            self._execute_safely(job), name=f"job-{job.job_id}"
+                        )
+                        self._job_tasks.add(task)
+                    if self._job_tasks:
+                        await asyncio.wait(
+                            self._job_tasks,
+                            timeout=self.settings.scheduler_poll_seconds,
+                            return_when=asyncio.FIRST_COMPLETED,
+                        )
+                    elif not claimed_any:
+                        await asyncio.sleep(self.settings.scheduler_poll_seconds)
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    log.exception("scheduler_iteration_failed")
                     await asyncio.sleep(self.settings.scheduler_poll_seconds)
-            except asyncio.CancelledError:
-                raise
-            except Exception:
-                log.exception("scheduler_iteration_failed")
-                await asyncio.sleep(self.settings.scheduler_poll_seconds)
+        finally:
+            if self._job_tasks:
+                await asyncio.gather(*self._job_tasks, return_exceptions=True)
+                self._job_tasks.clear()
+
+    async def _execute_safely(self, claimed_job: ClaimedJob) -> None:
+        try:
+            await self._execute(claimed_job)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception("job_execution_failed", job_id=str(claimed_job.job_id))
 
     async def _run_indexer(self) -> None:
         while not self._stop.is_set():
@@ -233,6 +265,13 @@ class Scheduler:
         if result and result.get("role") == AgentRole.EXECUTOR.value:
             completed = await self._executor_job_completer.execute(
                 ExecutorCompletionCommand(job_id, lease_token, result, datetime.now(UTC))
+            )
+            if not completed:
+                log.warning("stale_worker_result_rejected", job_id=str(job_id))
+            return
+        if result and result.get("role") == AgentRole.TESTER.value:
+            completed = await self._tester_job_completer.execute(
+                TesterCompletionCommand(job_id, lease_token, result, datetime.now(UTC))
             )
             if not completed:
                 log.warning("stale_worker_result_rejected", job_id=str(job_id))

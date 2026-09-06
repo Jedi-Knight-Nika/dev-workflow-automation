@@ -144,3 +144,49 @@ async def test_linear_workflow_states_are_discovered_and_sorted(
     states = await LinearClient("linear-key").list_workflow_states()
     assert [state["id"] for state in states] == ["started", "done"]
     assert states[1]["team_key"] == "WEB"
+
+
+@pytest.mark.asyncio
+async def test_linear_connections_follow_opaque_cursors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cursors: list[str | None] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        payload = request.content.decode()
+        cursor = "page-2" if '"after":"page-2"' in payload else None
+        cursors.append(cursor)
+        return httpx.Response(
+            200,
+            json={
+                "data": {
+                    "users": {
+                        "nodes": [
+                            {
+                                "id": "user-2" if cursor else "user-1",
+                                "name": "Zed" if cursor else "Alice",
+                                "email": "",
+                                "active": True,
+                            }
+                        ],
+                        "pageInfo": {
+                            "hasNextPage": cursor is None,
+                            "endCursor": "page-2" if cursor is None else None,
+                        },
+                    }
+                }
+            },
+        )
+
+    transport = httpx.MockTransport(handler)
+    original = httpx.AsyncClient
+
+    def client_factory(*args: Any, **kwargs: Any) -> httpx.AsyncClient:
+        kwargs["transport"] = transport
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(httpx, "AsyncClient", client_factory)
+    members = await LinearClient("linear-key").list_members()
+
+    assert cursors == [None, "page-2"]
+    assert [member["id"] for member in members] == ["user-1", "user-2"]

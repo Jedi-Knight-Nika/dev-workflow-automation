@@ -1,12 +1,13 @@
 import json
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from app.db.models import JobRole
-from app.infrastructure.workers.executor import ExecutorProposal, ReviewerProposal
+from app.infrastructure.workers.executor import ExecutorProposal, ReviewerProposal, TesterProposal
 from app.providers import AIProvider, ProviderRequest, ProviderResponse
 
 
@@ -88,6 +89,8 @@ def validate_role_output(role: JobRole, text: str) -> dict[str, Any]:
         model = ExecutorProposal
     elif role == JobRole.REVIEWER:
         model = ReviewerProposal
+    elif role == JobRole.TESTER:
+        model = TesterProposal
     else:
         raise ValueError(f"Unsupported role {role.value}")
     return model.model_validate(data).model_dump(mode="json")
@@ -98,12 +101,15 @@ async def run_with_structured_repair(
     request: ProviderRequest,
     role: JobRole,
     max_repairs: int = 2,
+    before_attempt: Callable[[list[ProviderAttempt]], Awaitable[None]] | None = None,
 ) -> tuple[dict[str, Any], list[ProviderAttempt]]:
     attempts: list[ProviderAttempt] = []
     prompt = request.prompt
     cacheable_prefix: str | None = None
     last_error: ValidationError | None = None
     for attempt_number in range(max(0, min(max_repairs, 10)) + 1):
+        if before_attempt is not None:
+            await before_attempt(attempts)
         started = time.monotonic()
         response = await provider.run(
             ProviderRequest(
