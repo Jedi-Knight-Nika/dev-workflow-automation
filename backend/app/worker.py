@@ -4,7 +4,7 @@ import json
 import sys
 import uuid
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import Any
 
@@ -92,6 +92,48 @@ class ResolvedAgentConfig:
     model_capability_version: str | None = None
     agent_config_version: int | None = None
     strategy_version: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeAuditSnapshot:
+    """Immutable audit metadata captured before provider execution begins."""
+
+    agent_id: uuid.UUID | None
+    role_id: uuid.UUID | None
+    role_version: int | None
+    permissions: tuple[str, ...]
+    knowledge_scope: tuple[str, ...]
+    effective_runtime_json: str
+    effective_runtime_hash: str | None
+    model_capability_version: str | None
+    agent_config_version: int | None
+    strategy_version: str | None
+
+    @classmethod
+    def capture(cls, config: ResolvedAgentConfig) -> "RuntimeAuditSnapshot":
+        runtime = config.effective_runtime or {}
+        runtime_json = json.dumps(runtime, sort_keys=True, default=str)
+        actual_hash = hashlib.sha256(runtime_json.encode()).hexdigest()
+        if config.effective_runtime_hash and config.effective_runtime_hash != actual_hash:
+            raise RuntimeError("Effective runtime configuration changed after resolution")
+        return cls(
+            agent_id=config.agent_id,
+            role_id=config.role_id,
+            role_version=config.role_version,
+            permissions=tuple(config.permissions),
+            knowledge_scope=tuple(config.knowledge_scope),
+            effective_runtime_json=runtime_json,
+            effective_runtime_hash=config.effective_runtime_hash or actual_hash,
+            model_capability_version=config.model_capability_version,
+            agent_config_version=config.agent_config_version,
+            strategy_version=config.strategy_version,
+        )
+
+    def effective_runtime(self) -> dict[str, Any]:
+        value = json.loads(self.effective_runtime_json)
+        if not isinstance(value, dict):
+            raise TypeError("Effective runtime snapshot must be an object")
+        return value
 
 
 REQUIRED_CAPABILITY = {
@@ -364,6 +406,7 @@ async def persist_attempts(
     model: str,
     attempts: list[ProviderAttempt],
     configuration: dict[str, Any],
+    audit_snapshot: RuntimeAuditSnapshot,
 ) -> None:
     for attempt in attempts:
         session.add(
@@ -381,16 +424,16 @@ async def persist_attempts(
                 ),
                 duration_ms=attempt.duration_ms,
                 provider_request_id=attempt.response.request_id,
-                agent_id=configuration.get("_agent_id"),
-                role_id=configuration.get("_role_id"),
-                role_version=configuration.get("_role_version"),
-                effective_permissions=configuration.get("_permissions", []),
-                effective_knowledge_scope=configuration.get("_knowledge_scope", []),
-                effective_runtime_config=configuration.get("_effective_runtime", {}),
-                effective_runtime_config_hash=configuration.get("_effective_runtime_hash"),
-                model_capability_version=configuration.get("_model_capability_version"),
-                agent_config_version=configuration.get("_agent_config_version"),
-                strategy_version=configuration.get("_strategy_version"),
+                agent_id=audit_snapshot.agent_id,
+                role_id=audit_snapshot.role_id,
+                role_version=audit_snapshot.role_version,
+                effective_permissions=list(audit_snapshot.permissions),
+                effective_knowledge_scope=list(audit_snapshot.knowledge_scope),
+                effective_runtime_config=audit_snapshot.effective_runtime(),
+                effective_runtime_config_hash=audit_snapshot.effective_runtime_hash,
+                model_capability_version=audit_snapshot.model_capability_version,
+                agent_config_version=audit_snapshot.agent_config_version,
+                strategy_version=audit_snapshot.strategy_version,
             )
         )
     await session.commit()
@@ -546,18 +589,11 @@ async def run(job_id: uuid.UUID) -> WorkerResult:
             raise RuntimeError(f"Task {job.task_id} not found")
         if config is None or not config.model:
             raise RuntimeError(f"Agent {job.role.value} is not fully configured")
-        config.configuration.update(
-            _agent_id=config.agent_id,
-            _role_id=config.role_id,
-            _role_version=config.role_version,
-            _permissions=list(config.permissions),
-            _knowledge_scope=list(config.knowledge_scope),
-            _effective_runtime=config.effective_runtime or {},
-            _effective_runtime_hash=config.effective_runtime_hash,
-            _model_capability_version=config.model_capability_version,
-            _agent_config_version=config.agent_config_version,
-            _strategy_version=config.strategy_version,
+        config = replace(
+            config,
+            configuration=dict(config.configuration),
         )
+        audit_snapshot = RuntimeAuditSnapshot.capture(config)
         integration = await session.scalar(
             select(Integration).where(Integration.provider_name == config.provider)
         )
@@ -751,6 +787,7 @@ async def run(job_id: uuid.UUID) -> WorkerResult:
                     config.model,
                     exc.attempts,
                     config.configuration,
+                    audit_snapshot,
                 )
                 raise
             except BudgetExceeded as exc:
@@ -760,7 +797,13 @@ async def run(job_id: uuid.UUID) -> WorkerResult:
         finally:
             await provider.aclose()
         await persist_attempts(
-            session, job, config.provider, config.model, attempts, config.configuration
+            session,
+            job,
+            config.provider,
+            config.model,
+            attempts,
+            config.configuration,
+            audit_snapshot,
         )
         if budget_error is not None:
             summary = str(budget_error)
