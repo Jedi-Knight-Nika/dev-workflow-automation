@@ -22,6 +22,8 @@ class AgentView:
     updated_at: datetime
     status: str
     active_jobs: int = 0
+    queued_jobs: int = 0
+    current_job_action: str | None = None
     total_runs: int = 0
     total_input_tokens: int = 0
     total_output_tokens: int = 0

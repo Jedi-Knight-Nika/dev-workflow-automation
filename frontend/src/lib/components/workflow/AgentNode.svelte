@@ -7,6 +7,9 @@
     displayName: string;
     role: string;
     status: string;
+    queuedJobs: number;
+    activeJobs: number;
+    currentJobAction: string | null;
     system: boolean;
     provider: string;
     model: string;
@@ -40,7 +43,17 @@
   );
 </script>
 
-<Handle type="target" position={Position.Left} />
+<Handle
+  type="target"
+  position={Position.Left}
+  class={agent.status === 'RUNNING'
+    ? 'handle-running'
+    : agent.queuedJobs > 0
+      ? 'handle-queued'
+      : agent.status === 'CONFIGURATION_ERROR'
+        ? 'handle-blocked'
+        : ''}
+/>
 <div class="node-shell" class:disabled={!agent.enabled}>
   <PixelAgentAvatar
     seed={`${agent.displayName}:${agent.role}`}
@@ -93,6 +106,14 @@
               : 'NOT SET'}
         </span>
       </div>{/if}
+    {#if agent.status === 'RUNNING' || agent.queuedJobs > 0}
+      <div class="activity-row" class:active={agent.status === 'RUNNING'}>
+        <span class="activity-pulse"></span>
+        <strong>{agent.status === 'RUNNING' ? 'WORKING' : 'QUEUED'}</strong>
+        <span>{agent.currentJobAction?.replaceAll('_', ' ') || 'Waiting for execution'}</span>
+        {#if agent.queuedJobs > 1}<b>+{agent.queuedJobs - 1}</b>{/if}
+      </div>
+    {/if}
     {#if agent.integrationNames.length || agent.repositoryCount}
       <div class="access-row">
         {#each agent.integrationNames.slice(0, 3) as name (name)}
@@ -120,9 +141,30 @@
     }}>•••</button
   >
 </div>
-<Handle type="source" position={Position.Right} />
+<Handle
+  type="source"
+  position={Position.Right}
+  class={agent.status === 'RUNNING'
+    ? 'handle-running'
+    : agent.queuedJobs > 0
+      ? 'handle-queued'
+      : agent.status === 'CONFIGURATION_ERROR'
+        ? 'handle-blocked'
+        : ''}
+/>
 
 <style>
+  :global(.svelte-flow__handle.handle-running) {
+    background: var(--color-brand-2);
+    box-shadow: 0 0 9px color-mix(in srgb, var(--color-brand-2) 80%, transparent);
+  }
+  :global(.svelte-flow__handle.handle-queued) {
+    background: var(--color-warning);
+    box-shadow: 0 0 7px color-mix(in srgb, var(--color-warning) 65%, transparent);
+  }
+  :global(.svelte-flow__handle.handle-blocked) {
+    background: var(--color-danger);
+  }
   .node-shell {
     display: flex;
     min-width: 245px;
@@ -184,6 +226,39 @@
     margin-top: 0.45rem;
     border-top: 1px solid var(--color-line);
     padding-top: 0.42rem;
+  }
+  .activity-row {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: 0.3rem;
+    margin-top: 0.45rem;
+    border-radius: 0.35rem;
+    background: color-mix(in srgb, var(--color-warning) 10%, transparent);
+    padding: 0.3rem 0.4rem;
+    color: var(--color-warning);
+    font-size: 0.48rem;
+  }
+  .activity-row.active {
+    background: color-mix(in srgb, var(--color-brand-2) 10%, transparent);
+    color: var(--color-brand-2);
+  }
+  .activity-row span:not(.activity-pulse) {
+    overflow: hidden;
+    color: var(--color-muted);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .activity-row b {
+    margin-left: auto;
+  }
+  .activity-pulse {
+    width: 0.36rem;
+    height: 0.36rem;
+    flex: none;
+    border-radius: 50%;
+    background: currentColor;
+    box-shadow: 0 0 6px currentColor;
   }
   .provider-mark {
     display: grid;

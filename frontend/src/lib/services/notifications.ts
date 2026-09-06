@@ -3,6 +3,8 @@ import type { AppNotification, TelegramStatus } from '$lib/types';
 
 export const listNotifications = (): Promise<AppNotification[]> => api('/notifications?limit=50');
 export const unreadCount = (): Promise<{ count: number }> => api('/notifications/unread-count');
+export const markAllNotificationsRead = (): Promise<{ updated: number }> =>
+  api('/notifications/read-all', { method: 'POST' });
 export const markNotification = (
   id: string,
   action: 'read' | 'acknowledge'

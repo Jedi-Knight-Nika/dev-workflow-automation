@@ -148,6 +148,8 @@ export type AgentConfig = {
   updated_at: string;
   status: string;
   active_jobs: number;
+  queued_jobs: number;
+  current_job_action: string | null;
   total_runs: number;
   total_input_tokens: number;
   total_output_tokens: number;

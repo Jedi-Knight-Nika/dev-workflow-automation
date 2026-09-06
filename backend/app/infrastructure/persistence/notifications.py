@@ -1,7 +1,8 @@
 import uuid
 from datetime import UTC, datetime
+from typing import Any, cast
 
-from sqlalchemy import func, select
+from sqlalchemy import CursorResult, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.application.ports.notifications import NotificationView, RaiseIncident
@@ -127,6 +128,18 @@ class SqlAlchemyNotificationStore:
             )
             or 0
         )
+
+    async def mark_all_read(self) -> int:
+        result = await self._session.execute(
+            update(Notification)
+            .where(
+                Notification.user_id == self._user_id,
+                Notification.status == NotificationStatus.UNREAD.value,
+            )
+            .values(status=NotificationStatus.READ.value, read_at=datetime.now(UTC))
+        )
+        await self._session.commit()
+        return int(cast(CursorResult[Any], result).rowcount or 0)
 
     async def mark(self, notification_id: uuid.UUID, action: str) -> NotificationView:
         record = await self._session.get(Notification, notification_id, with_for_update=True)

@@ -56,6 +56,9 @@
     displayName: string;
     role: string;
     status: string;
+    queuedJobs: number;
+    activeJobs: number;
+    currentJobAction: string | null;
     system: boolean;
     activationPolicy: string;
     batchWindowSeconds: number;
@@ -105,8 +108,12 @@
   }
 
   function edgeClass(sourceRole?: string) {
-    const running = agents.find((agent) => agent.role === sourceRole)?.status === 'RUNNING';
-    return running ? 'route-processing' : 'route-neutral';
+    const agent = agents.find((item) => item.role === sourceRole);
+    if (agent?.status === 'RUNNING') return 'route-running';
+    if (agent?.queued_jobs) return 'route-queued';
+    if (agent?.status === 'CONFIGURATION_ERROR') return 'route-blocked';
+    if (agent?.status === 'READY') return 'route-ready';
+    return 'route-neutral';
   }
 
   const initialWorkflow = untrack(() => workflow);
@@ -119,6 +126,9 @@
         displayName: node.label,
         role: node.role,
         status: 'UNCONFIGURED',
+        queuedJobs: 0,
+        activeJobs: 0,
+        currentJobAction: null,
         system: node.role === 'ORCHESTRATOR' || node.role === 'DELIVERER',
         activationPolicy: node.activation_policy,
         batchWindowSeconds: node.batch_window_seconds,
@@ -213,9 +223,10 @@
   }
 
   $effect(() => {
-    const statuses = new Map(agents.map((agent) => [agent.role, agent.status]));
+    const statuses = new Map(agents.map((agent) => [agent.role, agent]));
     nodes = untrack(() => nodes).map((node) => {
-      const status = nodeStatus(node, statuses.get(node.data.role));
+      const liveAgent = statuses.get(node.data.role);
+      const status = nodeStatus(node, liveAgent?.status);
       const integrationNames = node.data.integrationIds.flatMap((id) => {
         const integration = integrations.find((item) => item.id === id);
         return integration ? [integration.provider_name] : [];
@@ -225,6 +236,9 @@
         data: {
           ...node.data,
           status,
+          queuedJobs: liveAgent?.queued_jobs ?? 0,
+          activeJobs: liveAgent?.active_jobs ?? 0,
+          currentJobAction: liveAgent?.current_job_action ?? null,
           integrationNames,
           repositoryCount: node.data.repositoryIds.length
         },
@@ -561,6 +575,9 @@
           displayName: roleCount ? `${roleName} ${nextNumber}` : roleName,
           role,
           status: agents.find((agent) => agent.role === role)?.status || 'UNCONFIGURED',
+          queuedJobs: agents.find((agent) => agent.role === role)?.queued_jobs ?? 0,
+          activeJobs: agents.find((agent) => agent.role === role)?.active_jobs ?? 0,
+          currentJobAction: agents.find((agent) => agent.role === role)?.current_job_action ?? null,
           system: false,
           activationPolicy: 'any',
           batchWindowSeconds: 0,
@@ -1510,10 +1527,29 @@
   :global(.route-neutral .svelte-flow__edge-path) {
     stroke: var(--color-muted);
   }
-  :global(.route-processing .svelte-flow__edge-path) {
+  :global(.route-ready .svelte-flow__edge-path) {
+    stroke: color-mix(in srgb, var(--color-accent) 65%, var(--color-muted));
+  }
+  :global(.route-queued .svelte-flow__edge-path) {
+    stroke: var(--color-warning);
+    stroke-dasharray: 7 5;
+    filter: drop-shadow(0 0 3px color-mix(in srgb, var(--color-warning) 55%, transparent));
+  }
+  :global(.route-running .svelte-flow__edge-path) {
     stroke: var(--color-brand-2);
     stroke-width: 3;
+    stroke-dasharray: 9 5;
+    animation: route-flow 0.75s linear infinite;
     filter: drop-shadow(0 0 4px color-mix(in srgb, var(--color-brand-2) 65%, transparent));
+  }
+  :global(.route-blocked .svelte-flow__edge-path) {
+    stroke: var(--color-danger);
+    stroke-dasharray: 3 5;
+  }
+  @keyframes route-flow {
+    to {
+      stroke-dashoffset: -14;
+    }
   }
   :global(.svelte-flow__handle) {
     width: 11px;
@@ -1990,13 +2026,14 @@
     position: absolute;
     z-index: 1;
     top: 50%;
-    left: 0.7rem;
+    left: 0.9rem;
     transform: translateY(-50%);
     pointer-events: none;
   }
   .provider-select select {
     width: 100%;
-    padding-left: 2.8rem;
+    min-height: 2.75rem;
+    padding-left: 3.25rem;
   }
   .agent-health-summary {
     display: flex;

@@ -35,6 +35,13 @@ async def unread_count(
     return {"count": await ManageNotifications(store).unread_count()}
 
 
+@router.post("/notifications/read-all")
+async def read_all_notifications(
+    store: SqlAlchemyNotificationStore = Depends(get_notification_store),
+) -> dict[str, int]:
+    return {"updated": await ManageNotifications(store).mark_all_read()}
+
+
 @router.post("/notifications/{notification_id}/{action}")
 async def mark_notification(
     notification_id: uuid.UUID,

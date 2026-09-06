@@ -156,6 +156,17 @@
       ? parsed.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
       : parsed.toLocaleString();
   }
+  function taskSummary(task: Task) {
+    return task.description
+      .replace(/(?:Trello|Linear|GitHub):\s*https?:\/\/\S+/gi, '')
+      .replace(/https?:\/\/\S+/g, '')
+      .trim();
+  }
+  function sourceLabel(task: Task) {
+    const provider = task.source?.provider;
+    if (!provider) return '';
+    return `Open in ${provider[0].toUpperCase()}${provider.slice(1)}`;
+  }
   onMount(() => {
     void refresh();
     void listTeams()
@@ -311,8 +322,10 @@
           </header>
           <div class="cards">
             {#each column.tasks as task (task.id)}
-              <button
+              <div
                 class="task-card"
+                role="button"
+                tabindex="0"
                 class:moving={movingTaskId === task.id}
                 draggable={reopenableStates.has(task.state)}
                 ondragstart={() => {
@@ -323,14 +336,26 @@
                   dragOverColumn = '';
                 }}
                 onclick={() => (selected = task)}
+                onkeydown={(event) => {
+                  if (event.key === 'Enter' || event.key === ' ') selected = task;
+                }}
               >
                 <div class="card-top">
-                  <span class="source-id"
-                    >{task.source?.identifier || task.external_key || task.id.slice(0, 8)}</span
-                  ><span>P{task.priority}</span>
+                  {#if task.source?.url}
+                    <button
+                      type="button"
+                      class="source-link"
+                      onclick={(event) => {
+                        event.stopPropagation();
+                        window.open(task.source?.url || '', '_blank', 'noopener,noreferrer');
+                      }}>{sourceLabel(task)} ↗</button
+                    >
+                  {:else}<span class="source-id">{task.external_key || task.id.slice(0, 8)}</span
+                    >{/if}
+                  <span>P{task.priority}</span>
                 </div>
                 <strong>{task.title}</strong>
-                {#if task.description}<p>{task.description}</p>{/if}
+                {#if taskSummary(task)}<p>{taskSummary(task)}</p>{/if}
                 <div class="metadata">
                   <span class="chip brand">{task.source?.provider || 'manual'}</span>
                   <TeamBadge id={task.team_id} name={task.team_name} compact />
@@ -350,7 +375,7 @@
                         >{label}</span
                       >{/each}
                   </div>{/if}
-              </button>
+              </div>
             {/each}
             {#if column.tasks.length === 0}<div class="no-cards">No tasks</div>{/if}
           </div>
@@ -606,6 +631,21 @@
   .scope-list {
     display: grid;
     gap: 0.3rem;
+  }
+  .source-link {
+    appearance: none;
+    border: 0;
+    background: transparent;
+    padding: 0;
+    color: var(--color-brand-2);
+    cursor: pointer;
+    font-size: 0.62rem;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+    text-decoration: none;
+  }
+  .source-link:hover {
+    text-decoration: underline;
   }
   .scope-list li {
     display: flex;

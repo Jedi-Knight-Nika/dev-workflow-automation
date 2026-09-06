@@ -100,6 +100,19 @@ class SqlAlchemyAgentConfigurationWorkflow:
                 )
             ).all()
         }
+        queued = {
+            row[0]: (int(row[1]), row[2])
+            for row in (
+                await self._session.execute(
+                    select(Job.role, func.count(Job.id), func.min(Job.action))
+                    .where(
+                        Job.role.in_(roles),
+                        Job.state.in_([JobState.QUEUED, JobState.RETRY_WAIT]),
+                    )
+                    .group_by(Job.role)
+                )
+            ).all()
+        }
         views = []
         for config in configs:
             role_totals = totals.get(config.role, (0, 0, 0, 0))
@@ -119,6 +132,8 @@ class SqlAlchemyAgentConfigurationWorkflow:
                         enabled=config.enabled, model=config.model, active_jobs=active_count
                     ),
                     active_count,
+                    queued.get(config.role, (0, None))[0],
+                    queued.get(config.role, (0, None))[1],
                     int(role_totals[0]),
                     int(role_totals[1]),
                     int(role_totals[2]),

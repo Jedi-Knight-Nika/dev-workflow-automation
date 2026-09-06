@@ -17,6 +17,9 @@ class ManageNotifications:
     async def unread_count(self) -> int:
         return await self._store.unread_count()
 
+    async def mark_all_read(self) -> int:
+        return await self._store.mark_all_read()
+
     async def mark(self, notification_id: uuid.UUID, action: str) -> NotificationView:
         return await self._store.mark(notification_id, action)
 
