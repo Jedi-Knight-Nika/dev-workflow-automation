@@ -91,7 +91,12 @@
       </a>
     </div>
     <nav class="flex-1 space-y-1 p-3">
-      {#each NAV_ITEMS as item (item.href)}
+      {#each NAV_ITEMS as item, index (item.href)}
+        {#if item.group && item.group !== NAV_ITEMS[index - 1]?.group}
+          <p class="px-3 pt-4 pb-1 font-mono text-[9px] tracking-[0.16em] text-muted uppercase">
+            {item.group}
+          </p>
+        {/if}
         <a
           href={resolve(item.href)}
           class="block rounded-lg border-l-2 px-3 py-2.5 text-sm transition-all duration-200 ease-smooth hover:translate-x-0.5 {isActiveNavItem(

@@ -38,6 +38,10 @@ export function testIntegration(providerName: string): Promise<Integration> {
   return api<Integration>(`/integrations/${providerName}/test`, { method: 'POST' });
 }
 
+export function requestIntegrationSync(providerName: string): Promise<Integration> {
+  return api<Integration>(`/integrations/${providerName}/sync`, { method: 'POST' });
+}
+
 export function getGithubAppInstallUrl(): Promise<{ url: string }> {
   return api<{ url: string }>('/github/app/install-url');
 }

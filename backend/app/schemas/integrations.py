@@ -30,6 +30,8 @@ class IntegrationRead(BaseModel):
     sync_status: str
     last_synced_at: datetime | None
     updated_at: datetime
+    display_status: str = "NOT_CONFIGURED"
+    usage: dict[str, int] = Field(default_factory=dict)
 
 
 class IntegrationUpdate(BaseModel):
@@ -46,6 +48,18 @@ class RepositoryCreate(BaseModel):
     name: str = Field(min_length=1, max_length=255)
     clone_url: str = Field(min_length=1)
     default_branch: str = "main"
+
+
+class RepositoryBatchImport(BaseModel):
+    repositories: list[RepositoryCreate] = Field(min_length=1, max_length=100)
+    prepare_knowledge: bool = True
+
+
+class RepositoryDependenciesRead(BaseModel):
+    teams: tuple[str, ...] = ()
+    active_tasks: int = 0
+    active_workspaces: int = 0
+    task_sources: tuple[str, ...] = ()
 
 
 class RepositoryRead(BaseModel):
@@ -67,6 +81,13 @@ class RepositoryRead(BaseModel):
     updated_at: datetime
     clone_status: str = "NOT_CLONED"
     chunk_count: int = 0
+    archived_at: datetime | None = None
+    code_status: str = "NOT_PREPARED"
+    knowledge_status: str = "NOT_PREPARED"
+    teams_count: int = 0
+    active_tasks_count: int = 0
+    active_workspaces_count: int = 0
+    last_activity_at: datetime | None = None
 
 
 class LinearMemberRead(BaseModel):

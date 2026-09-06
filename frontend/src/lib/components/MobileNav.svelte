@@ -79,7 +79,12 @@
         <strong class="text-heading text-sm">{t('nav.brandName')}</strong>
       </a>
     </div>
-    {#each NAV_ITEMS as item (item.href)}
+    {#each NAV_ITEMS as item, index (item.href)}
+      {#if item.group && item.group !== NAV_ITEMS[index - 1]?.group}
+        <p class="px-3 pt-4 pb-1 font-mono text-[9px] tracking-[0.16em] text-muted uppercase">
+          {item.group}
+        </p>
+      {/if}
       <a
         href={resolve(item.href)}
         onclick={close}

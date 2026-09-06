@@ -66,6 +66,13 @@ export type Repository = {
   updated_at: string;
   clone_status: string;
   chunk_count: number;
+  archived_at: string | null;
+  code_status: 'READY' | 'UPDATING' | 'CANNOT_FETCH' | 'NOT_PREPARED' | 'DISABLED';
+  knowledge_status: 'READY' | 'INDEXING' | 'OUT_OF_DATE' | 'FAILED' | 'NOT_PREPARED' | 'DISABLED';
+  teams_count: number;
+  active_tasks_count: number;
+  active_workspaces_count: number;
+  last_activity_at: string | null;
 };
 
 export type DiscoveredRepository = {
@@ -89,6 +96,15 @@ export type Integration = {
   sync_status: string;
   last_synced_at: string | null;
   updated_at: string;
+  display_status: 'READY' | 'WORKING' | 'NEEDS_ATTENTION' | 'NOT_CONFIGURED' | 'DISABLED';
+  usage: {
+    agents_count?: number;
+    teams_count?: number;
+    repositories_count?: number;
+    active_tasks_count?: number;
+    waiting_jobs_count?: number;
+    workflow_nodes_count?: number;
+  };
 };
 
 export type TrelloBoard = { id: string; name: string; url: string };

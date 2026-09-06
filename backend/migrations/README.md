@@ -16,6 +16,7 @@ edit a migration after it has been applied outside local development. Add a new 
 | `0043`–`0044` | Role runtime profiles and built-in runtime defaults |
 | `0045` | Failure state, retry categories, health registry, and circuit breakers |
 | `0046` | Provider-neutral integration synchronization state |
+| `0047` | Repository archival lifecycle |
 
 ## Adding a migration
 

@@ -83,7 +83,9 @@ from app.schemas import (
     LinearWorkflowStateRead,
     ProviderCatalogRead,
     ProviderModelRead,
+    RepositoryBatchImport,
     RepositoryCreate,
+    RepositoryDependenciesRead,
     RepositoryRead,
     TrelloBoardRead,
     TrelloListRead,
@@ -295,13 +297,26 @@ async def test_integration(
     return IntegrationRead.model_validate(result, from_attributes=True)
 
 
+@router.post("/integrations/{provider_name}/sync", response_model=IntegrationRead)
+async def request_integration_sync(
+    provider_name: str,
+    workflow: IntegrationManagementWorkflow = Depends(get_integration_management_workflow),
+) -> IntegrationRead:
+    try:
+        result = await ManageIntegrations(workflow).request_sync(provider_name)
+    except ManagedIntegrationNotConfigured as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return IntegrationRead.model_validate(result, from_attributes=True)
+
+
 @router.get("/repositories", response_model=list[RepositoryRead])
 async def list_repositories(
+    include_archived: bool = False,
     workflow: RepositoryManagementWorkflow = Depends(get_repository_management_workflow),
 ) -> list[RepositoryRead]:
     return [
         RepositoryRead.model_validate(item, from_attributes=True)
-        for item in await ManageRepositories(workflow).list()
+        for item in await ManageRepositories(workflow).list(include_archived)
     ]
 
 
@@ -311,9 +326,24 @@ async def create_repository(
     workflow: RepositoryManagementWorkflow = Depends(get_repository_management_workflow),
 ) -> RepositoryRead:
     command = CreateRepositoryCommand(**body.model_dump())
-    return RepositoryRead.model_validate(
-        await ManageRepositories(workflow).create(command), from_attributes=True
-    )
+    try:
+        item = await ManageRepositories(workflow).create(command)
+    except ManagedRepositoryConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return RepositoryRead.model_validate(item, from_attributes=True)
+
+
+@router.post("/repositories/import", response_model=list[RepositoryRead])
+async def import_repositories(
+    body: RepositoryBatchImport,
+    workflow: RepositoryManagementWorkflow = Depends(get_repository_management_workflow),
+) -> list[RepositoryRead]:
+    commands = [CreateRepositoryCommand(**item.model_dump()) for item in body.repositories]
+    try:
+        items = await ManageRepositories(workflow).import_batch(commands, body.prepare_knowledge)
+    except ManagedRepositoryConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return [RepositoryRead.model_validate(item, from_attributes=True) for item in items]
 
 
 @router.patch("/repositories/{repository_id}/enabled", response_model=RepositoryRead)
@@ -326,7 +356,34 @@ async def set_repository_enabled(
         result = await ManageRepositories(workflow).set_enabled(repository_id, enabled)
     except ManagedRepositoryNotFound as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ManagedRepositoryConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     return RepositoryRead.model_validate(result, from_attributes=True)
+
+
+@router.patch("/repositories/{repository_id}/archived", response_model=RepositoryRead)
+async def set_repository_archived(
+    repository_id: uuid.UUID,
+    archived: bool,
+    workflow: RepositoryManagementWorkflow = Depends(get_repository_management_workflow),
+) -> RepositoryRead:
+    try:
+        result = await ManageRepositories(workflow).set_archived(repository_id, archived)
+    except ManagedRepositoryNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return RepositoryRead.model_validate(result, from_attributes=True)
+
+
+@router.get("/repositories/{repository_id}/dependencies", response_model=RepositoryDependenciesRead)
+async def repository_dependencies(
+    repository_id: uuid.UUID,
+    workflow: RepositoryManagementWorkflow = Depends(get_repository_management_workflow),
+) -> RepositoryDependenciesRead:
+    try:
+        result = await ManageRepositories(workflow).dependencies(repository_id)
+    except ManagedRepositoryNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return RepositoryDependenciesRead.model_validate(result, from_attributes=True)
 
 
 @router.post("/repositories/{repository_id}/index", response_model=RepositoryRead)
@@ -352,6 +409,8 @@ async def delete_repository(
         await ManageRepositories(workflow).delete(repository_id)
     except ManagedRepositoryNotFound as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ManagedRepositoryConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.get("/repositories/{repository_id}/search", response_model=list[KnowledgeSearchResult])

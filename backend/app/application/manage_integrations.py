@@ -17,3 +17,6 @@ class ManageIntegrations:
 
     async def verify(self, provider_name: str) -> IntegrationView:
         return await self._workflow.verify(provider_name)
+
+    async def request_sync(self, provider_name: str) -> IntegrationView:
+        return await self._workflow.request_sync(provider_name)

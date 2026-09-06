@@ -14,11 +14,20 @@
     addRepository,
     deleteRepository,
     discoverGithubRepositories,
+    getRepositoryDependencies,
+    importRepositories,
+    listRepositories,
     queueRepositoryIndex,
+    setRepositoryArchived,
     setRepositoryEnabled,
     searchRepositoryKnowledge
   } from '$lib/services/repositories';
   import { t } from '$lib/i18n/index.svelte';
+  import ResourceDetailDrawer from '$lib/components/resources/ResourceDetailDrawer.svelte';
+  import ResourceStatus, {
+    type ResourceState
+  } from '$lib/components/resources/ResourceStatus.svelte';
+  import type { RepositoryDependencies } from '$lib/services/repositories';
   import type {
     DiscoveredRepository,
     GitHubInstallationAccount,
@@ -35,9 +44,14 @@
   let query = '';
   let searchingRepository = '';
   let results: KnowledgeResult[] = [];
-  let busyRepository = '';
   let showManualForm = false;
   let githubAccount: GitHubInstallationAccount | null = null;
+  let selectedRepositoryIds: string[] = [];
+  let prepareKnowledge = true;
+  let selectedRepository: Repository | null = null;
+  let dependencies: RepositoryDependencies | null = null;
+  let showArchived = false;
+  let archivedRepositories: Repository[] = [];
   const date = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' });
   const githubConnected = () =>
     integrationsResource.data.some(
@@ -47,13 +61,6 @@
     repositoriesResource.data.some(
       (item) => item.provider === 'github' && item.external_repo_id === repository.external_repo_id
     );
-  function knowledgeLabel(repository: Repository) {
-    if (repository.index_status === 'READY') return t('repositories.aiReadyLabel');
-    if (['QUEUED', 'INDEXING'].includes(repository.index_status))
-      return t('repositories.embeddingLabel');
-    if (repository.index_status === 'FAILED') return t('repositories.failedLabel');
-    return t('repositories.notReadyLabel');
-  }
   function knowledgeDescription(repository: Repository) {
     if (repository.index_status === 'READY') {
       return t('repositories.knowledgeChunksSearchable', { count: repository.chunk_count });
@@ -64,6 +71,13 @@
     if (repository.index_status === 'FAILED')
       return repository.index_error || t('repositories.embeddingFailed');
     return t('repositories.createIndexBeforeAssigning');
+  }
+  function resourceState(value: string): ResourceState {
+    if (value === 'READY') return 'READY';
+    if (['UPDATING', 'INDEXING', 'QUEUED'].includes(value)) return 'WORKING';
+    if (['FAILED', 'CANNOT_FETCH', 'OUT_OF_DATE'].includes(value)) return 'NEEDS_ATTENTION';
+    if (value === 'DISABLED') return 'DISABLED';
+    return 'NOT_CONFIGURED';
   }
   async function add(event: SubmitEvent) {
     event.preventDefault();
@@ -112,26 +126,61 @@
       githubAccount = null;
     }
   }
-  async function selectRepository(repository: DiscoveredRepository) {
-    busyRepository = repository.external_repo_id;
+  function toggleDiscovered(id: string, checked: boolean) {
+    selectedRepositoryIds = checked
+      ? Array.from(new Set([...selectedRepositoryIds, id]))
+      : selectedRepositoryIds.filter((value) => value !== id);
+  }
+  async function importSelected() {
+    const selection = discovered.filter((item) =>
+      selectedRepositoryIds.includes(item.external_repo_id)
+    );
+    if (!selection.length) return;
+    error = '';
     try {
-      await addRepository({
-        provider: 'github',
-        external_repo_id: repository.external_repo_id,
-        owner: repository.owner,
-        name: repository.name,
-        clone_url: repository.clone_url,
-        default_branch: repository.default_branch
-      });
-      discovered = discovered.filter(
-        (item) => item.external_repo_id !== repository.external_repo_id
+      await importRepositories(
+        selection.map((repository) => ({
+          provider: 'github',
+          external_repo_id: repository.external_repo_id,
+          owner: repository.owner,
+          name: repository.name,
+          clone_url: repository.clone_url,
+          default_branch: repository.default_branch
+        })),
+        prepareKnowledge
       );
+      discovered = discovered.filter(
+        (item) => !selectedRepositoryIds.includes(item.external_repo_id)
+      );
+      selectedRepositoryIds = [];
       await repositoriesResource.refresh();
     } catch (cause) {
       error = String(cause);
-    } finally {
-      busyRepository = '';
     }
+  }
+  async function openRepository(repository: Repository) {
+    selectedRepository = repository;
+    dependencies = null;
+    try {
+      dependencies = await getRepositoryDependencies(repository.id);
+    } catch (cause) {
+      error = String(cause);
+    }
+  }
+  async function archiveRepository(repository: Repository, archived: boolean) {
+    error = '';
+    try {
+      await setRepositoryArchived(repository.id, archived);
+      selectedRepository = null;
+      await repositoriesResource.refresh();
+      if (showArchived) archivedRepositories = await listRepositories(true);
+    } catch (cause) {
+      error = String(cause);
+    }
+  }
+  async function toggleArchivedView() {
+    showArchived = !showArchived;
+    if (showArchived) archivedRepositories = await listRepositories(true);
   }
   async function queueIndex(repository: Repository) {
     error = '';
@@ -151,14 +200,14 @@
     }
   }
   async function removeRepository(repository: Repository) {
+    const usage = dependencies || (await getRepositoryDependencies(repository.id));
     if (
       !window.confirm(
-        t('repositories.confirmRemove', { name: `${repository.owner}/${repository.name}` })
+        `${t('repositories.confirmRemove', { name: `${repository.owner}/${repository.name}` })}\n\nUsed by ${usage.teams.length} teams, ${usage.active_tasks} active tasks, ${usage.active_workspaces} workspaces, and ${usage.task_sources.length} task sources.`
       )
     ) {
       return;
     }
-    busyRepository = repository.id;
     error = '';
     try {
       await deleteRepository(repository.id);
@@ -166,8 +215,6 @@
       await repositoriesResource.refresh();
     } catch (cause) {
       error = String(cause);
-    } finally {
-      busyRepository = '';
     }
   }
   async function search(repository: Repository) {
@@ -203,61 +250,94 @@
   description={t('repositories.newDescription')}
 />
 <main class="space-y-6 p-4 sm:p-6 md:p-10">
-  <section class="grid gap-3 md:grid-cols-3">
-    <article class="border-line bg-panel rounded-xl border p-4">
-      <p class="font-mono text-[10px] text-brand">{t('repositories.step1Eyebrow')}</p>
-      <strong class="mt-2 block">{t('repositories.connectGithub')}</strong>
-      <p class="text-muted mt-1 text-xs">
-        {t('repositories.connectGithubDescription')}
-      </p>
-      <div class="mt-4 flex items-center justify-between gap-2">
-        <span class="flex items-center gap-2">
-          {#if githubAccount}<img
-              class="h-6 w-6 rounded-full"
-              src={githubAccount.avatar_url}
-              alt=""
-            />{/if}
-          <span class="font-mono text-[10px] {githubConnected() ? 'text-accent' : 'text-warning'}">
-            {githubAccount
-              ? `@${githubAccount.login}`
-              : githubConnected()
-                ? t('repositories.connected')
-                : t('repositories.notConnected')}
+  {#if repositoriesResource.data.length === 0}<section class="grid gap-3 md:grid-cols-3">
+      <article class="border-line bg-panel rounded-xl border p-4">
+        <p class="font-mono text-[10px] text-brand">{t('repositories.step1Eyebrow')}</p>
+        <strong class="mt-2 block">{t('repositories.connectGithub')}</strong>
+        <p class="text-muted mt-1 text-xs">
+          {t('repositories.connectGithubDescription')}
+        </p>
+        <div class="mt-4 flex items-center justify-between gap-2">
+          <span class="flex items-center gap-2">
+            {#if githubAccount}<img
+                class="h-6 w-6 rounded-full"
+                src={githubAccount.avatar_url}
+                alt=""
+              />{/if}
+            <span
+              class="font-mono text-[10px] {githubConnected() ? 'text-accent' : 'text-warning'}"
+            >
+              {githubAccount
+                ? `@${githubAccount.login}`
+                : githubConnected()
+                  ? t('repositories.connected')
+                  : t('repositories.notConnected')}
+            </span>
           </span>
+          <a
+            class="border-line rounded-lg border px-3 py-2 text-xs hover:border-brand hover:text-brand"
+            href={resolve('/integrations')}
+          >
+            {githubConnected()
+              ? t('repositories.manageConnection')
+              : t('repositories.connectGithub')}
+          </a>
+        </div>
+      </article>
+      <article
+        class="border-line bg-panel rounded-xl border p-4 {githubConnected() ? '' : 'opacity-50'}"
+      >
+        <p class="font-mono text-[10px] text-brand">{t('repositories.step2Eyebrow')}</p>
+        <strong class="mt-2 block">{t('repositories.chooseRepositories')}</strong>
+        <p class="text-muted mt-1 text-xs">{t('repositories.onlyImportedCanBeUsed')}</p>
+        <p class="mt-4 font-mono text-[10px]">
+          {t('repositories.selectedCount', { count: repositoriesResource.data.length })}
+        </p>
+      </article>
+      <article class="border-line bg-panel rounded-xl border p-4">
+        <p class="font-mono text-[10px] text-brand">{t('repositories.step3Eyebrow')}</p>
+        <strong class="mt-2 block">{t('repositories.buildAiKnowledge')}</strong>
+        <p class="text-muted mt-1 text-xs">
+          {t('repositories.importingAutomaticallyClones')}
+        </p>
+        <p class="mt-4 font-mono text-[10px] text-accent">
+          {t('repositories.aiReadyCount', {
+            count: repositoriesResource.data.filter(
+              (repository) => repository.index_status === 'READY'
+            ).length
+          })}
+        </p>
+      </article>
+    </section>
+  {:else}
+    <section
+      class="border-line bg-panel flex flex-wrap items-center justify-between gap-4 rounded-xl border p-4"
+    >
+      <div>
+        <strong>{repositoriesResource.data.length} repositories</strong>
+        <p class="text-muted mt-1 text-xs">
+          {repositoriesResource.data.filter((item) => item.knowledge_status === 'READY').length} AI Ready
+          ·
+          {repositoriesResource.data.filter((item) => item.knowledge_status === 'INDEXING').length} indexing
+        </p>
+      </div>
+      <div class="flex flex-wrap items-center gap-2">
+        <span class="text-muted text-xs">
+          GitHub · {githubAccount ? `@${githubAccount.login}` : 'not connected'}
         </span>
         <a
-          class="border-line rounded-lg border px-3 py-2 text-xs hover:border-brand hover:text-brand"
-          href={resolve('/integrations')}
+          class="border-line rounded-lg border px-3 py-2 text-xs hover:text-brand"
+          href={resolve('/integrations')}>Manage GitHub</a
         >
-          {githubConnected() ? t('repositories.manageConnection') : t('repositories.connectGithub')}
-        </a>
+        <Button variant="primary" onclick={discover} disabled={discovering || !githubConnected()}
+          >+ Add Repository</Button
+        >
+        <Button size="sm" onclick={toggleArchivedView}
+          >{showArchived ? 'Hide archived' : 'Show archived'}</Button
+        >
       </div>
-    </article>
-    <article
-      class="border-line bg-panel rounded-xl border p-4 {githubConnected() ? '' : 'opacity-50'}"
-    >
-      <p class="font-mono text-[10px] text-brand">{t('repositories.step2Eyebrow')}</p>
-      <strong class="mt-2 block">{t('repositories.chooseRepositories')}</strong>
-      <p class="text-muted mt-1 text-xs">{t('repositories.onlyImportedCanBeUsed')}</p>
-      <p class="mt-4 font-mono text-[10px]">
-        {t('repositories.selectedCount', { count: repositoriesResource.data.length })}
-      </p>
-    </article>
-    <article class="border-line bg-panel rounded-xl border p-4">
-      <p class="font-mono text-[10px] text-brand">{t('repositories.step3Eyebrow')}</p>
-      <strong class="mt-2 block">{t('repositories.buildAiKnowledge')}</strong>
-      <p class="text-muted mt-1 text-xs">
-        {t('repositories.importingAutomaticallyClones')}
-      </p>
-      <p class="mt-4 font-mono text-[10px] text-accent">
-        {t('repositories.aiReadyCount', {
-          count: repositoriesResource.data.filter(
-            (repository) => repository.index_status === 'READY'
-          ).length
-        })}
-      </p>
-    </article>
-  </section>
+    </section>
+  {/if}
 
   {#if error || repositoriesResource.error || integrationsResource.error}
     <p
@@ -310,23 +390,33 @@
             class="border-line flex flex-wrap items-center justify-between gap-3 border-t p-3 motion-safe:animate-fade-in-up"
             style="animation-delay: {Math.min(index, 10) * 30}ms"
           >
-            <span class="text-sm"
-              >{repository.full_name} {repository.private ? '· private' : ''}</span
-            >
+            <label class="flex items-center gap-3 text-sm">
+              <input
+                type="checkbox"
+                checked={selectedRepositoryIds.includes(repository.external_repo_id)}
+                disabled={imported(repository)}
+                onchange={(event) =>
+                  toggleDiscovered(repository.external_repo_id, event.currentTarget.checked)}
+              />
+              {repository.full_name}
+              {repository.private ? '· private' : ''}
+            </label>
             {#if imported(repository)}
               <span class="font-mono text-[10px] text-accent">{t('repositories.imported')}</span>
             {:else}
-              <Button
-                variant="primary"
-                disabled={busyRepository === repository.external_repo_id}
-                onclick={() => selectRepository(repository)}
-              >
-                {busyRepository === repository.external_repo_id
-                  ? t('repositories.importing')
-                  : t('repositories.importPlusEmbed')}
-              </Button>
+              <span class="text-muted text-[10px]">Available</span>
             {/if}
           </div>{/each}
+        <div class="border-line flex flex-wrap items-center justify-between gap-3 border-t p-4">
+          <label class="flex items-center gap-2 text-xs">
+            <input type="checkbox" bind:checked={prepareKnowledge} /> Prepare AI Knowledge
+          </label>
+          <Button
+            variant="primary"
+            disabled={!selectedRepositoryIds.length}
+            onclick={importSelected}>Import {selectedRepositoryIds.length} selected</Button
+          >
+        </div>
       </div>{/if}
     {#if repositoriesResource.loading && repositoriesResource.data.length === 0}
       <div class="grid gap-4 p-4" aria-busy="true">
@@ -348,94 +438,35 @@
         {/each}
       </div>
     {:else}
-      {#each repositoriesResource.data as repository, index (repository.id)}<article
-          class="border-line grid gap-4 rounded-xl border p-4 card-hover motion-safe:animate-fade-in-up lg:grid-cols-[1fr_auto]"
+      <div
+        class="hidden border-line bg-panel-alt grid-cols-[minmax(15rem,2fr)_8rem_9rem_9rem_9rem_7rem] gap-4 border-b px-4 py-2 font-mono text-[10px] text-muted uppercase lg:grid"
+      >
+        <span>Repository</span><span>Source</span><span>Code access</span><span>AI Knowledge</span
+        ><span>Used by</span><span>Activity</span>
+      </div>
+      {#each showArchived ? archivedRepositories : repositoriesResource.data as repository, index (repository.id)}<button
+          type="button"
+          class="border-line hover:bg-panel-alt grid w-full gap-3 border-b p-4 text-left motion-safe:animate-fade-in-up lg:grid-cols-[minmax(15rem,2fr)_8rem_9rem_9rem_9rem_7rem] lg:items-center"
           style="animation-delay: {Math.min(index, 10) * 30}ms"
+          onclick={() => openRepository(repository)}
         >
-          <div>
-            <div class="flex items-center gap-3">
-              <strong>{repository.owner}/{repository.name}</strong>
-              <span
-                class="rounded-full border border-line px-2 py-0.5 font-mono text-[10px] {repository.enabled
-                  ? 'border-accent/40 text-accent'
-                  : 'text-muted'}"
-                >{repository.enabled ? t('repositories.enabled') : t('repositories.disabled')}</span
-              >
-            </div>
-            <p class="text-muted mt-1 text-xs break-all">
-              {repository.default_branch} · {repository.clone_url}
-            </p>
-            <div class="mt-3 rounded-lg border border-line bg-panel-alt p-3">
-              <div class="flex items-center justify-between gap-3">
-                <strong class="text-xs">{t('repositories.aiKnowledge')}</strong>
-                <span
-                  class="font-mono text-[10px] {repository.index_status === 'READY'
-                    ? 'text-accent'
-                    : repository.index_status === 'FAILED'
-                      ? 'text-danger'
-                      : 'text-warning'}"
-                >
-                  {knowledgeLabel(repository)}
-                </span>
-              </div>
-              <p class="text-muted mt-1 text-xs">{knowledgeDescription(repository)}</p>
-            </div>
-            <div class="text-muted mt-3 grid gap-1 font-mono text-[10px] sm:grid-cols-2">
-              <span>{t('repositories.clone')}: {repository.clone_status.replaceAll('_', ' ')}</span>
-              <span>{t('repositories.chunks')}: {repository.chunk_count}</span>
-              <span
-                >{t('repositories.remote')}: {repository.latest_sha?.slice(0, 12) ||
-                  t('repositories.notFetched')}</span
-              >
-              <span
-                >{t('repositories.indexed')}: {repository.indexed_sha?.slice(0, 12) ||
-                  t('repositories.never')}</span
-              >
-              <span class="sm:col-span-2"
-                >{t('repositories.lastSuccessfulPreparation')}: {repository.indexed_at
-                  ? date.format(new Date(repository.indexed_at))
-                  : t('repositories.never')}</span
-              >
-            </div>
-            {#if repository.index_error}<p class="mt-1 max-w-xl text-xs text-danger">
-                {repository.index_error}
-              </p>{/if}
-          </div>
-          <div class="flex flex-wrap items-center gap-2">
-            <Button
-              size="sm"
-              disabled={!repository.enabled ||
-                ['QUEUED', 'INDEXING'].includes(repository.index_status)}
-              onclick={() => queueIndex(repository)}
-              >{repository.index_status === 'READY'
-                ? t('repositories.reEmbed')
-                : t('repositories.prepareKnowledge')}</Button
-            >
-            <Button
-              size="sm"
-              disabled={repository.index_status !== 'READY'}
-              onclick={() => {
-                searchingRepository = repository.id;
-                results = [];
-              }}>{t('repositories.search')}</Button
-            >
-            <Button size="sm" onclick={() => toggleRepository(repository)}
-              >{repository.enabled
-                ? t('repositories.disable')
-                : t('repositories.enableAndIndex')}</Button
-            >
-            <Button
-              variant="danger"
-              size="sm"
-              disabled={busyRepository === repository.id}
-              onclick={() => removeRepository(repository)}
-            >
-              {busyRepository === repository.id
-                ? t('repositories.removing')
-                : t('repositories.remove')}
-            </Button>
-          </div>
-        </article>{:else}<EmptyState message={t('repositories.empty')} />{/each}
+          <span>
+            <strong class="block">{repository.owner}/{repository.name}</strong>
+            <span class="text-muted mt-1 block text-xs">{repository.default_branch}</span>
+            {#if repository.archived_at}<span class="text-muted text-[10px]">Archived</span>{/if}
+          </span>
+          <span class="text-xs capitalize">{repository.provider}</span>
+          <span><ResourceStatus state={resourceState(repository.code_status)} /></span>
+          <span><ResourceStatus state={resourceState(repository.knowledge_status)} /></span>
+          <span class="text-xs"
+            >{repository.teams_count} teams · {repository.active_tasks_count} tasks</span
+          >
+          <span class="text-muted text-xs"
+            >{repository.last_activity_at
+              ? date.format(new Date(repository.last_activity_at))
+              : 'Never'}</span
+          >
+        </button>{:else}<EmptyState message={t('repositories.empty')} />{/each}
     {/if}
     {#if searchingRepository}<form
         class="border-line border-t p-4"
@@ -481,4 +512,91 @@
       {/if}
     </div>
   </section>
+  {#if selectedRepository}
+    {@const repository = selectedRepository}
+    <ResourceDetailDrawer
+      title={`${repository.owner}/${repository.name}`}
+      description={`${repository.provider} · ${repository.default_branch}`}
+      onClose={() => (selectedRepository = null)}
+    >
+      <div class="space-y-5">
+        <section class="grid grid-cols-2 gap-3">
+          <div class="border-line bg-panel-alt rounded-lg border p-3">
+            <p class="text-muted text-[10px] uppercase">Code access</p>
+            <div class="mt-2"><ResourceStatus state={resourceState(repository.code_status)} /></div>
+            <p class="text-muted mt-2 text-xs">
+              Latest {repository.latest_sha?.slice(0, 12) || 'not fetched'}
+            </p>
+          </div>
+          <div class="border-line bg-panel-alt rounded-lg border p-3">
+            <p class="text-muted text-[10px] uppercase">AI Knowledge</p>
+            <div class="mt-2">
+              <ResourceStatus state={resourceState(repository.knowledge_status)} />
+            </div>
+            <p class="text-muted mt-2 text-xs">{repository.chunk_count} searchable chunks</p>
+          </div>
+        </section>
+        <section class="border-line rounded-lg border p-4">
+          <h3 class="font-semibold">Usage</h3>
+          <div class="text-muted mt-3 grid grid-cols-2 gap-2 text-xs">
+            <span>Teams</span><strong>{dependencies?.teams.length ?? repository.teams_count}</strong
+            >
+            <span>Active Tasks</span><strong
+              >{dependencies?.active_tasks ?? repository.active_tasks_count}</strong
+            >
+            <span>Workspaces</span><strong
+              >{dependencies?.active_workspaces ?? repository.active_workspaces_count}</strong
+            >
+            <span>Task Sources</span><strong
+              >{dependencies?.task_sources.join(', ') || 'None'}</strong
+            >
+          </div>
+        </section>
+        <section class="border-line rounded-lg border p-4">
+          <h3 class="font-semibold">AI Knowledge</h3>
+          <p class="text-muted mt-2 text-xs">{knowledgeDescription(repository)}</p>
+          {#if repository.index_error}<p class="mt-2 text-xs text-danger">
+              {repository.index_error}
+            </p>{/if}
+          <div class="mt-3 flex flex-wrap gap-2">
+            <Button
+              size="sm"
+              disabled={!repository.enabled ||
+                ['QUEUED', 'INDEXING'].includes(repository.index_status)}
+              onclick={() => queueIndex(repository)}>Update Knowledge</Button
+            >
+            <Button
+              size="sm"
+              disabled={repository.index_status !== 'READY'}
+              onclick={() => {
+                searchingRepository = repository.id;
+                results = [];
+                selectedRepository = null;
+              }}>Search Knowledge</Button
+            >
+          </div>
+        </section>
+        <section class="border-line rounded-lg border p-4">
+          <h3 class="font-semibold">Lifecycle</h3>
+          <div class="mt-3 flex flex-wrap gap-2">
+            {#if repository.archived_at}
+              <Button onclick={() => archiveRepository(repository, false)}>Restore</Button>
+            {:else}
+              <Button onclick={() => toggleRepository(repository)}
+                >{repository.enabled ? 'Disable' : 'Enable and Index'}</Button
+              >
+              <Button onclick={() => archiveRepository(repository, true)}>Archive</Button>
+            {/if}
+            <Button variant="danger" onclick={() => removeRepository(repository)}
+              >Remove Permanently</Button
+            >
+          </div>
+          <p class="text-muted mt-2 text-[10px]">
+            Removal is blocked while Teams, active Tasks, workspaces, or task-source integrations
+            depend on this repository.
+          </p>
+        </section>
+      </div>
+    </ResourceDetailDrawer>
+  {/if}
 </main>

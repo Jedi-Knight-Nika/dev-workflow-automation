@@ -51,6 +51,7 @@ class SqlAlchemyLinearTaskReconciliation:
             node.integration_sync_error = None
             try:
                 integration = await self._linear_integration(session, node)
+                integration.sync_status = "RUNNING"
                 issues = await LinearClient(
                     cipher.decrypt(integration.encrypted_credentials or b"")
                 ).list_issues(node.filter_assignee_id, list(node.filter_state_ids or []))
@@ -62,14 +63,29 @@ class SqlAlchemyLinearTaskReconciliation:
                     updated += int(not created)
                 node.integration_sync_status = "READY"
                 node.integration_last_synced_at = now
+                integration.sync_status = "READY"
+                integration.last_synced_at = now
+                integration.last_error = None
                 await session.commit()
                 return ReconciliationResult(processed=True, imported=imported, updated=updated)
             except Exception as exc:  # noqa: BLE001 - persist third-party failures for operators
                 node.integration_sync_status = "FAILED"
                 node.integration_sync_error = str(exc)[:1000]
                 node.integration_last_synced_at = now
+                failed_integration = await self._session_integration(session)
+                if failed_integration is not None:
+                    failed_integration.sync_status = "FAILED"
+                    failed_integration.last_synced_at = now
+                    failed_integration.last_error = str(exc)[:1000]
                 await session.commit()
                 return ReconciliationResult(processed=True)
+
+    @staticmethod
+    async def _session_integration(session: AsyncSession) -> Integration | None:
+        integration: Integration | None = await session.scalar(
+            select(Integration).where(Integration.provider_name == "linear")
+        )
+        return integration
 
     async def _linear_integration(self, session: AsyncSession, node: WorkflowNode) -> Integration:
         allowed = {str(value) for value in node.integration_ids or []}
