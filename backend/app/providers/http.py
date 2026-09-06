@@ -17,6 +17,23 @@ async def _normalized_events(
 
 
 class OpenAIProvider(AIProvider):
+    @staticmethod
+    def _payload(request: ProviderRequest, *, stream: bool = False) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "model": request.model,
+            "instructions": request.system,
+            "input": (request.cacheable_prompt_prefix or "") + request.prompt,
+            "max_output_tokens": request.max_output_tokens,
+            "store": False,
+        }
+        if stream:
+            payload["stream"] = True
+        if request.temperature is not None:
+            payload["temperature"] = request.temperature
+        if request.reasoning_effort != "default":
+            payload["reasoning"] = {"effort": request.reasoning_effort}
+        return payload
+
     async def list_models(self) -> list[ProviderModel]:
         response = await self.request(
             "GET",
@@ -35,24 +52,12 @@ class OpenAIProvider(AIProvider):
         )
 
     async def run(self, request: ProviderRequest) -> ProviderResponse:
-        prompt = (request.cacheable_prompt_prefix or "") + request.prompt
-        payload: dict[str, Any] = {
-            "model": request.model,
-            "instructions": request.system,
-            "input": prompt,
-            "max_output_tokens": request.max_output_tokens,
-            "store": False,
-        }
-        if request.temperature is not None:
-            payload["temperature"] = request.temperature
-        if request.reasoning_effort != "default":
-            payload["reasoning"] = {"effort": request.reasoning_effort}
         response = await self.request(
             "POST",
             "https://api.openai.com/v1/responses",
             timeout_seconds=request.timeout_seconds,
             headers={"authorization": f"Bearer {self.api_key}"},
-            json=payload,
+            json=self._payload(request),
         )
         data: dict[str, Any] = response.json()
         text = "".join(
@@ -70,25 +75,12 @@ class OpenAIProvider(AIProvider):
         )
 
     async def stream(self, request: ProviderRequest) -> AsyncIterator[ProviderStreamEvent]:
-        prompt = (request.cacheable_prompt_prefix or "") + request.prompt
-        payload: dict[str, Any] = {
-            "model": request.model,
-            "instructions": request.system,
-            "input": prompt,
-            "max_output_tokens": request.max_output_tokens,
-            "store": False,
-            "stream": True,
-        }
-        if request.temperature is not None:
-            payload["temperature"] = request.temperature
-        if request.reasoning_effort != "default":
-            payload["reasoning"] = {"effort": request.reasoning_effort}
         async with self.client().stream(
             "POST",
             "https://api.openai.com/v1/responses",
             timeout=request.timeout_seconds,
             headers={"authorization": f"Bearer {self.api_key}"},
-            json=payload,
+            json=self._payload(request, stream=True),
         ) as response:
             await self.ensure_stream_success(response)
             async for event in _normalized_events("openai", response):
@@ -96,6 +88,39 @@ class OpenAIProvider(AIProvider):
 
 
 class AnthropicProvider(AIProvider):
+    @staticmethod
+    def _payload(request: ProviderRequest, *, stream: bool = False) -> dict[str, Any]:
+        content: str | list[dict[str, Any]] = request.prompt
+        if request.cacheable_prompt_prefix:
+            content = [
+                {
+                    "type": "text",
+                    "text": request.cacheable_prompt_prefix,
+                    "cache_control": {"type": "ephemeral"},
+                },
+                {"type": "text", "text": request.prompt},
+            ]
+        payload: dict[str, Any] = {
+            "model": request.model,
+            "system": [
+                {
+                    "type": "text",
+                    "text": request.system,
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ],
+            "messages": [{"role": "user", "content": content}],
+            "max_tokens": request.max_output_tokens,
+        }
+        if stream:
+            payload["stream"] = True
+        if request.temperature is not None:
+            payload["temperature"] = request.temperature
+        if request.reasoning_effort != "default":
+            payload["thinking"] = {"type": "adaptive"}
+            payload["output_config"] = {"effort": request.reasoning_effort}
+        return payload
+
     async def list_models(self) -> list[ProviderModel]:
         response = await self.request(
             "GET",
@@ -114,33 +139,6 @@ class AnthropicProvider(AIProvider):
         )
 
     async def run(self, request: ProviderRequest) -> ProviderResponse:
-        content: str | list[dict[str, Any]] = request.prompt
-        if request.cacheable_prompt_prefix:
-            content = [
-                {
-                    "type": "text",
-                    "text": request.cacheable_prompt_prefix,
-                    "cache_control": {"type": "ephemeral"},
-                },
-                {"type": "text", "text": request.prompt},
-            ]
-        payload: dict[str, Any] = {
-            "model": request.model,
-            "system": [
-                {
-                    "type": "text",
-                    "text": request.system,
-                    "cache_control": {"type": "ephemeral"},
-                }
-            ],
-            "messages": [{"role": "user", "content": content}],
-            "max_tokens": request.max_output_tokens,
-        }
-        if request.temperature is not None:
-            payload["temperature"] = request.temperature
-        if request.reasoning_effort != "default":
-            payload["thinking"] = {"type": "adaptive"}
-            payload["output_config"] = {"effort": request.reasoning_effort}
         response = await self.request(
             "POST",
             "https://api.anthropic.com/v1/messages",
@@ -149,7 +147,7 @@ class AnthropicProvider(AIProvider):
                 "x-api-key": self.api_key,
                 "anthropic-version": "2023-06-01",
             },
-            json=payload,
+            json=self._payload(request),
         )
         data: dict[str, Any] = response.json()
         text = "".join(
@@ -166,34 +164,6 @@ class AnthropicProvider(AIProvider):
         )
 
     async def stream(self, request: ProviderRequest) -> AsyncIterator[ProviderStreamEvent]:
-        content: str | list[dict[str, Any]] = request.prompt
-        if request.cacheable_prompt_prefix:
-            content = [
-                {
-                    "type": "text",
-                    "text": request.cacheable_prompt_prefix,
-                    "cache_control": {"type": "ephemeral"},
-                },
-                {"type": "text", "text": request.prompt},
-            ]
-        payload: dict[str, Any] = {
-            "model": request.model,
-            "system": [
-                {
-                    "type": "text",
-                    "text": request.system,
-                    "cache_control": {"type": "ephemeral"},
-                }
-            ],
-            "messages": [{"role": "user", "content": content}],
-            "max_tokens": request.max_output_tokens,
-            "stream": True,
-        }
-        if request.temperature is not None:
-            payload["temperature"] = request.temperature
-        if request.reasoning_effort != "default":
-            payload["thinking"] = {"type": "adaptive"}
-            payload["output_config"] = {"effort": request.reasoning_effort}
         async with self.client().stream(
             "POST",
             "https://api.anthropic.com/v1/messages",
@@ -202,7 +172,7 @@ class AnthropicProvider(AIProvider):
                 "x-api-key": self.api_key,
                 "anthropic-version": "2023-06-01",
             },
-            json=payload,
+            json=self._payload(request, stream=True),
         ) as response:
             await self.ensure_stream_success(response)
             async for event in _normalized_events("anthropic", response):
@@ -210,6 +180,23 @@ class AnthropicProvider(AIProvider):
 
 
 class GoogleProvider(AIProvider):
+    @staticmethod
+    def _payload(request: ProviderRequest, *, stream: bool = False) -> dict[str, Any]:
+        generation_config: dict[str, Any] = {"max_output_tokens": request.max_output_tokens}
+        if request.temperature is not None:
+            generation_config["temperature"] = request.temperature
+        if request.reasoning_effort != "default":
+            generation_config["thinking_level"] = request.reasoning_effort
+        payload: dict[str, Any] = {
+            "model": request.model,
+            "system_instruction": request.system,
+            "input": (request.cacheable_prompt_prefix or "") + request.prompt,
+            "generation_config": generation_config,
+        }
+        if stream:
+            payload["stream"] = True
+        return payload
+
     async def list_models(self) -> list[ProviderModel]:
         response = await self.request(
             "GET",
@@ -229,23 +216,12 @@ class GoogleProvider(AIProvider):
         return sorted(models, key=lambda item: item.id)
 
     async def run(self, request: ProviderRequest) -> ProviderResponse:
-        prompt = (request.cacheable_prompt_prefix or "") + request.prompt
-        generation_config: dict[str, Any] = {"max_output_tokens": request.max_output_tokens}
-        if request.temperature is not None:
-            generation_config["temperature"] = request.temperature
-        if request.reasoning_effort != "default":
-            generation_config["thinking_level"] = request.reasoning_effort
         response = await self.request(
             "POST",
             "https://generativelanguage.googleapis.com/v1beta/interactions",
             timeout_seconds=request.timeout_seconds,
             headers={"x-goog-api-key": self.api_key},
-            json={
-                "model": request.model,
-                "system_instruction": request.system,
-                "input": prompt,
-                "generation_config": generation_config,
-            },
+            json=self._payload(request),
         )
         data: dict[str, Any] = response.json()
         usage = data.get("usage") or data.get("usageMetadata") or {}
@@ -257,24 +233,12 @@ class GoogleProvider(AIProvider):
         )
 
     async def stream(self, request: ProviderRequest) -> AsyncIterator[ProviderStreamEvent]:
-        prompt = (request.cacheable_prompt_prefix or "") + request.prompt
-        generation_config: dict[str, Any] = {"max_output_tokens": request.max_output_tokens}
-        if request.temperature is not None:
-            generation_config["temperature"] = request.temperature
-        if request.reasoning_effort != "default":
-            generation_config["thinking_level"] = request.reasoning_effort
         async with self.client().stream(
             "POST",
             "https://generativelanguage.googleapis.com/v1beta/interactions?alt=sse",
             timeout=request.timeout_seconds,
             headers={"x-goog-api-key": self.api_key},
-            json={
-                "model": request.model,
-                "system_instruction": request.system,
-                "input": prompt,
-                "generation_config": generation_config,
-                "stream": True,
-            },
+            json=self._payload(request, stream=True),
         ) as response:
             await self.ensure_stream_success(response)
             async for event in _normalized_events("google", response):

@@ -41,6 +41,53 @@ def test_provider_factory_behavior_is_available() -> None:
     assert provider.api_key == "secret"
 
 
+@pytest.mark.parametrize(
+    "provider_type",
+    [OpenAIProvider, AnthropicProvider, GoogleProvider],
+)
+def test_streaming_and_non_streaming_use_the_same_runtime_mapping(
+    provider_type: type[OpenAIProvider | AnthropicProvider | GoogleProvider],
+) -> None:
+    request = ProviderRequest(
+        model="test-model",
+        system="system",
+        prompt="prompt",
+        max_output_tokens=8_000,
+        temperature=0.2,
+        reasoning_effort="high",
+        cacheable_prompt_prefix="cached-prefix",
+    )
+
+    standard = provider_type._payload(request)
+    streaming = provider_type._payload(request, stream=True)
+
+    assert streaming == {**standard, "stream": True}
+
+
+def test_normalized_runtime_fields_map_to_provider_specific_parameters() -> None:
+    request = ProviderRequest(
+        model="test-model",
+        system="system",
+        prompt="prompt",
+        max_output_tokens=8_000,
+        reasoning_effort="high",
+    )
+
+    openai = OpenAIProvider._payload(request)
+    anthropic = AnthropicProvider._payload(request)
+    google = GoogleProvider._payload(request)
+
+    assert openai["max_output_tokens"] == 8_000
+    assert openai["reasoning"] == {"effort": "high"}
+    assert anthropic["max_tokens"] == 8_000
+    assert anthropic["thinking"] == {"type": "adaptive"}
+    assert anthropic["output_config"] == {"effort": "high"}
+    assert google["generation_config"] == {
+        "max_output_tokens": 8_000,
+        "thinking_level": "high",
+    }
+
+
 def test_model_json_is_parsed() -> None:
     assert parse_model_data('```json\n{"result": "PASS"}\n```') == {"result": "PASS"}
 
