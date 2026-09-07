@@ -18,6 +18,7 @@ class FakeIntakeUnitOfWork:
         self.context = context
         self.directive: CompletionDirective | None = None
         self.takeover = False
+        self.conversation = False
         self.committed = False
         self.external_actions_executed = False
         self.synchronized = False
@@ -38,6 +39,9 @@ class FakeIntakeUnitOfWork:
 
     async def finish_during_takeover(self, _context: IntakeCompletionContext) -> None:
         self.takeover = True
+
+    async def finish_conversation(self, _context: IntakeCompletionContext) -> None:
+        self.conversation = True
 
     async def apply(
         self, _context: IntakeCompletionContext, directive: CompletionDirective
@@ -66,6 +70,18 @@ def intake_context(*, takeover: bool = False) -> IntakeCompletionContext:
     )
 
 
+def conversation_context() -> IntakeCompletionContext:
+    return IntakeCompletionContext(
+        uuid.uuid4(),
+        uuid.uuid4(),
+        "RESPOND_TO_MESSAGE",
+        {"conversation_only": True},
+        "EVENT_INTERPRETED",
+        {"actionability": "INFORMATIONAL"},
+        False,
+    )
+
+
 def command() -> IntakeCompletionCommand:
     return IntakeCompletionCommand(uuid.uuid4(), uuid.uuid4(), {}, datetime.now(UTC))
 
@@ -89,3 +105,14 @@ async def test_intake_completion_preserves_manual_takeover() -> None:
     assert unit.takeover and unit.committed and unit.synchronized
     assert not unit.external_actions_executed
     assert unit.directive is None
+
+
+@pytest.mark.asyncio
+async def test_conversation_response_does_not_apply_workflow_directive() -> None:
+    unit = FakeIntakeUnitOfWork(conversation_context())
+    handler = CompleteIntakeJob(lambda: unit)  # type: ignore[arg-type]
+
+    assert await handler.execute(command())
+    assert unit.conversation and unit.committed and unit.synchronized
+    assert unit.directive is None
+    assert not unit.external_actions_executed

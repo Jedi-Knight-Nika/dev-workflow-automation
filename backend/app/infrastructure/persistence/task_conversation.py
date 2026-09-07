@@ -8,7 +8,7 @@ from app.application.ports.task_conversation import (
     TaskMessagePage,
     TaskMessageView,
 )
-from app.db.models import Job, JobRole, JobState, Task, TaskMessage, TaskState
+from app.db.models import Job, JobRole, JobState, Task, TaskMessage
 from app.infrastructure.persistence.job_operations import enqueue_job, record_event
 
 
@@ -83,38 +83,25 @@ class SqlAlchemyTaskConversationStore:
             "TASK_MESSAGE_ADDED",
             {"message_id": message.id, "author_type": "USER"},
         )
-        active_job = await self._session.scalar(
+        pending_response = await self._session.scalar(
             select(Job.id).where(
                 Job.task_id == task_id,
+                Job.action == "RESPOND_TO_MESSAGE",
                 Job.state.in_([JobState.QUEUED, JobState.CLAIMED, JobState.RUNNING]),
             )
         )
-        if (
-            active_job is None
-            and task.team_id is not None
-            and task.state not in {TaskState.MERGED, TaskState.CANCELLED}
-        ):
-            if task.state in {
-                TaskState.NEEDS_HUMAN,
-                TaskState.CONTEXT_PENDING,
-                TaskState.FAILED,
-                TaskState.PAUSED,
-            }:
-                task.state = TaskState.NEW
-                task.manual_takeover = False
-            role, action = (
-                (JobRole.REVIEWER, "REVIEW_USER_MESSAGE")
-                if task.state in {TaskState.WAITING_GITHUB, TaskState.READY_TO_MERGE}
-                else (JobRole.TESTER, "VALIDATE_USER_MESSAGE")
-                if task.state == TaskState.LOCAL_VALIDATION
-                else (JobRole.INTAKE, "INTERPRET_MESSAGE")
-            )
+        if pending_response is None and task.team_id is not None:
             await enqueue_job(
                 self._session,
                 task,
-                role,
-                action,
-                payload={"message_id": message.id, "reply_to_id": reply_to_id},
+                JobRole.INTAKE,
+                "RESPOND_TO_MESSAGE",
+                payload={
+                    "message_id": message.id,
+                    "reply_to_id": reply_to_id,
+                    "conversation_only": True,
+                },
+                preserve_task_state=True,
             )
         await self._session.commit()
         return _view(message)

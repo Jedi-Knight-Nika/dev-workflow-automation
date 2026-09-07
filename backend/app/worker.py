@@ -763,6 +763,14 @@ async def run(job_id: uuid.UUID) -> WorkerResult:
         else:
             raise RuntimeError(f"Unsupported worker role {job.role.value}")
         prompt = json.dumps(prompt_data, ensure_ascii=False)
+        system_prompt = config.system_prompt
+        if job.action == "RESPOND_TO_MESSAGE":
+            system_prompt += (
+                "\n\nThis is a conversation-only response. Answer the user's latest internal task "
+                "message directly and use your summary as the answer. Return EVENT_INTERPRETED "
+                "with INFORMATIONAL actionability, blocking=false, and empty repository_ids and "
+                "external_delivery_actions. Do not restart, reroute, or reinterpret the engineering task."
+            )
         configured_repairs = config.configuration.get("structured_output_retries", 2)
         max_repairs = int(configured_repairs) if isinstance(configured_repairs, (int, str)) else 2
         max_job_turns = int(execution_strategy.get("max_job_turns", max_repairs + 1))
@@ -778,7 +786,7 @@ async def run(job_id: uuid.UUID) -> WorkerResult:
                         provider,
                         ProviderRequest(
                             model=config.model,
-                            system=config.system_prompt,
+                            system=system_prompt,
                             prompt=prompt,
                             max_output_tokens=int(
                                 config.configuration.get("max_output_tokens") or 4096

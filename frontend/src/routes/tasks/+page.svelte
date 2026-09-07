@@ -130,10 +130,6 @@
     try {
       const message = await addTaskMessage(taskId, body, replyToId);
       messages = [...messages, message];
-      if (['NEEDS_HUMAN', 'CONTEXT_PENDING'].includes(selected.state)) {
-        selected = await runTaskCommand(taskId, 'resume');
-        await refresh();
-      }
     } catch (cause) {
       error = cause instanceof Error ? cause.message : String(cause);
       throw cause;
@@ -606,7 +602,7 @@
         <TaskConversation
           {messages}
           taskState={selected.state}
-          resumeOnSend={['NEEDS_HUMAN', 'CONTEXT_PENDING'].includes(selected.state)}
+          resumeOnSend={false}
           hasOlder={nextMessageCursor !== null}
           loadingOlder={loadingOlderMessages}
           sending={sendingMessage}

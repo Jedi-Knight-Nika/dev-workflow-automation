@@ -72,7 +72,7 @@ async def _record_agent_summary(
     if not summary:
         return
     result = str(job.result.get("result") or "")
-    if result in {"EVENT_INTERPRETED", "PLAN_READY"}:
+    if result in {"EVENT_INTERPRETED", "PLAN_READY"} and job.action != "RESPOND_TO_MESSAGE":
         return
     agent = await session.get(AIAgent, job.agent_id) if job.agent_id else None
     task = await session.get(Task, task_id)
@@ -103,6 +103,7 @@ async def enqueue_job(
     payload: dict[str, Any] | None = None,
     workflow_node: WorkflowNode | None = None,
     workflow_version: int | None = None,
+    preserve_task_state: bool = False,
 ) -> Job:
     if task.execution_profile is None or task.execution_strategy is None:
         profile = TaskProfiler().profile(
@@ -130,7 +131,8 @@ async def enqueue_job(
         job.agent_id = workflow_node.agent_id
         job.team_workflow_version = workflow_version
         task.current_workflow_node_id = workflow_node.id
-    task.state = ROLE_TASK_STATE[role]
+    if not preserve_task_state:
+        task.state = ROLE_TASK_STATE[role]
     await record_event(
         session,
         task.id,
@@ -224,6 +226,17 @@ async def claim_next_job(session: AsyncSession, worker_id: str, lease_seconds: i
         .correlate(Job)
         .exists()
     )
+    other_task_job = aliased(Job)
+    task_already_running = (
+        select(other_task_job.id)
+        .where(
+            other_task_job.task_id == Job.task_id,
+            other_task_job.id != Job.id,
+            other_task_job.state.in_([JobState.CLAIMED, JobState.RUNNING]),
+        )
+        .correlate(Job)
+        .exists()
+    )
     stmt = (
         select(Job)
         .join(Task)
@@ -245,6 +258,7 @@ async def claim_next_job(session: AsyncSession, worker_id: str, lease_seconds: i
                 HealthState.probe_job_id == Job.id,
             ),
             ~blocked_integration,
+            ~task_already_running,
             or_(
                 Task.team_id.is_(None),
                 (

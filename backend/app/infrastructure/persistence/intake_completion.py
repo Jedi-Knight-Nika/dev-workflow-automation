@@ -95,6 +95,14 @@ class SqlAlchemyIntakeCompletionUnitOfWork:
             {"job_id": str(context.job_id), "state": JobState.SUCCEEDED.value},
         )
 
+    async def finish_conversation(self, context: IntakeCompletionContext) -> None:
+        await record_event(
+            self._active(),
+            context.task_id,
+            "JOB_SUCCEEDED",
+            {"job_id": str(context.job_id), "result": context.outcome},
+        )
+
     async def apply(self, context: IntakeCompletionContext, directive: CompletionDirective) -> None:
         session = self._active()
         task = await session.get(Task, context.task_id)
