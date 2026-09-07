@@ -234,6 +234,31 @@
   let fullscreen = $state(false);
   let canvasViewport: HTMLDivElement;
 
+  async function enterFullscreen(): Promise<void> {
+    // Prefer the browser Fullscreen API so the graph can occupy the entire
+    // display, including the area normally occupied by browser chrome. Keep
+    // the existing fixed-layout fallback for browsers or embedded previews
+    // that do not grant fullscreen permission.
+    if (canvasViewport.requestFullscreen) {
+      try {
+        await canvasViewport.requestFullscreen();
+        fullscreen = true;
+        return;
+      } catch {
+        // Fall back to the in-page fullscreen presentation below.
+      }
+    }
+    fullscreen = true;
+  }
+
+  async function exitFullscreen(): Promise<void> {
+    if (document.fullscreenElement && document.exitFullscreen) {
+      await document.exitFullscreen();
+      return;
+    }
+    fullscreen = false;
+  }
+
   onMount(() => {
     const storageKey = `workflow-canvas-size:${teamId || 'default'}`;
     const saved = localStorage.getItem(storageKey);
@@ -257,7 +282,24 @@
       );
     });
     observer.observe(canvasViewport);
-    return () => observer.disconnect();
+
+    const handleFullscreenChange = () => {
+      // Escape, browser controls, or another fullscreen request can exit the
+      // native mode without going through our button.
+      fullscreen = Boolean(document.fullscreenElement);
+    };
+    const handleKeydown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && fullscreen && !document.fullscreenElement) {
+        fullscreen = false;
+      }
+    };
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    document.addEventListener('keydown', handleKeydown);
+    return () => {
+      observer.disconnect();
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+      document.removeEventListener('keydown', handleKeydown);
+    };
   });
 
   $effect(() => {
@@ -913,7 +955,11 @@
     >
       {liveNode ? '⌘ Open live view' : '⌘ No live activity'}
     </Button>
-    <Button size="sm" variant="ghost" onclick={() => (fullscreen = !fullscreen)}>
+    <Button
+      size="sm"
+      variant="ghost"
+      onclick={() => (fullscreen ? exitFullscreen() : enterFullscreen())}
+    >
       {fullscreen ? 'Exit fullscreen' : 'Fullscreen graph'}
     </Button>
     <Button size="sm" variant="primary" disabled={saving || !dirty} onclick={persist}>
@@ -970,10 +1016,8 @@
   <div bind:this={canvasViewport} class="canvas-viewport bg-surface" class:fullscreen>
     {#if fullscreen}
       <div class="fullscreen-toolbar">
-        <span>Team workflow · live graph</span>
-        <Button size="sm" variant="ghost" onclick={() => (fullscreen = false)}
-          >Exit fullscreen</Button
-        >
+        <span>Team workflow · live graph <small>Press Esc to exit</small></span>
+        <Button size="sm" variant="ghost" onclick={exitFullscreen}>Exit fullscreen</Button>
       </div>
     {/if}
     <SvelteFlow

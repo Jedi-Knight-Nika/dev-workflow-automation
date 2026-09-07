@@ -119,8 +119,11 @@ class SqlAlchemyFailedCompletionUnitOfWork:
             health = await self._load_health(classification.resource_type, resource_id)
             updated = record_failure(
                 CircuitSnapshot(
-                    CircuitState(health.circuit_state),
-                    health.consecutive_failures,
+                    # Older health rows may predate the non-null defaults.  A
+                    # failure must still be recorded rather than crashing the
+                    # failure handler and being misreported as UNKNOWN_SYSTEM_ERROR.
+                    CircuitState(health.circuit_state or CircuitState.CLOSED.value),
+                    health.consecutive_failures or 0,
                     health.next_probe_at,
                 ),
                 now=command.finished_at,
