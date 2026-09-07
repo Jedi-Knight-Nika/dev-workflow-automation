@@ -4,6 +4,7 @@ import uuid
 from app.application.ports.team_management import (
     AssignTaskCommand,
     SaveTeamCommand,
+    ShutdownTeamResult,
     TaskAssignmentView,
     TeamManagementWorkflow,
     TeamNotFound,
@@ -47,3 +48,7 @@ class ManageTeams:
     async def wake(self, team_id: uuid.UUID) -> WakeTeamResult:
         await self.get(team_id)
         return await self._workflow.wake(team_id)
+
+    async def shutdown(self, team_id: uuid.UUID) -> ShutdownTeamResult:
+        await self.get(team_id)
+        return await self._workflow.shutdown(team_id)

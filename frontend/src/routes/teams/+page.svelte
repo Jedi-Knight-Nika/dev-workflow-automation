@@ -7,7 +7,14 @@
   import Skeleton from '$lib/components/Skeleton.svelte';
   import { listRepositories } from '$lib/services/repositories';
   import { getExecutionPolicy, saveExecutionPolicy } from '$lib/services/execution-policy';
-  import { archiveTeam, createTeam, listTeams, updateTeam, wakeTeam } from '$lib/services/teams';
+  import {
+    archiveTeam,
+    createTeam,
+    listTeams,
+    shutdownTeam,
+    updateTeam,
+    wakeTeam
+  } from '$lib/services/teams';
   import type { Repository, Team } from '$lib/types';
 
   let teams = $state<Team[]>([]),
@@ -19,6 +26,7 @@
     loading = $state(true);
   let archivingId = $state(''),
     wakingId = $state(''),
+    shuttingDownId = $state(''),
     wakeMessage = $state('');
   let name = $state(''),
     description = $state(''),
@@ -150,6 +158,23 @@
       wakingId = '';
     }
   }
+  async function shutdown(team: Team) {
+    if (
+      !confirm(`Stop active work for ${team.name}? Tasks will be paused and can be resumed later.`)
+    )
+      return;
+    shuttingDownId = team.id;
+    error = '';
+    try {
+      const result = await shutdownTeam(team.id);
+      wakeMessage = `${team.name}: stopped ${result.cancelled_jobs} job(s), paused ${result.paused_tasks} task(s)`;
+      await load();
+    } catch (cause) {
+      error = String(cause);
+    } finally {
+      shuttingDownId = '';
+    }
+  }
   onMount(load);
 </script>
 
@@ -161,11 +186,14 @@
 <main class="space-y-6 p-4 sm:p-6 md:p-10">
   <ErrorBanner message={error} />
   {#if wakeMessage}<p class="wake-result" role="status">{wakeMessage}</p>{/if}
-  <div class="flex items-center justify-between">
-    <p class="text-muted text-sm">
-      Each team works sequentially by default. Teams run independently.
-    </p>
-    <button class="primary" onclick={() => void open()}>Create team</button>
+  <div class="teams-toolbar">
+    <div>
+      <strong>Independent delivery lanes</strong>
+      <p>Each team works sequentially by default and runs independently.</p>
+    </div>
+    <button class="create-button" onclick={() => void open()}>
+      <span aria-hidden="true">+</span> Create team
+    </button>
   </div>
   <section class="team-grid" aria-busy={loading}>
     {#if loading}
@@ -186,46 +214,91 @@
       {/each}
     {/if}
     {#each teams as team (team.id)}
-      <article class="team-card">
-        <header>
-          <div>
-            <TeamBadge id={team.id} name={team.name} />
+      {@const hasActiveWork = team.running_tasks > 0 || team.queued_tasks > 0}
+      <article class="team-card" class:active={team.running_tasks > 0}>
+        <header class="card-header">
+          <div class="team-identity">
+            <div class="team-name">
+              <TeamBadge id={team.id} name={team.name} />
+              <span
+                class:online={team.enabled}
+                class="status"
+                title={team.enabled ? 'Enabled' : 'Disabled'}
+              ></span>
+            </div>
             <span
-              class:online={team.enabled}
-              class="status"
-              title={team.enabled ? 'Enabled' : 'Disabled'}
-            ></span>
+              class="team-state"
+              class:working={team.running_tasks > 0}
+              class:disabled={!team.enabled}
+            >
+              <i></i>{team.running_tasks > 0 ? 'Working' : team.enabled ? 'Available' : 'Disabled'}
+            </span>
           </div>
-          <span class="capacity">{team.max_concurrent_tasks} concurrent</span>
+          <div class="capacity">
+            <strong>{team.max_concurrent_tasks}</strong>
+            <span>{team.max_concurrent_tasks === 1 ? 'task at a time' : 'parallel tasks'}</span>
+          </div>
         </header>
-        <p>{team.description || 'No team description.'}</p>
+        <p class="team-description">{team.description || 'No team description yet.'}</p>
         <div class="metrics">
-          <div><strong>{team.running_tasks}</strong><span>Running</span></div>
-          <div><strong>{team.queued_tasks}</strong><span>Queued</span></div>
-          <div><strong>{team.completed_tasks}</strong><span>Completed</span></div>
+          <div class="running-metric">
+            <span><i></i>Running</span><strong>{team.running_tasks}</strong>
+          </div>
+          <div class="queued-metric">
+            <span><i></i>Queued</span><strong>{team.queued_tasks}</strong>
+          </div>
+          <div class="completed-metric">
+            <span><i></i>Completed</span><strong>{team.completed_tasks}</strong>
+          </div>
         </div>
-        <div class="usage">
-          <span>{integer.format(team.total_input_tokens + team.total_output_tokens)} tokens</span
-          ><span>{money.format(team.estimated_cost_usd)}</span><span
-            >{team.repository_ids.length
-              ? `${team.repository_ids.length} projects`
+        <div class="usage" aria-label="Team usage">
+          <span title="Total input and output tokens"
+            ><b>Tokens</b>{integer.format(team.total_input_tokens + team.total_output_tokens)}</span
+          >
+          <span title="Estimated provider cost"
+            ><b>Spend</b>{money.format(team.estimated_cost_usd)}</span
+          >
+          <span title="Repository access scope"
+            ><b>Access</b>{team.repository_ids.length
+              ? `${team.repository_ids.length} ${team.repository_ids.length === 1 ? 'project' : 'projects'}`
               : 'All projects'}</span
           >
         </div>
         <footer>
           <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
-          <a class="primary" href={`${resolve('/agents')}?team=${team.id}`}>Open workflow</a><button
-            class="wake"
-            disabled={!team.enabled || wakingId === team.id}
-            onclick={() => void wake(team)}>{wakingId === team.id ? 'Waking…' : 'Wake team'}</button
-          ><button class="edit" onclick={() => void open(team)} aria-label={`Edit ${team.name}`}
-            ><span aria-hidden="true">✎</span> Edit</button
-          >{#if team.id !== '00000000-0000-0000-0000-000000000001'}<button
-              class="danger"
-              disabled={archivingId === team.id}
-              onclick={() => void remove(team)}
-              >{archivingId === team.id ? 'Archiving…' : 'Archive'}</button
-            >{/if}
+          <a class="workflow-action" href={`${resolve('/agents')}?team=${team.id}`}
+            ><span>Open workflow</span><b aria-hidden="true">→</b></a
+          >
+          <div class="operation-actions">
+            <button
+              class="wake"
+              disabled={!team.enabled || wakingId === team.id}
+              onclick={() => void wake(team)}
+              ><span aria-hidden="true">▶</span>{wakingId === team.id ? 'Waking…' : 'Wake'}</button
+            >
+            <span
+              class="button-help"
+              title={!hasActiveWork ? 'No running or queued work to stop' : undefined}
+            >
+              <button
+                class="stop"
+                disabled={shuttingDownId === team.id || !hasActiveWork}
+                onclick={() => void shutdown(team)}
+                ><span aria-hidden="true">■</span>{shuttingDownId === team.id
+                  ? 'Stopping…'
+                  : 'Stop work'}</button
+              >
+            </span>
+            <button class="edit" onclick={() => void open(team)} aria-label={`Edit ${team.name}`}
+              ><span aria-hidden="true">✎</span> Settings</button
+            >
+            {#if team.id !== '00000000-0000-0000-0000-000000000001'}<button
+                class="danger"
+                disabled={archivingId === team.id}
+                onclick={() => void remove(team)}
+                >{archivingId === team.id ? 'Archiving…' : 'Archive'}</button
+              >{/if}
+          </div>
         </footer>
       </article>
     {/each}
@@ -380,32 +453,115 @@
     font-size: 0.8rem;
     font-weight: 700;
   }
-  .team-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-    gap: 1rem;
-  }
-  .team-card {
-    display: grid;
+  .teams-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
     gap: 1rem;
     border: 1px solid var(--color-line);
-    border-radius: 1rem;
-    background: var(--color-panel);
-    padding: 1.1rem;
-    box-shadow: 0 2px 10px rgb(0 0 0/0.04);
+    border-radius: 0.85rem;
+    background: color-mix(in srgb, var(--color-panel) 76%, transparent);
+    padding: 0.85rem 0.9rem 0.85rem 1rem;
   }
-  .team-card > header {
+  .teams-toolbar strong {
+    color: var(--color-heading);
+    font-size: 0.8rem;
+  }
+  .teams-toolbar p {
+    margin-top: 0.15rem;
+    color: var(--color-muted);
+    font-size: 0.72rem;
+  }
+  .create-button {
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    gap: 0.5rem;
+    border: 1px solid color-mix(in srgb, var(--color-brand-2) 45%, var(--color-brand));
+    border-radius: 0.6rem;
+    background: linear-gradient(120deg, var(--color-brand), var(--color-brand-2));
+    padding: 0.62rem 0.85rem;
+    color: #08050d;
+    font-size: 0.76rem;
+    font-weight: 800;
+    box-shadow: 0 8px 22px color-mix(in srgb, var(--color-brand) 22%, transparent);
+    transition:
+      filter 150ms ease,
+      transform 150ms ease;
+  }
+  .create-button span {
+    font-size: 1rem;
+    line-height: 0;
+  }
+  .create-button:hover {
+    filter: brightness(1.08);
+    transform: translateY(-1px);
+  }
+  .team-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(360px, 100%), 440px));
+    gap: 1.15rem;
+    justify-content: start;
+  }
+  .team-card {
+    position: relative;
+    display: grid;
+    align-content: start;
+    gap: 1.05rem;
+    overflow: hidden;
+    border: 1px solid color-mix(in srgb, var(--color-brand-2) 16%, var(--color-line));
+    border-radius: 1rem;
+    background:
+      radial-gradient(
+        circle at 100% 0,
+        color-mix(in srgb, var(--color-brand) 8%, transparent),
+        transparent 35%
+      ),
+      var(--color-panel);
+    padding: 1.15rem;
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 4%),
+      0 14px 36px rgb(0 0 0 / 18%);
+    transition:
+      border-color 160ms ease,
+      box-shadow 160ms ease,
+      transform 160ms ease;
+  }
+  .team-card::before {
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 3px;
+    background: color-mix(in srgb, var(--color-brand-2) 55%, var(--color-line));
+    content: '';
+  }
+  .team-card:hover {
+    border-color: color-mix(in srgb, var(--color-brand-2) 38%, var(--color-line));
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 6%),
+      0 18px 42px rgb(0 0 0 / 26%);
+    transform: translateY(-2px);
+  }
+  .team-card.active::before {
+    background: var(--color-accent);
+    box-shadow: 0 0 14px color-mix(in srgb, var(--color-accent) 55%, transparent);
+  }
+  .card-header {
     display: flex;
-    align-items: start;
+    align-items: flex-start;
     justify-content: space-between;
     gap: 1rem;
   }
-  .team-card header div {
+  .team-identity {
+    display: grid;
+    min-width: 0;
+    gap: 0.55rem;
+  }
+  .team-name {
     display: flex;
     align-items: center;
     gap: 0.55rem;
   }
-  .team-card header div :global(.badge) {
+  .team-name :global(.badge) {
     font-size: 0.78rem;
   }
   .status {
@@ -418,14 +574,55 @@
     background: #22a06b;
     box-shadow: 0 0 0 3px color-mix(in srgb, #22a06b 18%, transparent);
   }
-  .capacity {
-    border: 1px solid var(--color-line);
+  .team-state {
+    display: inline-flex;
+    width: fit-content;
+    align-items: center;
+    gap: 0.38rem;
+    border: 1px solid color-mix(in srgb, var(--color-accent) 24%, var(--color-line));
     border-radius: 999px;
-    padding: 0.2rem 0.5rem;
-    color: var(--color-muted);
-    font-size: 0.67rem;
+    background: color-mix(in srgb, var(--color-accent) 6%, transparent);
+    padding: 0.22rem 0.5rem;
+    color: color-mix(in srgb, var(--color-accent) 78%, var(--color-text));
+    font-size: 0.58rem;
+    font-weight: 750;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
   }
-  .team-card > p {
+  .team-state i {
+    width: 0.38rem;
+    height: 0.38rem;
+    border-radius: 50%;
+    background: currentColor;
+  }
+  .team-state.working i {
+    box-shadow: 0 0 7px currentColor;
+  }
+  .team-state.disabled {
+    border-color: var(--color-line);
+    background: transparent;
+    color: var(--color-muted);
+  }
+  .capacity {
+    display: grid;
+    flex: none;
+    min-width: 4.7rem;
+    justify-items: end;
+    gap: 0.05rem;
+    border-left: 1px solid var(--color-line);
+    padding-left: 0.9rem;
+  }
+  .capacity strong {
+    color: var(--color-heading);
+    font-size: 1.25rem;
+    line-height: 1;
+  }
+  .capacity span {
+    color: var(--color-muted);
+    font-size: 0.55rem;
+    white-space: nowrap;
+  }
+  .team-description {
     min-height: 2.5rem;
     color: var(--color-muted);
     font-size: 0.8rem;
@@ -435,68 +632,145 @@
     display: grid;
     grid-template-columns: repeat(3, 1fr);
     overflow: hidden;
-    border: 1px solid var(--color-line);
-    border-radius: 0.7rem;
+    border: 1px solid color-mix(in srgb, var(--color-line) 84%, transparent);
+    border-radius: 0.75rem;
+    background: color-mix(in srgb, var(--color-surface) 46%, transparent);
   }
   .metrics div {
-    display: grid;
-    gap: 0.2rem;
-    padding: 0.65rem;
-    text-align: center;
+    display: flex;
+    min-width: 0;
+    flex-direction: column-reverse;
+    gap: 0.3rem;
+    padding: 0.72rem;
   }
   .metrics div + div {
     border-left: 1px solid var(--color-line);
   }
   .metrics strong {
-    font-size: 1.15rem;
+    color: var(--color-heading);
+    font-size: 1.25rem;
+    line-height: 1;
   }
-  .metrics span,
-  .usage {
-    color: var(--color-muted);
-    font-size: 0.66rem;
-  }
-  .usage {
-    display: flex;
-    flex-wrap: wrap;
-    justify-content: space-between;
-    gap: 0.5rem;
-  }
-  .team-card > footer {
+  .metrics span {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
-    border-top: 1px solid var(--color-line);
-    padding-top: 0.9rem;
-  }
-  .team-card > footer button {
-    padding: 0.5rem;
+    gap: 0.3rem;
     color: var(--color-muted);
-    font-size: 0.75rem;
+    font-size: 0.6rem;
   }
-  .team-card > footer .edit {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.35rem;
+  .metrics i {
+    width: 0.34rem;
+    height: 0.34rem;
+    border-radius: 50%;
+    background: var(--color-muted);
+  }
+  .running-metric i {
+    background: var(--color-accent);
+  }
+  .queued-metric i {
+    background: var(--color-warning);
+  }
+  .completed-metric i {
+    background: var(--color-brand-2);
+  }
+  .usage {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.4rem;
+  }
+  .usage > span {
+    display: grid;
+    min-width: 0;
+    gap: 0.12rem;
+    overflow: hidden;
     border: 1px solid var(--color-line);
     border-radius: 0.5rem;
-    padding: 0.5rem 0.65rem;
+    padding: 0.48rem 0.52rem;
+    color: var(--color-text);
+    font: 0.64rem var(--font-mono);
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
-  .team-card > footer .edit:hover {
-    border-color: var(--color-brand);
+  .usage b {
+    color: var(--color-muted);
+    font: 700 0.5rem/1.2 var(--font-mono);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .team-card > footer {
+    display: grid;
+    gap: 0.65rem;
+    border-top: 1px solid var(--color-line);
+    padding-top: 1rem;
+  }
+  .workflow-action {
+    display: flex;
+    width: 100%;
+    align-items: center;
+    justify-content: space-between;
+    border: 1px solid color-mix(in srgb, var(--color-brand-2) 40%, var(--color-line));
+    border-radius: 0.6rem;
+    background: color-mix(in srgb, var(--color-brand-2) 9%, var(--color-panel-alt));
+    padding: 0.68rem 0.78rem;
+    color: var(--color-heading);
+    font-size: 0.76rem;
+    font-weight: 800;
+    transition:
+      background 150ms ease,
+      border-color 150ms ease;
+  }
+  .workflow-action b {
+    color: var(--color-brand-2);
+    font-size: 1rem;
+  }
+  .workflow-action:hover {
+    border-color: var(--color-brand-2);
+    background: color-mix(in srgb, var(--color-brand-2) 15%, var(--color-panel-alt));
+  }
+  .operation-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+  }
+  .operation-actions button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.32rem;
+    border: 1px solid var(--color-line);
+    border-radius: 0.5rem;
+    padding: 0.48rem 0.58rem;
+    color: var(--color-muted);
+    font-size: 0.68rem;
+    white-space: nowrap;
+  }
+  .operation-actions button:hover:not(:disabled) {
+    border-color: color-mix(in srgb, var(--color-brand-2) 45%, var(--color-line));
+    background: color-mix(in srgb, var(--color-brand-2) 7%, transparent);
     color: var(--color-text);
   }
-  .team-card > footer .wake {
+  .button-help {
+    display: inline-flex;
+  }
+  .operation-actions .wake {
     border: 1px solid color-mix(in srgb, var(--color-brand) 40%, var(--color-line));
-    border-radius: 0.5rem;
     color: var(--color-brand);
     font-weight: 700;
   }
-  .team-card > footer .wake:hover:not(:disabled) {
+  .operation-actions .wake:hover:not(:disabled) {
     background: color-mix(in srgb, var(--color-brand) 9%, transparent);
   }
-  .team-card > footer .wake:disabled {
+  .operation-actions .stop {
+    border: 1px solid color-mix(in srgb, var(--color-danger) 45%, var(--color-line));
+    color: var(--color-danger);
+    font-weight: 700;
+  }
+  .operation-actions .stop:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--color-danger) 9%, transparent);
+  }
+  .operation-actions button:disabled {
     cursor: not-allowed;
-    opacity: 0.55;
+    opacity: 0.42;
   }
   .wake-result {
     border: 1px solid color-mix(in srgb, #22a06b 35%, var(--color-line));
@@ -506,9 +780,25 @@
     color: var(--color-text);
     font-size: 0.78rem;
   }
-  .team-card > footer .danger {
+  .operation-actions .danger {
     margin-left: auto;
-    color: #e5484d;
+    border-color: transparent;
+    color: var(--color-danger);
+  }
+  @media (max-width: 460px) {
+    .teams-toolbar {
+      align-items: stretch;
+      flex-direction: column;
+    }
+    .create-button {
+      justify-content: center;
+    }
+    .operation-actions {
+      flex-wrap: wrap;
+    }
+    .operation-actions .danger {
+      margin-left: 0;
+    }
   }
   .backdrop {
     position: fixed;

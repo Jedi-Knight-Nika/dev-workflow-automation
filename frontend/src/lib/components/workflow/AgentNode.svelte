@@ -65,7 +65,7 @@
       <strong class="truncate text-base font-semibold">{agent.displayName}</strong>
       {#if agent.system}<span class="system-pill">CORE</span>{/if}
     </div>
-    <div class="flex items-center gap-1.5">
+    <div class="node-meta">
       <span
         class="status-dot"
         class:running={agent.status === 'RUNNING'}
@@ -172,6 +172,16 @@
     gap: 0.75rem;
     padding: 0.8rem 0.85rem;
   }
+  .node-shell strong {
+    color: var(--color-heading);
+    text-shadow: 0 1px 10px rgb(0 0 0 / 35%);
+  }
+  .node-meta {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: 0.38rem;
+  }
   .system-pill {
     border: 1px solid color-mix(in srgb, var(--color-brand) 35%, transparent);
     border-radius: 999px;
@@ -222,10 +232,12 @@
     display: flex;
     min-width: 0;
     align-items: center;
-    gap: 0.35rem;
+    gap: 0.4rem;
     margin-top: 0.45rem;
-    border-top: 1px solid var(--color-line);
-    padding-top: 0.42rem;
+    border: 1px solid color-mix(in srgb, var(--color-line) 82%, transparent);
+    border-radius: 0.42rem;
+    background: color-mix(in srgb, var(--color-surface) 48%, transparent);
+    padding: 0.38rem 0.42rem;
   }
   .activity-row {
     display: flex;
@@ -259,6 +271,7 @@
     border-radius: 50%;
     background: currentColor;
     box-shadow: 0 0 6px currentColor;
+    animation: activity-pulse 1.35s ease-in-out infinite;
   }
   .provider-mark {
     display: grid;
@@ -279,7 +292,7 @@
   }
   .model-name {
     overflow: hidden;
-    color: var(--color-muted);
+    color: color-mix(in srgb, var(--color-text) 82%, var(--color-muted));
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     font-size: 0.55rem;
     text-overflow: ellipsis;
@@ -357,5 +370,16 @@
   .menu-hint:hover {
     background: color-mix(in srgb, var(--color-line) 45%, transparent);
     color: var(--color-heading);
+  }
+  @keyframes activity-pulse {
+    50% {
+      opacity: 0.55;
+      transform: scale(1.45);
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .activity-pulse {
+      animation: none;
+    }
   }
 </style>

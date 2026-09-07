@@ -20,6 +20,8 @@ def docker_container_spec(settings: Settings, job_id: uuid.UUID) -> dict[str, An
         "SCHEDULER_ENABLED=false",
         f"MAX_JOB_TOKENS={settings.max_job_tokens}",
         f"MAX_TASK_TOKENS={settings.max_task_tokens}",
+        f"MAX_JOB_MODEL_CALLS={settings.max_job_model_calls}",
+        f"MAX_TASK_MODEL_CALLS={settings.max_task_model_calls}",
         f"MAX_TEAM_TOKENS={settings.max_team_tokens}",
         f"MAX_JOB_COST_USD={settings.max_job_cost_usd}",
         f"MAX_TASK_COST_USD={settings.max_task_cost_usd}",

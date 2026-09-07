@@ -26,6 +26,7 @@ from app.bootstrap.dependencies import (
 )
 from app.domain.workflows import WorkflowGraphData
 from app.schemas import (
+    ShutdownTeamRead,
     TaskAssignmentCreate,
     TaskAssignmentRead,
     TeamRead,
@@ -130,6 +131,18 @@ async def wake_team(
     except TeamNotFound as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return WakeTeamRead.model_validate(result, from_attributes=True)
+
+
+@router.post("/{team_id}/shutdown", response_model=ShutdownTeamRead)
+async def shutdown_team(
+    team_id: uuid.UUID,
+    workflow: TeamManagementWorkflow = Depends(get_team_management_workflow),
+) -> ShutdownTeamRead:
+    try:
+        result = await ManageTeams(workflow).shutdown(team_id)
+    except TeamNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return ShutdownTeamRead.model_validate(result, from_attributes=True)
 
 
 @router.get("/{team_id}/assignments", response_model=list[TaskAssignmentRead])

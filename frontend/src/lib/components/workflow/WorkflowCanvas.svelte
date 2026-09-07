@@ -325,6 +325,15 @@
   const titleCase = (value: string) => value[0].toUpperCase() + value.slice(1);
   const percent = (value: number, min: number, max: number) => ((value - min) / (max - min)) * 100;
 
+  function nodeStatusClass(status: string) {
+    if (status === 'RUNNING') return 'running';
+    if (['READY', 'SYSTEM_READY'].includes(status)) return 'status-ready';
+    if (['QUEUED', 'WAITING'].includes(status)) return 'status-queued';
+    if (status === 'CONFIGURATION_ERROR') return 'status-error';
+    if (['NEEDS_CONFIGURATION', 'NEEDS_VERIFICATION'].includes(status)) return 'status-warning';
+    return '';
+  }
+
   function nodeStatus(node: CanvasNode, liveStatus?: string, activeJobs = 0) {
     if (liveStatus === 'RUNNING' || activeJobs > 0) return 'RUNNING';
     if (!node.data.enabled) return 'DISABLED';
@@ -366,7 +375,7 @@
           integrationNames,
           repositoryCount: node.data.repositoryIds.length
         },
-        class: `workflow-node ${status === 'RUNNING' ? 'running' : ''} ${!node.data.enabled ? 'disabled' : ''} ${node.data.role === selectedRole ? 'selected' : ''}`
+        class: `workflow-node ${nodeStatusClass(status)} ${!node.data.enabled ? 'disabled' : ''} ${node.data.role === selectedRole ? 'selected' : ''}`
       };
     });
     edges = untrack(() => edges).map((edge) => ({
@@ -1019,6 +1028,55 @@
         <span>Team workflow · live graph <small>Press Esc to exit</small></span>
         <Button size="sm" variant="ghost" onclick={exitFullscreen}>Exit fullscreen</Button>
       </div>
+      <aside class="fullscreen-activity" aria-label="Live workflow queue">
+        <div class="activity-heading">
+          <div><strong>Live workflow</strong><small>{activity.length} agent(s)</small></div>
+          <span class="activity-live-dot"></span>
+        </div>
+        {#if activity.length === 0}
+          <p class="activity-empty">No queued or running jobs.</p>
+        {:else}
+          {#each activity as item (item.node_id)}
+            {@const itemNode = nodes.find((node) => node.id === item.node_id)}
+            <button
+              type="button"
+              class="activity-item"
+              class:active={item.active_jobs > 0}
+              onclick={() => itemNode && onSelect(itemNode.data.role, itemNode.id)}
+            >
+              <span class="activity-status" class:working={item.active_jobs > 0}></span>
+              <span class="activity-copy"
+                ><strong>{itemNode?.data.displayName || item.node_id}</strong><small
+                  >{item.current_job_action?.replaceAll('_', ' ') || 'Waiting'}</small
+                >{#if item.task_id}<small class="activity-task"
+                    >Task {item.task_id.slice(0, 8)}</small
+                  >{/if}</span
+              >
+              <span class="activity-counts"
+                >{item.active_jobs} active · {item.queued_jobs} queued</span
+              >
+            </button>
+          {/each}
+        {/if}
+        {#if selectedNodeId}
+          {@const selectedLive = activity.find((item) => item.node_id === selectedNodeId)}
+          {@const selected = nodes.find((node) => node.id === selectedNodeId)}
+          {#if selected}
+            <div class="activity-details">
+              <small>Selected agent</small><strong>{selected.data.displayName}</strong><span
+                >{selected.data.provider} / {selected.data.model || 'Model not configured'}</span
+              ><span
+                >{selectedLive?.current_job_action?.replaceAll('_', ' ') ||
+                  selected.data.status.replaceAll('_', ' ')}</span
+              >{#if selectedLive?.task_id}<span>Task {selectedLive.task_id}</span>{/if}<Button
+                size="sm"
+                variant="ghost"
+                onclick={() => onConsole(selected.data.role, selected.id)}>Open live view</Button
+              >
+            </div>
+          {/if}
+        {/if}
+      </aside>
     {/if}
     <SvelteFlow
       bind:nodes
@@ -1043,8 +1101,8 @@
       <Background
         variant={BackgroundVariant.Dots}
         gap={22}
-        size={1.2}
-        patternColor="var(--color-line)"
+        size={1.35}
+        patternColor="var(--color-muted)"
       />
       <Controls />
     </SvelteFlow>
@@ -1700,25 +1758,58 @@
 
 <style>
   :global(.workflow-node) {
+    --node-accent: color-mix(in srgb, var(--color-brand-2) 45%, var(--color-muted));
     min-width: 245px;
-    border: 1px solid var(--color-line) !important;
+    overflow: hidden;
+    border: 1px solid color-mix(in srgb, var(--node-accent) 32%, var(--color-line)) !important;
     border-radius: 12px !important;
-    background: linear-gradient(145deg, var(--color-panel), var(--color-panel-alt)) !important;
+    background: linear-gradient(
+      145deg,
+      color-mix(in srgb, var(--color-panel) 94%, white),
+      var(--color-panel-alt)
+    ) !important;
     color: var(--color-heading) !important;
-    box-shadow: 0 12px 30px rgb(0 0 0 / 28%);
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 5%),
+      0 14px 34px rgb(0 0 0 / 42%);
     transition:
       border-color 160ms ease,
       box-shadow 160ms ease,
-      transform 160ms ease;
+      transform 160ms ease,
+      filter 160ms ease;
+  }
+  :global(.workflow-node::before) {
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 3px;
+    background: var(--node-accent);
+    box-shadow: 0 0 12px color-mix(in srgb, var(--node-accent) 38%, transparent);
+    content: '';
+  }
+  :global(.workflow-node.status-ready) {
+    --node-accent: var(--color-accent);
+  }
+  :global(.workflow-node.status-queued) {
+    --node-accent: var(--color-warning);
+  }
+  :global(.workflow-node.status-warning) {
+    --node-accent: var(--color-warning);
+  }
+  :global(.workflow-node.status-error) {
+    --node-accent: var(--color-danger);
   }
   :global(.workflow-node:hover),
   :global(.workflow-node.selected) {
-    border-color: var(--color-brand-2) !important;
+    border-color: color-mix(in srgb, var(--node-accent) 78%, white) !important;
     box-shadow:
-      0 0 0 3px color-mix(in srgb, var(--color-brand-2) 15%, transparent),
-      0 16px 34px rgb(0 0 0 / 32%);
+      inset 0 1px 0 rgb(255 255 255 / 8%),
+      0 0 0 3px color-mix(in srgb, var(--node-accent) 16%, transparent),
+      0 18px 40px rgb(0 0 0 / 48%);
+    filter: brightness(1.07);
+    transform: translateY(-1px);
   }
   :global(.workflow-node.running) {
+    --node-accent: var(--color-brand-2);
     border-color: var(--color-accent) !important;
     box-shadow:
       0 0 0 3px color-mix(in srgb, var(--color-accent) 24%, transparent),
@@ -1751,10 +1842,16 @@
     }
   }
   :global(.svelte-flow__edge-path) {
-    stroke-width: 2.2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 2.5;
+    transition:
+      stroke 160ms ease,
+      stroke-width 160ms ease,
+      filter 160ms ease;
   }
   :global(.route-neutral .svelte-flow__edge-path) {
-    stroke: var(--color-muted);
+    stroke: color-mix(in srgb, var(--color-brand-2) 34%, var(--color-muted));
   }
   :global(.route-ready .svelte-flow__edge-path) {
     stroke: color-mix(in srgb, var(--color-accent) 65%, var(--color-muted));
@@ -1766,14 +1863,33 @@
   }
   :global(.route-running .svelte-flow__edge-path) {
     stroke: var(--color-brand-2);
-    stroke-width: 3;
-    stroke-dasharray: 9 5;
-    animation: route-flow 0.75s linear infinite;
-    filter: drop-shadow(0 0 4px color-mix(in srgb, var(--color-brand-2) 65%, transparent));
+    stroke-width: 3.5;
+    stroke-dasharray: 10 6;
+    animation: route-flow 0.7s linear infinite;
+    filter: drop-shadow(0 0 5px color-mix(in srgb, var(--color-brand-2) 78%, transparent));
   }
   :global(.route-blocked .svelte-flow__edge-path) {
     stroke: var(--color-danger);
     stroke-dasharray: 3 5;
+  }
+  :global(.svelte-flow__edge:hover .svelte-flow__edge-path),
+  :global(.svelte-flow__edge.selected .svelte-flow__edge-path) {
+    stroke: color-mix(in srgb, var(--color-brand-2) 88%, white) !important;
+    stroke-width: 3.5;
+    filter: drop-shadow(0 0 5px color-mix(in srgb, var(--color-brand-2) 55%, transparent));
+  }
+  :global(.svelte-flow__edge-text) {
+    fill: var(--color-text);
+    font-family: var(--font-mono);
+    font-size: 9px;
+    font-weight: 750;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+  :global(.svelte-flow__edge-textbg) {
+    fill: color-mix(in srgb, var(--color-panel) 94%, transparent);
+    stroke: color-mix(in srgb, var(--color-brand-2) 22%, var(--color-line));
+    stroke-width: 1px;
   }
   @keyframes route-flow {
     to {
@@ -1786,10 +1902,13 @@
     }
   }
   :global(.svelte-flow__handle) {
-    width: 11px;
-    height: 11px;
-    border: 2px solid var(--color-surface);
-    background: var(--color-brand-2);
+    width: 12px;
+    height: 12px;
+    border: 2px solid var(--color-panel-alt);
+    background: color-mix(in srgb, var(--color-brand-2) 78%, white);
+    box-shadow:
+      0 0 0 2px color-mix(in srgb, var(--color-brand-2) 24%, transparent),
+      0 0 8px color-mix(in srgb, var(--color-brand-2) 35%, transparent);
   }
   .add-button {
     display: flex;
@@ -2038,6 +2157,38 @@
     max-height: 1200px;
     overflow: hidden;
     resize: both;
+    background:
+      radial-gradient(
+        circle at 18% 12%,
+        color-mix(in srgb, var(--color-brand) 10%, transparent),
+        transparent 34%
+      ),
+      radial-gradient(
+        circle at 82% 78%,
+        color-mix(in srgb, var(--color-brand-2) 8%, transparent),
+        transparent 36%
+      ),
+      var(--color-surface);
+    box-shadow: inset 0 0 80px rgb(0 0 0 / 24%);
+  }
+  .canvas-viewport :global(.svelte-flow__background) {
+    opacity: 0.25;
+  }
+  .canvas-viewport :global(.svelte-flow__controls) {
+    overflow: hidden;
+    border: 1px solid color-mix(in srgb, var(--color-brand-2) 22%, var(--color-line));
+    border-radius: 0.55rem;
+    box-shadow: 0 10px 28px rgb(0 0 0 / 38%);
+  }
+  .canvas-viewport :global(.svelte-flow__controls-button) {
+    --xy-controls-button-background-color: color-mix(in srgb, var(--color-panel) 94%, transparent);
+    --xy-controls-button-background-color-hover: color-mix(
+      in srgb,
+      var(--color-brand-2) 16%,
+      var(--color-panel)
+    );
+    --xy-controls-button-border-color: var(--color-line);
+    --xy-controls-button-color: var(--color-text);
   }
   .canvas-viewport.fullscreen {
     position: fixed;
@@ -2069,6 +2220,86 @@
     color: var(--color-muted);
     font-size: 0.68rem;
     backdrop-filter: blur(8px);
+  }
+  .fullscreen-activity {
+    position: absolute;
+    top: 4.8rem;
+    right: 0.75rem;
+    bottom: 0.75rem;
+    z-index: 7;
+    width: min(22rem, calc(100vw - 1.5rem));
+    overflow: auto;
+    border: 1px solid var(--color-line);
+    border-radius: 0.7rem;
+    background: color-mix(in srgb, var(--color-panel) 92%, transparent);
+    padding: 0.75rem;
+    backdrop-filter: blur(10px);
+  }
+  .activity-heading {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.55rem;
+  }
+  .activity-heading div,
+  .activity-copy {
+    display: grid;
+    gap: 0.15rem;
+  }
+  .activity-heading small,
+  .activity-copy small,
+  .activity-details small {
+    color: var(--color-muted);
+    font-size: 0.65rem;
+  }
+  .activity-live-dot,
+  .activity-status {
+    width: 0.5rem;
+    height: 0.5rem;
+    border-radius: 999px;
+    background: var(--color-muted);
+  }
+  .activity-live-dot {
+    background: #22c55e;
+    box-shadow: 0 0 0 0.2rem color-mix(in srgb, #22c55e 18%, transparent);
+  }
+  .activity-status.working {
+    background: #f59e0b;
+    box-shadow: 0 0 0 0.2rem color-mix(in srgb, #f59e0b 16%, transparent);
+  }
+  .activity-item {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    gap: 0.55rem;
+    width: 100%;
+    border-radius: 0.5rem;
+    padding: 0.55rem;
+    text-align: left;
+  }
+  .activity-item:hover,
+  .activity-item.active {
+    background: color-mix(in srgb, var(--color-brand) 10%, transparent);
+  }
+  .activity-counts {
+    color: var(--color-muted);
+    font-size: 0.6rem;
+    white-space: nowrap;
+  }
+  .activity-task {
+    font-family: ui-monospace, SFMono-Regular, monospace;
+  }
+  .activity-empty {
+    color: var(--color-muted);
+    font-size: 0.75rem;
+    padding: 0.5rem 0;
+  }
+  .activity-details {
+    display: grid;
+    gap: 0.35rem;
+    margin-top: 0.75rem;
+    border-top: 1px solid var(--color-line);
+    padding-top: 0.75rem;
+    font-size: 0.7rem;
   }
   .resize-hint {
     position: absolute;

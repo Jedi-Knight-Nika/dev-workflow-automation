@@ -32,6 +32,8 @@ class OpenAIProvider(AIProvider):
             payload["stream"] = True
         if request.tools:
             payload["tools"] = [{"type": "function", **tool} for tool in request.tools]
+            if not request.allow_tool_calls:
+                payload["tool_choice"] = "none"
             payload["parallel_tool_calls"] = False
             payload["include"] = ["reasoning.encrypted_content"]
             payload["input"] = [

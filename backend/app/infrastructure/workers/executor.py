@@ -390,6 +390,7 @@ async def run_checks(
     timeout_seconds: int = 180,
     credential_environment: dict[str, str] | None = None,
     gateway: ToolGateway | None = None,
+    directory: str = ".",
 ) -> list[CheckResult]:
     results: list[CheckResult] = []
     setup_commands = dependency_setup_commands(workspace)
@@ -415,6 +416,7 @@ async def run_checks(
             )
             outcome = await gateway.run_command(
                 command,
+                directory=directory,
                 capability=capability,
                 timeout_seconds=timeout_seconds,
                 environment=credential_subprocess_environment(supplied)

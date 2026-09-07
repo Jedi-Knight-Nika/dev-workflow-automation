@@ -169,7 +169,7 @@ async def run_with_structured_repair(
     provider: AIProvider,
     request: ProviderRequest,
     role: JobRole,
-    max_repairs: int = 2,
+    max_repairs: int = 1,
     before_attempt: Callable[[list[ProviderAttempt]], Awaitable[None]] | None = None,
     on_text_delta: Callable[[str], Awaitable[None]] | None = None,
     is_cancelled: Callable[[], Awaitable[bool]] | None = None,
@@ -178,11 +178,15 @@ async def run_with_structured_repair(
     max_model_calls: int = 20,
 ) -> tuple[dict[str, Any], list[ProviderAttempt]]:
     attempts: list[ProviderAttempt] = []
+    if repository_tools is not None:
+        repository_tools.begin_history()
     prompt = request.prompt
-    cacheable_prefix: str | None = None
+    cacheable_prefix: str | None = request.cacheable_prompt_prefix
     last_error: ValidationError | None = None
     history: tuple[dict[str, Any], ...] = ()
     for attempt_number in range(max(0, min(max_repairs, 10)) + 1):
+        if len(attempts) >= max_model_calls:
+            raise StructuredOutputError("Model-turn budget exhausted", attempts)
         if before_attempt is not None:
             await before_attempt(attempts)
         started = time.monotonic()
@@ -210,7 +214,30 @@ async def run_with_structured_repair(
                     await before_attempt(attempts)
                 started = time.monotonic()
                 try:
-                    response = await provider.run(replace(pending_request, tool_history=history))
+                    # Reserve the last call for a deliverable, retaining all source evidence.
+                    final_turn = (
+                        len(attempts) >= max_model_calls - 1
+                        or repository_tools.calls >= repository_tools.max_calls
+                        or repository_tools.remaining <= 0
+                        or repository_tools.repeated_reads >= 2
+                        or attempt_number > 0
+                    )
+                    response = await provider.run(
+                        replace(
+                            pending_request,
+                            tool_history=history,
+                            allow_tool_calls=not final_turn,
+                            system=pending_request.system
+                            + (
+                                "\nRepository inspection is complete for this run. Return your "
+                                "structured result using the evidence already read. If essential "
+                                "evidence is missing, identify the exact unresolved files; do not "
+                                "invent source or report unverified success."
+                                if final_turn
+                                else ""
+                            ),
+                        )
+                    )
                 except RuntimeError as exc:
                     raise ProviderRunInterrupted(exc, attempts) from exc
                 attempts.append(
@@ -222,6 +249,10 @@ async def run_with_structured_repair(
                     break
                 history += response.continuation
                 for call in response.tool_calls:
+                    if is_cancelled is not None and await is_cancelled():
+                        raise ProviderRunInterrupted(
+                            RuntimeError("Worker cancelled before workspace operation"), attempts
+                        )
                     name = str(call.get("name", ""))
                     if on_text_delta:
                         await on_text_delta(f"\nUsing {name}\n")
@@ -231,6 +262,13 @@ async def run_with_structured_repair(
                         )
                     except RuntimeError as exc:
                         raise StructuredOutputError(str(exc), attempts) from exc
+                    approval_id = getattr(repository_tools, "approval_id", None)
+                    if approval_id is not None:
+                        return {
+                            "result": "NEEDS_HUMAN",
+                            "summary": "Workspace operation requires policy approval",
+                            "reason": f"Approve workspace operation {approval_id} before resuming.",
+                        }, attempts
                     if repository_tools.consultation is not None:
                         return {
                             "result": "CONSULTATION_REQUESTED",
@@ -261,7 +299,7 @@ async def run_with_structured_repair(
             cacheable_prefix = request.prompt
             prompt = (
                 "\n\nYour previous response failed schema validation. Return corrected JSON only. "
-                + f"Validation errors: {exc.errors(include_url=False)}. "
+                + f"Validation errors: {exc.errors(include_url=False, include_input=False)}. "
                 + f"Previous response: {response.text[:8000]}"
             )
     raise StructuredOutputError(

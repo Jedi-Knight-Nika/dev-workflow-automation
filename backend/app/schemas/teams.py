@@ -91,3 +91,8 @@ class WakeTeamRead(BaseModel):
     queued_jobs: int
     running_jobs: int
     missing_repository_tasks: int
+
+
+class ShutdownTeamRead(BaseModel):
+    cancelled_jobs: int
+    paused_tasks: int

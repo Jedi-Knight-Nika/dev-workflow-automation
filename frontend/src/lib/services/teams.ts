@@ -21,6 +21,9 @@ export type WakeTeamResult = {
 };
 export const wakeTeam = (id: string) =>
   api<WakeTeamResult>(`/teams/${id}/wake`, { method: 'POST' });
+export type ShutdownTeamResult = { cancelled_jobs: number; paused_tasks: number };
+export const shutdownTeam = (id: string) =>
+  api<ShutdownTeamResult>(`/teams/${id}/shutdown`, { method: 'POST' });
 export const listTeamAssignments = (id: string) =>
   api<TaskAssignment[]>(`/teams/${id}/assignments`);
 export const assignTaskToTeam = (teamId: string, taskId: string) =>

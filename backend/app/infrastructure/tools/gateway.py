@@ -31,6 +31,10 @@ class ToolDenied(PermissionError):
     pass
 
 
+class ToolOperationError(RuntimeError):
+    """An authorized operation failed and may be corrected by the caller."""
+
+
 class ToolNeedsApproval(PermissionError):
     def __init__(self, approval_id: uuid.UUID) -> None:
         self.approval_id = approval_id
@@ -75,6 +79,18 @@ class ToolGateway:
             and self._tool_calls > self._context.max_tool_calls
         ):
             raise ToolDenied(f"Job tool-call budget exhausted ({self._context.max_tool_calls})")
+
+    async def read_file(self, relative: str, max_bytes: int = 100_000) -> str:
+        self._consume_tool_call()
+        await self._authorize("filesystem", "read", "READ_REPOSITORY", {"path": relative})
+        path = resolve_workspace_path(self._context.workspace, relative, must_exist=True)
+        if not path.is_file() or path.stat().st_size > max_bytes:
+            raise ToolOperationError("File is not regular or exceeds the read allowance")
+        with path.open("rb") as source:
+            content = source.read(max_bytes + 1)
+        if len(content) > max_bytes:
+            raise ToolOperationError("File exceeds the read allowance")
+        return content.decode("utf-8")
 
     async def write_file(self, relative: str, content: str) -> None:
         self._consume_tool_call()
@@ -121,7 +137,7 @@ class ToolGateway:
         _, stderr = await process.communicate(patch.encode())
         if process.returncode:
             safe_error = self._sanitize(stderr.decode(errors="replace"), {})
-            raise ToolDenied(f"Patch did not apply cleanly: {safe_error[-1000:]}")
+            raise ToolOperationError(f"Patch did not apply cleanly: {safe_error[-1000:]}")
         await self._audit(
             "filesystem",
             "patch",
@@ -138,16 +154,22 @@ class ToolGateway:
         capability: str = "RUN_COMMANDS",
         timeout_seconds: int = 60,
         environment: dict[str, str] | None = None,
+        directory: str = ".",
     ) -> CommandResult:
         self._consume_tool_call()
         if not command:
             raise ToolDenied("Empty command")
         timeout = min(max(timeout_seconds, 1), self._policy.max_command_timeout_seconds)
+        command_directory = resolve_workspace_path(
+            self._context.workspace, directory, must_exist=True
+        )
+        if not command_directory.is_dir():
+            raise ToolOperationError("Command directory must be a workspace directory")
         await self._authorize(
             "shell",
             "execute",
             capability,
-            {"command": command, "timeout_seconds": timeout},
+            {"command": command, "timeout_seconds": timeout, "directory": directory},
             tuple(command),
         )
         worker_home = self._context.workspace / ".worker-home"
@@ -167,7 +189,7 @@ class ToolGateway:
         started = time.monotonic()
         process = await asyncio.create_subprocess_exec(
             *command,
-            cwd=self._context.workspace,
+            cwd=command_directory,
             env=env,
             start_new_session=os.name != "nt",
             stdout=asyncio.subprocess.PIPE,
@@ -176,6 +198,10 @@ class ToolGateway:
         timed_out = False
         try:
             stdout, stderr = await asyncio.wait_for(process.communicate(), timeout)
+        except asyncio.CancelledError:
+            await self._terminate_tree(process.pid)
+            await asyncio.wait_for(process.wait(), 5)
+            raise
         except TimeoutError:
             timed_out = True
             await self._terminate_tree(process.pid)

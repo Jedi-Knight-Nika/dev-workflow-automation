@@ -41,7 +41,7 @@ async def test_live_reads_are_bounded_and_reject_secrets_and_symlinks(
         json.loads(await tools.execute("read_repository_files", '{"paths":["module.py"]}'))[0][
             "status"
         ]
-        == "CONTEXT_LIMIT"
+        == "ALREADY_READ"
     )
     with pytest.raises(RuntimeError, match="budget"):
         await tools.execute("list_repository_files", "{}")
@@ -61,6 +61,55 @@ class ToolProvider(AIProvider):
 
     async def list_models(self) -> list[ProviderModel]:
         return []
+
+
+@pytest.mark.asyncio
+async def test_final_turn_retains_evidence_and_disables_tools() -> None:
+    call = {
+        "type": "function_call",
+        "name": "list_repository_files",
+        "call_id": "last-read",
+        "arguments": '{"pattern":"*","offset":0}',
+    }
+    provider = ToolProvider(
+        [
+            ProviderResponse(
+                "", tool_calls=(call,), continuation=(call,), input_tokens=10, output_tokens=2
+            ),
+            ProviderResponse(
+                '{"result":"PLAN_READY","goal":"Fix","ordered_steps":["Edit"],"acceptance_criteria":["Pass"]}',
+                input_tokens=20,
+                output_tokens=10,
+            ),
+        ]
+    )
+    result, attempts = await run_with_structured_repair(
+        provider,
+        ProviderRequest(model="test", system="plan", prompt="task", tools=REPOSITORY_TOOLS),
+        JobRole.THINKER,
+        repository_tools=RepositoryTools([], max_calls=20),
+        max_model_calls=2,
+    )
+    assert result["result"] == "PLAN_READY" and len(attempts) == 2
+    final = provider.requests[-1]
+    assert not final.allow_tool_calls
+    payload = OpenAIProvider._payload(final)
+    assert payload["tool_choice"] == "none"
+    assert payload["input"][1]["call_id"] == "last-read"
+    assert payload["input"][2]["type"] == "function_call_output"
+
+
+@pytest.mark.asyncio
+async def test_zero_model_budget_never_contacts_provider() -> None:
+    provider = ToolProvider([])
+    with pytest.raises(RuntimeError, match="Model-turn budget exhausted"):
+        await run_with_structured_repair(
+            provider,
+            ProviderRequest(model="test", system="plan", prompt="task"),
+            JobRole.THINKER,
+            max_model_calls=0,
+        )
+    assert provider.requests == []
 
 
 @pytest.mark.asyncio

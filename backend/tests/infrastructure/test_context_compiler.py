@@ -130,7 +130,7 @@ async def test_conversation_reply_keeps_task_evidence_without_repository_discove
     monkeypatch.setattr(
         compiler, "_persistent_memory", AsyncMock(return_value={"summary": "Context"})
     )
-    monkeypatch.setattr(compiler, "_plan", AsyncMock(return_value={"goal": "Implement"}))
+    monkeypatch.setattr(compiler, "latest_plan", AsyncMock(return_value={"goal": "Implement"}))
     monkeypatch.setattr(compiler, "_team_repositories", repositories)
 
     async def finish(task, job, context, started):

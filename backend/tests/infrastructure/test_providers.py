@@ -346,13 +346,13 @@ async def test_invalid_structured_output_is_repaired_once() -> None:
 @pytest.mark.asyncio
 async def test_structured_output_repairs_are_bounded() -> None:
     provider = SequenceProvider(["bad", "still bad", "bad again"])
-    with pytest.raises(RuntimeError, match="after 3 attempts"):
+    with pytest.raises(RuntimeError, match="after 2 attempts"):
         await run_with_structured_repair(
             provider,
             ProviderRequest(model="test", system="review", prompt="context"),
             JobRole.REVIEWER,
         )
-    assert len(provider.prompts) == 3
+    assert len(provider.prompts) == 2
 
 
 @pytest.mark.asyncio

@@ -84,6 +84,13 @@ class RepositoryTools:
         self.remaining = max_bytes
         self.consultants = consultants or set()
         self.consultation: dict[str, str] | None = None
+        self.read_paths: set[str] = set()
+        self.repeated_reads = 0
+
+    def begin_history(self) -> None:
+        """A new provider conversation cannot reference an earlier discarded history."""
+        self.read_paths.clear()
+        self.repeated_reads = 0
 
     async def execute(self, name: str, arguments: str) -> str:
         self.calls += 1
@@ -113,13 +120,29 @@ class RepositoryTools:
                     raise ValueError(
                         "Provide 1–20 tracked source paths; secret paths are unavailable"
                     )
+                # Tools are read-only during this model session. Earlier successful
+                # reads remain in tool history, so sending them again wastes input.
+                fresh_paths = list(dict.fromkeys(p for p in paths if p not in self.read_paths))
+                repeated = list(dict.fromkeys(p for p in paths if p in self.read_paths))
+                self.repeated_reads = self.repeated_reads + 1 if not fresh_paths else 0
                 result = await requested_file_context(
                     self.workspaces,
-                    paths,
+                    fresh_paths,
                     max_context_bytes=max(self.remaining, 0),
                     path_filter=source_path_allowed,
                 )
                 self.remaining -= sum(len(item.get("content", "").encode()) for item in result)
+                for item in result:
+                    if item.get("status") == "LOADED":
+                        self.read_paths.add(str(item.get("requested_path") or item.get("path")))
+                result.extend(
+                    {
+                        "path": path,
+                        "status": "ALREADY_READ",
+                        "reason": "Use the complete file in earlier tool output.",
+                    }
+                    for path in repeated
+                )
             elif name in {"list_repository_files", "search_repository"}:
                 paths = []
                 for prefix, workspace in self.workspaces:

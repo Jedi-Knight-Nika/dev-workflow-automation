@@ -25,3 +25,9 @@ docker compose up --build
 
 Read [PRODUCT.md](PRODUCT.md) for the complete product and architecture reference, and
 [DEVELOPMENT.md](DEVELOPMENT.md) for setup, operations, and validation commands.
+
+See [Token efficiency and execution budgets](docs/token-efficiency.md) for cost controls,
+source-reading limits, plan reuse, and verification details.
+
+See [Executor workspace tools](docs/executor-workspace-tools.md) for direct editing,
+same-run test correction, permissions, and rollout instructions.

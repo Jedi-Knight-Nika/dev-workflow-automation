@@ -440,6 +440,8 @@ export const ka: Record<TranslationKey, string> = {
   'taskDetail.attempt': 'მცდელობა',
   'taskDetail.retryScheduledFor': 'გამეორება დაგეგმილია',
   'taskDetail.timeline': 'ქრონოლოგია',
+  'taskDetail.statusHistory': 'სტატუსის ისტორია',
+  'taskDetail.changedBy': 'ცვლილების ავტორი:',
   'taskDetail.noEventsRecorded': 'მოვლენები არ დაფიქსირებულა.',
   'taskDetail.aiGenerating': 'AI პასუხი მუშავდება',
   'taskDetail.charactersReceived': 'მიღებულია {count} სიმბოლო',

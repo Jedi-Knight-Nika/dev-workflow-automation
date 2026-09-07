@@ -11,6 +11,21 @@
     if (/RETRY|WAIT|PAUSE|NEEDS_HUMAN/.test(eventType)) return 'text-warning';
     return 'text-heading';
   }
+
+  function isStatusEvent(event: TaskEvent): boolean {
+    return /TASK_|STATE|NEEDS_HUMAN|PLANNING|IMPLEMENT|REVIEW|WAITING|READY|MERGED|PAUSED|CANCELLED|REOPENED|DONE/.test(
+      event.event_type
+    );
+  }
+
+  function actor(event: TaskEvent): string {
+    const payload = event.payload ?? {};
+    return String(
+      payload.actor_name ?? payload.changed_by ?? payload.user_name ?? event.source ?? 'system'
+    );
+  }
+
+  const statusEvents = $derived(events.filter(isStatusEvent));
 </script>
 
 <section class="border-line rounded-xl border p-5">
@@ -18,6 +33,28 @@
   {#if events.length === 0}
     <p class="text-muted text-sm">{t('taskDetail.noEventsRecorded')}</p>
   {:else}
+    {#if statusEvents.length > 0}
+      <div class="border-line mb-5 rounded-lg border bg-panel-alt/30 p-3">
+        <h3 class="mb-3 text-xs font-semibold uppercase tracking-wider text-muted">
+          {t('taskDetail.statusHistory')}
+        </h3>
+        <div class="space-y-3">
+          {#each statusEvents as event (event.id)}
+            <div class="flex items-start justify-between gap-3 text-sm">
+              <div>
+                <strong class={typeClass(event.event_type)}
+                  >{event.event_type.replaceAll('_', ' ')}</strong
+                >
+                <p class="text-muted text-xs">{t('taskDetail.changedBy')} {actor(event)}</p>
+              </div>
+              <time class="text-muted shrink-0 text-xs" datetime={event.created_at}>
+                {new Date(event.created_at).toLocaleString()}
+              </time>
+            </div>
+          {/each}
+        </div>
+      </div>
+    {/if}
     <ShowMore items={events}>
       {#snippet children(visibleEvents: TaskEvent[])}
         {#each visibleEvents as event, index (event.id)}

@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.application.ports.team_management import (
     AssignTaskCommand,
     SaveTeamCommand,
+    ShutdownTeamResult,
     TaskAssignmentView,
     TeamConflict,
     TeamNotFound,
@@ -277,7 +278,7 @@ class SqlAlchemyTeamManagementWorkflow:
                     .join(Task, Task.id == TaskAssignment.task_id)
                     .where(
                         TaskAssignment.team_id == team_id,
-                        TaskAssignment.status.in_(["QUEUED", "RUNNING"]),
+                        TaskAssignment.status.in_(["QUEUED", "RUNNING", "PAUSED"]),
                         Task.archived_at.is_(None),
                     )
                     .with_for_update()
@@ -377,6 +378,71 @@ class SqlAlchemyTeamManagementWorkflow:
             running_jobs=running_jobs,
             missing_repository_tasks=missing_repository_tasks,
         )
+
+    async def shutdown(self, team_id: uuid.UUID) -> ShutdownTeamResult:
+        team = await self._session.get(Team, team_id, with_for_update=True)
+        if team is None or team.archived_at:
+            raise TeamNotFound("Team not found")
+        now = datetime.now(UTC)
+        jobs = list(
+            (
+                await self._session.scalars(
+                    select(Job)
+                    .join(Task, Task.id == Job.task_id)
+                    .where(
+                        Task.team_id == team_id,
+                        Job.state.in_(
+                            [
+                                JobState.QUEUED,
+                                JobState.CLAIMED,
+                                JobState.RUNNING,
+                                JobState.RETRY_WAIT,
+                                JobState.WAITING_PROVIDER,
+                                JobState.WAITING_INTEGRATION,
+                                JobState.WAITING_CONFIGURATION,
+                                JobState.WAITING_HUMAN,
+                            ]
+                        ),
+                    )
+                    .with_for_update()
+                )
+            ).all()
+        )
+        task_ids = {job.task_id for job in jobs}
+        for job in jobs:
+            job.state = JobState.CANCELLED
+            job.worker_id = None
+            job.lease_token = None
+            job.lease_expires_at = None
+            job.finished_at = now
+        paused_tasks = 0
+        if task_ids:
+            tasks = list(
+                (
+                    await self._session.scalars(
+                        select(Task).where(Task.id.in_(task_ids)).with_for_update()
+                    )
+                ).all()
+            )
+            for task in tasks:
+                if task.state not in {
+                    TaskState.CANCELLED,
+                    TaskState.FAILED,
+                    TaskState.MERGED,
+                    TaskState.PAUSED,
+                }:
+                    task.state = TaskState.PAUSED
+                    paused_tasks += 1
+        await self._session.execute(
+            update(TaskAssignment)
+            .where(
+                TaskAssignment.team_id == team_id,
+                TaskAssignment.status.in_(["QUEUED", "RUNNING"]),
+            )
+            .values(status="PAUSED")
+        )
+        await self._session.commit()
+        return ShutdownTeamResult(cancelled_jobs=len(jobs), paused_tasks=paused_tasks)
 
     async def _views(self, teams: builtins.list[Team]) -> builtins.list[TeamView]:
         if not teams:

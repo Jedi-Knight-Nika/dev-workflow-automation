@@ -1,5 +1,6 @@
 import json
 import uuid
+from dataclasses import replace
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,7 +20,18 @@ class TaskMemoryService:
             record = TaskMemory(task_id=task.id, goal=task.title, current_sha=task.current_revision)
             self._session.add(record)
             await self._session.flush()
-        return self._snapshot(record)
+        snapshot = self._snapshot(record)
+        if record.current_plan_job_id:
+            plan = await self._session.get(Job, record.current_plan_job_id)
+            data = (plan.result or {}).get("data") if plan else None
+            if isinstance(data, dict) and data.get("result") == "PLAN_READY":
+                # Also compact legacy memory at read time; retain original audit data.
+                snapshot = replace(
+                    snapshot,
+                    decisions=tuple(self._strings(data.get("constraints"))),
+                    important_files=tuple(self._strings(data.get("targets"))),
+                )
+        return snapshot
 
     async def latest_checkpoint(self, task_id: uuid.UUID, role: JobRole) -> AgentCheckpoint | None:
         checkpoint: AgentCheckpoint | None = await self._session.scalar(
@@ -79,10 +91,11 @@ class TaskMemoryService:
             memory.current_plan_job_id = (
                 job.id if result.get("result") == "PLAN_READY" else memory.current_plan_job_id
             )
-            memory.decisions = self._merged(memory.decisions, structured.get("decisions"))
-            memory.important_files = self._merged(
-                memory.important_files, structured.get("important_files")
-            )
+            if result.get("result") == "PLAN_READY":
+                # A new complete plan supersedes the old one. Historical plans remain
+                # in checkpoints; appending paraphrases grows every subsequent prompt.
+                memory.decisions = self._strings(structured.get("decisions"))
+                memory.important_files = self._strings(structured.get("important_files"))
             memory.open_questions = self._strings(structured.get("open_questions"))
         elif job.role == JobRole.EXECUTOR:
             memory.important_files = self._merged(

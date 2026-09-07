@@ -335,7 +335,7 @@ class ContextCompiler:
             unique[key] = row
         return list(unique.values())
 
-    async def _plan(self, task: Task) -> dict[str, Any] | None:
+    async def latest_plan(self, task: Task) -> dict[str, Any] | None:
         thinker = await self.session.scalar(
             select(Job)
             .where(
@@ -382,7 +382,7 @@ class ContextCompiler:
             # A conversation reply does not select repositories or restart implementation.
             # Keep durable task/plan/failure evidence, without repeating global repository RAG.
             context["task_memory"] = await self._persistent_memory(task, JobRole.DELIVERER)
-            context["technical_plan"] = await self._plan(task)
+            context["technical_plan"] = await self.latest_plan(task)
             latest_job = await self.session.scalar(
                 select(Job)
                 .where(Job.task_id == task.id, Job.id != job.id, Job.result.is_not(None))
@@ -508,7 +508,7 @@ class ContextCompiler:
         context["task_memory"] = await self._persistent_memory(task, JobRole.EXECUTOR)
         previous_checkpoint = await self._previous_checkpoint(task, JobRole.EXECUTOR)
         context["previous_role_checkpoint"] = previous_checkpoint
-        context["technical_plan"] = await self._plan(task)
+        context["technical_plan"] = await self.latest_plan(task)
         context["retrieved_knowledge"] = await self._knowledge(task, repository, JobRole.EXECUTOR)
         context["open_findings"] = await self._findings(task)
         repository_data: dict[str, Any] = {
@@ -554,7 +554,7 @@ class ContextCompiler:
         context["previous_role_checkpoint"] = await self._previous_checkpoint(
             task, JobRole.EXECUTOR
         )
-        context["technical_plan"] = await self._plan(task)
+        context["technical_plan"] = await self.latest_plan(task)
         context["open_findings"] = await self._findings(task)
         context["retrieved_knowledge"] = await self._knowledge(task, None, JobRole.EXECUTOR)
         context["repository_path_rule"] = (
@@ -593,7 +593,7 @@ class ContextCompiler:
         context = self._base(task, job)
         await self._include_conversation(task, context)
         context["task_memory"] = await self._persistent_memory(task, role)
-        context["technical_plan"] = await self._plan(task)
+        context["technical_plan"] = await self.latest_plan(task)
         context["open_findings"] = await self._findings(task)
         context["checks"] = checks or []
         repositories: list[dict[str, Any]] = []
@@ -633,7 +633,7 @@ class ContextCompiler:
         context = self._base(task, job)
         await self._include_conversation(task, context)
         context["task_memory"] = await self._persistent_memory(task, JobRole.REVIEWER)
-        context["technical_plan"] = await self._plan(task)
+        context["technical_plan"] = await self.latest_plan(task)
         context["retrieved_knowledge"] = await self._knowledge(task, repository, JobRole.REVIEWER)
         context["open_findings"] = await self._findings(task)
         context["repository"] = {
@@ -655,7 +655,7 @@ class ContextCompiler:
         context = self._base(task, job)
         await self._include_conversation(task, context)
         context["task_memory"] = await self._persistent_memory(task, JobRole.TESTER)
-        context["technical_plan"] = await self._plan(task)
+        context["technical_plan"] = await self.latest_plan(task)
         context["open_findings"] = await self._findings(task)
         context["validation_results"] = checks
         context["repository"] = {

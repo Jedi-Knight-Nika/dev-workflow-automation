@@ -49,6 +49,12 @@ from app.infrastructure.workers.executor import (
     run_checks,
     workspace_fingerprint,
 )
+from app.infrastructure.workers.executor_tools import (
+    EXECUTOR_TOOLS,
+    ExecutorTools,
+    InteractiveExecutorProposal,
+)
+from app.infrastructure.workers.plan_reuse import clean_workspace_revisions, plan_input_fingerprint
 from app.infrastructure.workers.repository_tools import (
     CONSULTATION_TOOL,
     REPOSITORY_TOOLS,
@@ -580,7 +586,9 @@ async def enforce_spending_budget(
         )
     for scope, token_limit, cost_limit, predicate in scopes:
         statement = (
-            select(tokens, cost).select_from(WorkerRun).join(Job, Job.id == WorkerRun.job_id)
+            select(tokens, cost, func.count(WorkerRun.id))
+            .select_from(WorkerRun)
+            .join(Job, Job.id == WorkerRun.job_id)
         )
         if scope == "team":
             statement = statement.join(Task, Task.id == Job.task_id)
@@ -588,7 +596,18 @@ async def enforce_spending_budget(
             statement = statement.where(
                 WorkerRun.created_at >= datetime(now.year, now.month, 1, tzinfo=UTC)
             )
-        used_tokens, used_cost = (await session.execute(statement.where(predicate))).one()
+        used_tokens, used_cost, used_calls = (
+            await session.execute(statement.where(predicate))
+        ).one()
+        call_limit = {
+            "job": settings.max_job_model_calls,
+            "task": settings.max_task_model_calls,
+        }.get(scope)
+        if call_limit and int(used_calls) + len(pending_attempts) >= call_limit:
+            raise BudgetExceeded(
+                f"{scope.title()} model-call budget exhausted ({int(used_calls) + len(pending_attempts)}/{call_limit})",
+                pending_attempts,
+            )
         total_tokens = int(used_tokens or 0) + pending_tokens
         total_cost = float(used_cost or 0) + pending_cost
         if token_limit and total_tokens >= token_limit:
@@ -622,6 +641,29 @@ async def run(job_id: uuid.UUID) -> WorkerResult:
             configuration=dict(config.configuration),
         )
         audit_snapshot = RuntimeAuditSnapshot.capture(config)
+        # Check lifetime limits before source preparation or paid retrieval as well
+        # as before every model call. Reopening a task never resets its usage.
+        try:
+            await enforce_spending_budget(session, job, task, settings, config.configuration, [])
+        except BudgetExceeded as exc:
+            stopped_result = WorkerResult(
+                job_id=job.id,
+                task_id=task.id,
+                role=job.role,
+                result="NEEDS_HUMAN",
+                summary=str(exc),
+                data={"result": "NEEDS_HUMAN", "reason": str(exc)},
+            )
+            await TaskMemoryService(session).checkpoint(
+                task,
+                job,
+                stopped_result.data,
+                stopped_result.summary,
+                config.agent_id,
+                config.role_id,
+                stopped_result.model_dump(mode="json"),
+            )
+            return stopped_result
         integration = await session.scalar(
             select(Integration).where(Integration.provider_name == config.provider)
         )
@@ -780,9 +822,59 @@ async def run(job_id: uuid.UUID) -> WorkerResult:
             )
         else:
             raise RuntimeError(f"Unsupported worker role {job.role.value}")
+        plan_fingerprint = None
+        planning_revisions = (
+            await clean_workspace_revisions(
+                [(str(item.repository.id), item.path) for item in scoped_workspaces]
+            )
+            if job.role == JobRole.THINKER and job.action == "CREATE_PLAN"
+            else None
+        )
+        if planning_revisions is not None:
+            plan_fingerprint = plan_input_fingerprint(
+                prompt_data,
+                {
+                    "provider": config.provider,
+                    "model": config.model,
+                    "system": config.system_prompt,
+                    "configuration": config.configuration,
+                    "workflow_version": job.team_workflow_version,
+                    "node": str(job.workflow_node_id),
+                },
+                planning_revisions,
+            )
+            previous_plan = await compiler.latest_plan(task)
+            previous_data = (previous_plan or {}).get("data", {})
+            if (
+                previous_plan is not None
+                and isinstance(previous_data, dict)
+                and previous_data.get("plan_input_fingerprint") == plan_fingerprint
+            ):
+                # Route this result normally through the configured workflow graph.
+                # Legacy plans without a signature never qualify for automatic replay.
+                reused_result = WorkerResult(
+                    job_id=job.id,
+                    task_id=task.id,
+                    role=job.role,
+                    result="PLAN_READY",
+                    summary=str(previous_plan.get("summary") or previous_data.get("goal")),
+                    data={**previous_data, "reused_plan": True},
+                )
+                await TaskMemoryService(session).checkpoint(
+                    task,
+                    job,
+                    reused_result.data,
+                    reused_result.summary,
+                    config.agent_id,
+                    config.role_id,
+                    reused_result.model_dump(mode="json"),
+                )
+                await provider.aclose()
+                return reused_result
         prompt = json.dumps(prompt_data, ensure_ascii=False, separators=(",", ":"))
         system_prompt = config.system_prompt
-        repository_tools = None
+        repository_tools: RepositoryTools | None = None
+        executor_tools: ExecutorTools | None = None
         consultants = (
             await available_consultants(session, task, job)
             if int(job.payload.get("consultation_depth", 0)) < 3
@@ -796,11 +888,76 @@ async def run(job_id: uuid.UUID) -> WorkerResult:
                     for item in scoped_workspaces
                 ],
                 strategy_tool_limit,
+                max_bytes=min(max_context_chars, 100_000),
                 consultants={item["node_id"] for item in consultants},
             )
             tool_definitions = (REPOSITORY_TOOLS if scoped_workspaces else ()) + (
                 (CONSULTATION_TOOL,) if consultants else ()
             )
+            if (
+                job.role == JobRole.EXECUTOR
+                and job.action == "IMPLEMENT_PLAN"
+                and scoped_workspaces
+            ):
+                require_permission(config, "READ_REPOSITORY")
+                require_permission(config, "WRITE_REPOSITORY")
+                if task.team_id is None:
+                    raise RuntimeError("Executor task must belong to a Team")
+                policy_record = await session.scalar(
+                    select(ExecutionPolicy).where(ExecutionPolicy.team_id == task.team_id)
+                )
+                policy = TeamExecutionPolicy(
+                    ExecutionMode(policy_record.mode)
+                    if policy_record
+                    else ExecutionMode.AUTONOMOUS,
+                    {key: Decision(value) for key, value in (policy_record.settings or {}).items()}
+                    if policy_record
+                    else {},
+                    tuple(policy_record.approved_hosts or []) if policy_record else (),
+                    policy_record.max_command_timeout_seconds if policy_record else 1200,
+                    policy_record.max_output_bytes if policy_record else 1_000_000,
+                )
+                permissions = expanded_permissions(config.permissions)
+                gateways = {
+                    "." if len(scoped_workspaces) == 1 else item.path.name: ToolGateway(
+                        session,
+                        GatewayContext(
+                            task.team_id,
+                            task.id,
+                            job.id,
+                            config.agent_id,
+                            config.role_id,
+                            item.path,
+                            item.scope.branch_name,
+                            permissions,
+                            strategy_tool_limit,
+                        ),
+                        policy,
+                    )
+                    for item in scoped_workspaces
+                }
+                executor_tools = ExecutorTools(
+                    repository_tools.workspaces,
+                    strategy_tool_limit,
+                    max_bytes=min(max_context_chars, 100_000),
+                    consultants={item["node_id"] for item in consultants},
+                    gateways=gateways,
+                    credential_environment=await package_registry_environment(session),
+                    is_cancelled=stream_cancellation_checker(job.id, job.lease_token),
+                )
+                repository_tools = executor_tools
+                tool_permissions = {
+                    "run_workspace_command": "RUN_COMMANDS",
+                    "run_workspace_checks": "RUN_TESTS",
+                    "delete_workspace_file": "DELETE_FILES",
+                }
+                tool_definitions += tuple(
+                    definition
+                    for definition in EXECUTOR_TOOLS
+                    if definition["name"] not in tool_permissions
+                    or tool_permissions[definition["name"]] in permissions
+                )
+                prompt_data["executor_workspaces"] = list(gateways)
             prompt_data["allowed_consultants"] = consultants
             for item in prompt_data.get("repositories", []):
                 item.pop("files", None)
@@ -813,6 +970,19 @@ async def run(job_id: uuid.UUID) -> WorkerResult:
                 system_prompt += "\nRepository inspection tools are available. Missing prompt snippets are not a blocker: list, search, and read current files. Never treat stale RAG as current source."
             if consultants:
                 system_prompt += "\nYou may ask a focused question of allowed_consultants using ask_agent. Prefer direct repository evidence; ask only when another specialist's input is necessary. The orchestrator will persist the reply and resume this job."
+            if executor_tools is not None:
+                system_prompt += (
+                    "\nEXECUTOR WORKSPACE PROTOCOL (supersedes proposal-based editing instructions): "
+                    "Use direct workspace tools now, in the listed executor_workspaces. Files persist "
+                    "in this task's Docker workspace. Read current source, edit exact text, then run "
+                    "checks in relevant directories. A failed edit or command returns an error: correct "
+                    "it within this same run using the existing evidence. Batch independent calls to "
+                    "save model turns. Do not repeat planning or request prompt snippets. "
+                    "Final files, patches and delete_files MUST be empty because edits are already "
+                    "applied. Return IMPLEMENTED only after completing the requested changes; report "
+                    "checks honestly. Do not commit, push, merge, or bypass a denied capability. "
+                    "The runtime independently validates the actual workspace before delivery."
+                )
         if job.action == "CONSULT_AGENT":
             system_prompt += "\nThis is a read-only consultation, not an engineering phase. Answer job.payload.question using current evidence. Do not edit files, run delivery actions, or request another consultation. Return only {result: CONSULTATION_REPLIED, summary: your useful answer}."
         if job.action == "RESPOND_TO_MESSAGE":
@@ -822,8 +992,8 @@ async def run(job_id: uuid.UUID) -> WorkerResult:
                 "with INFORMATIONAL actionability, blocking=false, and empty repository_ids and "
                 "external_delivery_actions. Do not restart, reroute, or reinterpret the engineering task."
             )
-        configured_repairs = config.configuration.get("structured_output_retries", 2)
-        max_repairs = int(configured_repairs) if isinstance(configured_repairs, (int, str)) else 2
+        configured_repairs = config.configuration.get("structured_output_retries", 1)
+        max_repairs = int(configured_repairs) if isinstance(configured_repairs, (int, str)) else 1
         max_job_turns = int(execution_strategy.get("max_job_turns", max_repairs + 1))
         max_repairs = min(max_repairs, max(max_job_turns - 1, 0))
         budget_error: BudgetExceeded | None = None
@@ -850,6 +1020,8 @@ async def run(job_id: uuid.UUID) -> WorkerResult:
                             * 60,
                             response_schema=ConsultationReply.model_json_schema()
                             if job.action == "CONSULT_AGENT"
+                            else InteractiveExecutorProposal.model_json_schema()
+                            if executor_tools is not None
                             else role_output_schema(job.role),
                             tools=tool_definitions,
                         ),
@@ -866,9 +1038,15 @@ async def run(job_id: uuid.UUID) -> WorkerResult:
                         on_text_delta=stream_progress_reporter(task.id, job.id),
                         is_cancelled=stream_cancellation_checker(job.id, job.lease_token),
                         repository_tools=repository_tools,
-                        response_model=ConsultationReply if job.action == "CONSULT_AGENT" else None,
+                        response_model=ConsultationReply
+                        if job.action == "CONSULT_AGENT"
+                        else InteractiveExecutorProposal
+                        if executor_tools is not None
+                        else None,
                         max_model_calls=min(
-                            max_job_turns, int(config.configuration.get("max_model_turns", 20))
+                            max_job_turns,
+                            int(config.configuration.get("max_model_turns", 20)),
+                            settings.max_job_model_calls,
                         )
                         - len(attempts),
                     )
@@ -1045,6 +1223,8 @@ async def run(job_id: uuid.UUID) -> WorkerResult:
             summary = str(data["summary"])[:500]
         elif job.role == JobRole.THINKER:
             result = str(data["result"])
+            if result == "PLAN_READY" and plan_fingerprint:
+                data["plan_input_fingerprint"] = plan_fingerprint
             summary = str(data.get("goal") or data.get("reason") or "Thinker completed")[:500]
         elif job.role == JobRole.EXECUTOR and scoped_workspaces:
             proposal = ExecutorProposal.model_validate(data)
@@ -1106,11 +1286,22 @@ async def run(job_id: uuid.UUID) -> WorkerResult:
                             ),
                             policy,
                         )
-                        repository_checks = await run_checks(
-                            item.path,
-                            credential_environment=credentials,
-                            gateway=repository_gateway,
+                        key = "." if len(scoped_workspaces) == 1 else item.path.name
+                        directories = {"."} | (
+                            executor_tools.validation_directories.get(key, set())
+                            if executor_tools is not None
+                            else set()
                         )
+                        repository_checks = []
+                        for directory in sorted(directories):
+                            repository_checks.extend(
+                                await run_checks(
+                                    item.path / directory,
+                                    directory=directory,
+                                    credential_environment=credentials,
+                                    gateway=repository_gateway,
+                                )
+                            )
                         for check in repository_checks:
                             check.command.insert(
                                 0, f"[{item.repository.owner}/{item.repository.name}]"

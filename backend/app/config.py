@@ -39,8 +39,10 @@ class Settings(BaseSettings):
     max_external_review_repairs_per_task: int = 3
     max_job_attempts: int = 3
     job_retry_base_seconds: int = 5
-    max_job_tokens: int = Field(default=0, ge=0)
-    max_task_tokens: int = Field(default=0, ge=0)
+    max_job_tokens: int = Field(default=120_000, ge=0)
+    max_task_tokens: int = Field(default=400_000, ge=0)
+    max_job_model_calls: int = Field(default=8, ge=1)
+    max_task_model_calls: int = Field(default=32, ge=1)
     max_team_tokens: int = Field(default=0, ge=0)
     max_job_cost_usd: float = Field(default=0, ge=0)
     max_task_cost_usd: float = Field(default=0, ge=0)

@@ -429,6 +429,8 @@ export const en = {
   'taskDetail.attempt': 'attempt',
   'taskDetail.retryScheduledFor': 'Retry scheduled for',
   'taskDetail.timeline': 'Timeline',
+  'taskDetail.statusHistory': 'Status history',
+  'taskDetail.changedBy': 'Changed by',
   'taskDetail.noEventsRecorded': 'No events recorded.',
   'taskDetail.aiGenerating': 'AI response in progress',
   'taskDetail.charactersReceived': '{count} characters received',
