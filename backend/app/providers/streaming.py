@@ -13,6 +13,8 @@ class ProviderStreamEvent:
     input_tokens: int | None = None
     output_tokens: int | None = None
     completed: bool = False
+    cached_input_tokens: int | None = None
+    cache_write_tokens: int | None = None
 
 
 class ProviderStreamCancelled(RuntimeError):
@@ -30,6 +32,8 @@ async def collect_provider_stream(
     request_id: str | None = None
     input_tokens: int | None = None
     output_tokens: int | None = None
+    cached_input_tokens: int | None = None
+    cache_write_tokens: int | None = None
     if is_cancelled is not None and await is_cancelled():
         raise ProviderStreamCancelled("Provider stream cancelled before generation")
     stream = provider.stream(request)
@@ -46,6 +50,10 @@ async def collect_provider_stream(
             output_tokens = (
                 event.output_tokens if event.output_tokens is not None else output_tokens
             )
+            if event.cached_input_tokens is not None:
+                cached_input_tokens = event.cached_input_tokens
+            if event.cache_write_tokens is not None:
+                cache_write_tokens = event.cache_write_tokens
     finally:
         close = getattr(stream, "aclose", None)
         if close is not None:
@@ -55,6 +63,8 @@ async def collect_provider_stream(
         request_id=request_id,
         input_tokens=input_tokens,
         output_tokens=output_tokens,
+        cached_input_tokens=cached_input_tokens,
+        cache_write_tokens=cache_write_tokens,
     )
 
 
@@ -96,6 +106,10 @@ def normalize_stream_event(provider: str, event: dict[str, Any]) -> ProviderStre
                 request_id=response.get("id"),
                 input_tokens=usage.get("input_tokens"),
                 output_tokens=usage.get("output_tokens"),
+                cached_input_tokens=(usage.get("input_tokens_details") or {}).get("cached_tokens"),
+                cache_write_tokens=(usage.get("input_tokens_details") or {}).get(
+                    "cache_write_tokens"
+                ),
                 completed=True,
             )
     elif provider == "anthropic":

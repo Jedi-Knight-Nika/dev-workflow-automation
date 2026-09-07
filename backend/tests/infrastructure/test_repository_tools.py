@@ -93,6 +93,8 @@ async def test_final_turn_retains_evidence_and_disables_tools() -> None:
     assert result["result"] == "PLAN_READY" and len(attempts) == 2
     final = provider.requests[-1]
     assert not final.allow_tool_calls
+    assert final.system == provider.requests[0].system
+    assert final.tool_history[-1]["role"] == "user"
     payload = OpenAIProvider._payload(final)
     assert payload["tool_choice"] == "none"
     assert payload["input"][1]["call_id"] == "last-read"

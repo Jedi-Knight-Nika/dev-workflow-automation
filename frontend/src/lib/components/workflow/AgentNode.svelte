@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { resolve } from '$app/paths';
   import { Handle, Position, type NodeProps } from '@xyflow/svelte';
   import PixelAgentAvatar from '$lib/components/agents/PixelAgentAvatar.svelte';
   import BrandIcon from '$lib/components/resources/BrandIcon.svelte';
@@ -10,6 +11,8 @@
     queuedJobs: number;
     activeJobs: number;
     currentJobAction: string | null;
+    taskId: string | null;
+    taskTitle: string | null;
     system: boolean;
     provider: string;
     model: string;
@@ -41,6 +44,20 @@
           ? 'Open this Agent and select Test model.'
           : agent.modelValidationMessage || statusLabel
   );
+
+  const roleIcon = $derived(
+    agent.role === 'ORCHESTRATOR'
+      ? '◎'
+      : agent.role === 'THINKER'
+        ? '◇'
+        : agent.role === 'EXECUTOR'
+          ? '</>'
+          : agent.role === 'REVIEWER'
+            ? '✓'
+            : agent.role === 'TESTER'
+              ? 'T'
+              : 'AI'
+  );
 </script>
 
 <Handle
@@ -55,11 +72,14 @@
         : ''}
 />
 <div class="node-shell" class:disabled={!agent.enabled}>
-  <PixelAgentAvatar
-    seed={`${agent.displayName}:${agent.role}`}
-    label={agent.displayName}
-    size={36}
-  />
+  <div class="worker-avatar" title={`${agent.role.replaceAll('_', ' ')} worker`}>
+    <PixelAgentAvatar
+      seed={`${agent.displayName}:${agent.role}`}
+      label={agent.displayName}
+      size={40}
+    />
+    <span class="role-icon" aria-hidden="true">{roleIcon}</span>
+  </div>
   <div class="min-w-0 flex-1">
     <div class="mb-1 flex items-center gap-2">
       <strong class="truncate text-base font-semibold">{agent.displayName}</strong>
@@ -107,11 +127,29 @@
         </span>
       </div>{/if}
     {#if agent.status === 'RUNNING' || agent.queuedJobs > 0}
-      <div class="activity-row" class:active={agent.status === 'RUNNING'}>
-        <span class="activity-pulse"></span>
-        <strong>{agent.status === 'RUNNING' ? 'WORKING' : 'QUEUED'}</strong>
-        <span>{agent.currentJobAction?.replaceAll('_', ' ') || 'Waiting for execution'}</span>
-        {#if agent.queuedJobs > 1}<b>+{agent.queuedJobs - 1}</b>{/if}
+      <div class="activity-card" class:active={agent.status === 'RUNNING'}>
+        <div class="activity-heading">
+          <span class="activity-pulse"></span>
+          <strong>{agent.status === 'RUNNING' ? 'WORKING NOW' : 'QUEUED'}</strong>
+          <span>{agent.currentJobAction?.replaceAll('_', ' ') || 'Waiting for execution'}</span>
+          {#if agent.queuedJobs > 1}<b>+{agent.queuedJobs - 1}</b>{/if}
+        </div>
+        {#if agent.taskId}
+          <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
+          <a
+            class="task-summary nodrag"
+            href={resolve('/tasks/[id]', { id: agent.taskId })}
+            title={agent.taskTitle || `Task ${agent.taskId}`}
+            onclick={(event) => event.stopPropagation()}
+          >
+            <span aria-hidden="true">▱</span>
+            <span>
+              <small>Current task</small>
+              <b>{agent.taskTitle || `Task ${agent.taskId.slice(0, 8)}`}</b>
+            </span>
+            <i aria-hidden="true">→</i>
+          </a>
+        {/if}
       </div>
     {/if}
     {#if agent.integrationNames.length || agent.repositoryCount}
@@ -171,6 +209,26 @@
     align-items: center;
     gap: 0.75rem;
     padding: 0.8rem 0.85rem;
+  }
+  .worker-avatar {
+    position: relative;
+    flex: none;
+    align-self: flex-start;
+  }
+  .role-icon {
+    position: absolute;
+    right: -0.28rem;
+    bottom: -0.22rem;
+    display: grid;
+    min-width: 1.15rem;
+    height: 1.15rem;
+    place-items: center;
+    border: 2px solid var(--color-panel-alt);
+    border-radius: 0.38rem;
+    background: color-mix(in srgb, var(--color-brand-2) 18%, var(--color-panel));
+    color: var(--color-brand-2);
+    font: 800 0.48rem/1 var(--font-mono);
+    box-shadow: 0 3px 9px rgb(0 0 0 / 45%);
   }
   .node-shell strong {
     color: var(--color-heading);
@@ -239,30 +297,78 @@
     background: color-mix(in srgb, var(--color-surface) 48%, transparent);
     padding: 0.38rem 0.42rem;
   }
-  .activity-row {
+  .activity-card {
+    display: grid;
+    min-width: 0;
+    gap: 0.42rem;
+    margin-top: 0.45rem;
+    border: 1px solid color-mix(in srgb, var(--color-warning) 24%, var(--color-line));
+    border-radius: 0.48rem;
+    background: color-mix(in srgb, var(--color-warning) 10%, transparent);
+    padding: 0.4rem;
+    color: var(--color-warning);
+  }
+  .activity-card.active {
+    border-color: color-mix(in srgb, var(--color-brand-2) 28%, var(--color-line));
+    background: color-mix(in srgb, var(--color-brand-2) 10%, transparent);
+    color: var(--color-brand-2);
+  }
+  .activity-heading {
     display: flex;
     min-width: 0;
     align-items: center;
     gap: 0.3rem;
-    margin-top: 0.45rem;
-    border-radius: 0.35rem;
-    background: color-mix(in srgb, var(--color-warning) 10%, transparent);
-    padding: 0.3rem 0.4rem;
-    color: var(--color-warning);
     font-size: 0.48rem;
   }
-  .activity-row.active {
-    background: color-mix(in srgb, var(--color-brand-2) 10%, transparent);
-    color: var(--color-brand-2);
-  }
-  .activity-row span:not(.activity-pulse) {
+  .activity-heading > span:not(.activity-pulse) {
     overflow: hidden;
     color: var(--color-muted);
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .activity-row b {
+  .activity-heading > b {
     margin-left: auto;
+  }
+  .task-summary {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 0.42rem;
+    border-top: 1px solid color-mix(in srgb, currentColor 16%, transparent);
+    padding-top: 0.4rem;
+    color: var(--color-text);
+  }
+  .task-summary > span:first-child {
+    color: var(--color-brand-2);
+    font-size: 0.8rem;
+  }
+  .task-summary > span:nth-child(2) {
+    display: grid;
+    min-width: 0;
+    gap: 0.08rem;
+  }
+  .task-summary small {
+    color: var(--color-muted);
+    font-size: 0.43rem;
+    font-weight: 750;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .task-summary b {
+    overflow: hidden;
+    color: var(--color-text);
+    font-size: 0.58rem;
+    font-weight: 650;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .task-summary i {
+    color: var(--color-brand-2);
+    font-size: 0.7rem;
+    font-style: normal;
+  }
+  .task-summary:hover b {
+    color: var(--color-heading);
   }
   .activity-pulse {
     width: 0.36rem;

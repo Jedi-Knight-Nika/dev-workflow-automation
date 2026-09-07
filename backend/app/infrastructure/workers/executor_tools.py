@@ -97,6 +97,7 @@ class ExecutorTools(RepositoryTools):
         self.validation_directories: dict[str, set[str]] = {}
 
     async def execute(self, name: str, arguments: str) -> str:
+        self.last_trace = {}
         if self.is_cancelled is not None and await self.is_cancelled():
             raise RuntimeError("Worker cancelled before workspace operation")
         operation = asyncio.create_task(self._execute(name, arguments))
@@ -105,7 +106,17 @@ class ExecutorTools(RepositoryTools):
                 if self.is_cancelled is not None and await self.is_cancelled():
                     raise RuntimeError("Worker cancelled during workspace operation")
                 await asyncio.wait({operation}, timeout=1)
-            return await operation
+            output = await operation
+            if not self.last_trace:
+                result = json.loads(output)
+                self.last_trace = {
+                    "tool": name,
+                    "output_bytes": len(output.encode()),
+                    "status": result.get("status"),
+                    "exit_code": result.get("exit_code"),
+                    "remaining_source_bytes": self.remaining,
+                }
+            return output
         finally:
             if not operation.done():
                 operation.cancel()

@@ -31,3 +31,6 @@ source-reading limits, plan reuse, and verification details.
 
 See [Executor workspace tools](docs/executor-workspace-tools.md) for direct editing,
 same-run test correction, permissions, and rollout instructions.
+
+See [Token-cost research and recovery](docs/token-cost-research-and-recovery.md) for
+the research-backed source-access, caching, and reimport/worktree fixes.

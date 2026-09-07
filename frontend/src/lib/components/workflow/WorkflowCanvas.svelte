@@ -36,6 +36,7 @@
     workflow,
     agents,
     activity = [],
+    taskTitles = {},
     integrations,
     repositories,
     teamId,
@@ -48,6 +49,7 @@
     workflow: WorkflowGraph;
     agents: AgentConfig[];
     activity?: WorkflowActivity[];
+    taskTitles?: Record<string, string>;
     integrations: Integration[];
     repositories: Repository[];
     teamId?: string;
@@ -66,6 +68,8 @@
     queuedJobs: number;
     activeJobs: number;
     currentJobAction: string | null;
+    taskId: string | null;
+    taskTitle: string | null;
     system: boolean;
     activationPolicy: string;
     batchWindowSeconds: number;
@@ -137,6 +141,8 @@
         queuedJobs: 0,
         activeJobs: 0,
         currentJobAction: null,
+        taskId: null,
+        taskTitle: null,
         system: node.role === 'ORCHESTRATOR',
         activationPolicy: node.activation_policy,
         batchWindowSeconds: node.batch_window_seconds,
@@ -372,6 +378,8 @@
           queuedJobs: liveAgent?.queued_jobs ?? 0,
           activeJobs: liveAgent?.active_jobs ?? 0,
           currentJobAction: liveAgent?.current_job_action ?? null,
+          taskId: liveAgent?.task_id ?? null,
+          taskTitle: liveAgent?.task_id ? taskTitles[liveAgent.task_id] || null : null,
           integrationNames,
           repositoryCount: node.data.repositoryIds.length
         },
@@ -748,6 +756,8 @@
           queuedJobs: 0,
           activeJobs: 0,
           currentJobAction: null,
+          taskId: null,
+          taskTitle: null,
           system: false,
           activationPolicy: 'any',
           batchWindowSeconds: 0,

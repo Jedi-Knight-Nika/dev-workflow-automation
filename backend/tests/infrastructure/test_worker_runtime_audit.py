@@ -98,6 +98,40 @@ async def test_worker_runs_receive_independent_runtime_snapshots() -> None:
 
 
 @pytest.mark.asyncio
+async def test_cache_usage_is_persisted_without_changing_runtime_configuration() -> None:
+    snapshot = RuntimeAuditSnapshot.capture(resolved_config({}))
+    session = RecordingSession()
+    job = Job(id=uuid.uuid4(), task_id=uuid.uuid4(), role=JobRole.THINKER, action="CREATE_PLAN")
+    await persist_attempts(
+        cast(AsyncSession, session),
+        job,
+        "openai",
+        "test",
+        [
+            ProviderAttempt(
+                ProviderResponse(
+                    "{}",
+                    request_id="test-response",
+                    input_tokens=1000,
+                    output_tokens=50,
+                    cached_input_tokens=800,
+                    cache_write_tokens=200,
+                ),
+                100,
+            )
+        ],
+        {},
+        snapshot,
+    )
+    usage, run = session.records
+    assert usage.event_type == "PROVIDER_TOKEN_USAGE"
+    assert usage.payload["cached_input_tokens"] == 800
+    assert usage.payload["cache_write_tokens"] == 200
+    assert run.input_tokens == 1000
+    assert run.effective_runtime_config == snapshot.effective_runtime()
+
+
+@pytest.mark.asyncio
 async def test_role_and_workflow_configuration_becomes_immutable_worker_audit() -> None:
     role = Role(
         id=uuid.uuid4(),

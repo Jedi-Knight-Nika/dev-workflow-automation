@@ -176,6 +176,7 @@ async def run_with_structured_repair(
     repository_tools: RepositoryTools | None = None,
     response_model: type[BaseModel] | None = None,
     max_model_calls: int = 20,
+    on_tool_result: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
 ) -> tuple[dict[str, Any], list[ProviderAttempt]]:
     attempts: list[ProviderAttempt] = []
     if repository_tools is not None:
@@ -225,17 +226,18 @@ async def run_with_structured_repair(
                     response = await provider.run(
                         replace(
                             pending_request,
-                            tool_history=history,
-                            allow_tool_calls=not final_turn,
-                            system=pending_request.system
+                            tool_history=history
                             + (
-                                "\nRepository inspection is complete for this run. Return your "
-                                "structured result using the evidence already read. If essential "
-                                "evidence is missing, identify the exact unresolved files; do not "
-                                "invent source or report unverified success."
+                                (
+                                    {
+                                        "role": "user",
+                                        "content": "Tool allowance is complete for this run. Return your structured result using evidence already read. For planning, delegate remaining routine source audits in ordered steps; never invent contracts or report unverified success.",
+                                    },
+                                )
                                 if final_turn
-                                else ""
+                                else ()
                             ),
+                            allow_tool_calls=not final_turn,
                         )
                     )
                 except RuntimeError as exc:
@@ -262,6 +264,8 @@ async def run_with_structured_repair(
                         )
                     except RuntimeError as exc:
                         raise StructuredOutputError(str(exc), attempts) from exc
+                    if on_tool_result is not None:
+                        await on_tool_result(repository_tools.last_trace)
                     approval_id = getattr(repository_tools, "approval_id", None)
                     if approval_id is not None:
                         return {

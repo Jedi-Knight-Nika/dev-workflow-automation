@@ -34,6 +34,8 @@ class ProviderResponse:
     output_tokens: int | None = None
     tool_calls: tuple[dict[str, Any], ...] = ()
     continuation: tuple[dict[str, Any], ...] = ()
+    cached_input_tokens: int | None = None
+    cache_write_tokens: int | None = None
 
 
 @dataclass(frozen=True)

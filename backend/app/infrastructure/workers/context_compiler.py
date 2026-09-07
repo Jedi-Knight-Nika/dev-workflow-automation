@@ -140,11 +140,13 @@ class ContextCompiler:
         max_chars: int = DEFAULT_CONTEXT_CHARS,
         include_repository_knowledge: bool = True,
         retrieval_depth: str = "normal",
+        native_repository_tools: bool = False,
     ) -> None:
         self.session = session
         self.max_chars = max_chars
         self.include_repository_knowledge = include_repository_knowledge
         self.retrieval_depth = retrieval_depth
+        self.native_repository_tools = native_repository_tools
 
     def _base(self, task: Task, job: Job) -> dict[str, Any]:
         return {
@@ -481,6 +483,12 @@ class ContextCompiler:
         manifest_budget = max(4_000, min(20_000, self.max_chars // max(len(workspaces), 1) // 4))
         for item in workspaces:
             tracked_files = await run_git("ls-files", cwd=item.path)
+            if self.native_repository_tools:
+                # Discovery is paginated through live tools. Do not repeatedly send
+                # the full manifest or stale semantic snippets on every model turn.
+                tracked_files = "\n".join(
+                    sorted({path.split("/")[0] for path in tracked_files.splitlines()})
+                )
             if len(tracked_files) > manifest_budget:
                 tracked_files = tracked_files[:manifest_budget] + "\n[TRUNCATED]"
             repositories.append(
@@ -490,8 +498,12 @@ class ContextCompiler:
                     "default_branch": item.repository.default_branch,
                     "latest_sha": item.repository.latest_sha,
                     "indexed_sha": item.repository.indexed_sha,
-                    "tracked_files": tracked_files,
-                    "retrieved_knowledge": await self._knowledge(
+                    "directory_outline"
+                    if self.native_repository_tools
+                    else "tracked_files": tracked_files,
+                    "retrieved_knowledge": []
+                    if self.native_repository_tools
+                    else await self._knowledge(
                         task, item.repository, JobRole.THINKER, include_manual=False
                     ),
                 }

@@ -5,10 +5,49 @@ import json
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from app.domain.security.paths import resolve_workspace_path
 from app.infrastructure.git.workspaces import GitCommandError, run_git
 from app.infrastructure.workers.executor import requested_file_context
 
 REPOSITORY_TOOLS = (
+    {
+        "name": "read_repository_ranges",
+        "description": "Read focused current source ranges, especially when full files exceed CONTEXT_LIMIT. Batch up to 10 related ranges. Line numbers start at 1; at most 200 lines per range. Returned next_line allows continuation.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "ranges": {
+                    "type": "array",
+                    "maxItems": 10,
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "path": {"type": "string"},
+                            "start_line": {"type": "integer", "minimum": 1},
+                            "end_line": {"type": "integer", "minimum": 1},
+                        },
+                        "required": ["path", "start_line", "end_line"],
+                        "additionalProperties": False,
+                    },
+                }
+            },
+            "required": ["ranges"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "search_repository_snippets",
+        "description": "Locate a symbol or literal text and return bounded matching lines with paths and line numbers. Use a narrow file glob such as backend/app/**/*.py, then batch read_repository_ranges around matches. Secret files are excluded.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "maxLength": 200},
+                "pattern": {"type": "string"},
+            },
+            "required": ["query", "pattern"],
+            "additionalProperties": False,
+        },
+    },
     {
         "name": "list_repository_files",
         "description": "List current tracked file paths across the task repositories. Filter by glob and paginate with offset. Use these paths for reading files.",
@@ -86,6 +125,7 @@ class RepositoryTools:
         self.consultation: dict[str, str] | None = None
         self.read_paths: set[str] = set()
         self.repeated_reads = 0
+        self.last_trace: dict[str, Any] = {}
 
     def begin_history(self) -> None:
         """A new provider conversation cannot reference an earlier discarded history."""
@@ -93,6 +133,99 @@ class RepositoryTools:
         self.repeated_reads = 0
 
     async def execute(self, name: str, arguments: str) -> str:
+        output = await self._execute_read(name, arguments)
+        parsed = json.loads(output)
+        rows = parsed if isinstance(parsed, list) else [parsed]
+        # Persist status/size metadata, never source contents or arbitrary command arguments.
+        self.last_trace = {
+            "tool": name,
+            "output_bytes": len(output.encode()),
+            "remaining_source_bytes": self.remaining,
+            "results": [
+                {
+                    key: row[key]
+                    for key in ("path", "status", "start_line", "end_line", "next_line")
+                    if key in row
+                }
+                for row in rows[:20]
+                if isinstance(row, dict)
+            ],
+            "error": isinstance(parsed, dict) and "error" in parsed,
+        }
+        return output
+
+    def _source_path(self, requested: str) -> tuple[Path, str]:
+        candidate = PurePosixPath(requested)
+        if candidate.is_absolute() or ".." in candidate.parts or not source_path_allowed(requested):
+            raise ValueError("Use a non-secret relative source path")
+        for prefix, workspace in self.workspaces:
+            if len(self.workspaces) == 1 or requested.startswith(prefix + "/"):
+                relative = requested if len(self.workspaces) == 1 else requested[len(prefix) + 1 :]
+                path = resolve_workspace_path(workspace, relative, must_exist=True)
+                if (
+                    not source_path_allowed(path.relative_to(workspace.resolve()).as_posix())
+                    or not path.is_file()
+                ):
+                    raise ValueError("Not a readable source file")
+                return workspace, relative
+        raise ValueError("Unknown repository prefix")
+
+    async def _read_ranges(self, ranges: Any) -> list[dict[str, Any]]:
+        if not isinstance(ranges, list) or not 1 <= len(ranges) <= 10:
+            raise ValueError("Provide 1–10 source ranges")
+        results = []
+        for item in ranges:
+            requested = item.get("path") if isinstance(item, dict) else None
+            try:
+                if not isinstance(requested, str):
+                    raise TypeError("Range path must be a string")
+                start, end = item.get("start_line"), item.get("end_line")
+                if (
+                    type(start) is not int
+                    or type(end) is not int
+                    or start < 1
+                    or not start <= end < start + 200
+                ):
+                    raise ValueError(
+                        "Use a range of at most 200 lines, starting at line 1 or later"
+                    )
+                workspace, relative = self._source_path(requested)
+                tracked = (await run_git("ls-files", cwd=workspace)).splitlines()
+                if relative not in tracked:
+                    raise ValueError("Source path is not tracked")
+                path = resolve_workspace_path(workspace, relative, must_exist=True)
+                if path.stat().st_size > 1_000_000:
+                    raise ValueError("Source file exceeds 1 MB")
+                lines = []
+                used = 0
+                next_line = None
+                with path.open(encoding="utf-8") as source:
+                    for number, line in enumerate(source, 1):
+                        if number < start:
+                            continue
+                        if number > end or used + len(line.encode()) > min(self.remaining, 12_000):
+                            next_line = number
+                            break
+                        lines.append(line)
+                        used += len(line.encode())
+                self.remaining -= used
+                results.append(
+                    {
+                        "path": requested,
+                        "status": "LOADED_RANGE" if lines else "NO_LINES_WITHIN_BUDGET",
+                        "start_line": start,
+                        "end_line": start + len(lines) - 1,
+                        "next_line": next_line,
+                        "content": "".join(lines),
+                    }
+                )
+            except (ValueError, TypeError, OSError, PermissionError) as exc:
+                results.append(
+                    {"path": requested, "status": "NOT_READABLE", "reason": str(exc)[:200]}
+                )
+        return results
+
+    async def _execute_read(self, name: str, arguments: str) -> str:
         self.calls += 1
         if self.calls > self.max_calls:
             raise RuntimeError("Repository tool-call budget exhausted")
@@ -100,7 +233,55 @@ class RepositoryTools:
             args = json.loads(arguments)
             if not isinstance(args, dict):
                 raise TypeError("Tool arguments must be an object")
-            if name == "ask_agent":
+            if name == "read_repository_ranges":
+                result: Any = await self._read_ranges(args.get("ranges"))
+            elif name == "search_repository_snippets":
+                query, pattern = args.get("query"), args.get("pattern")
+                if (
+                    not isinstance(query, str)
+                    or not 1 <= len(query) <= 200
+                    or not isinstance(pattern, str)
+                ):
+                    raise ValueError("Provide a literal query and file glob")
+                result = []
+                for prefix, workspace in self.workspaces:
+                    try:
+                        output = await run_git(
+                            "grep",
+                            "-n",
+                            "-I",
+                            "-F",
+                            "-m",
+                            "3",
+                            "-e",
+                            query,
+                            "--",
+                            pattern,
+                            cwd=workspace,
+                        )
+                    except GitCommandError as exc:
+                        if str(exc).strip():
+                            raise RuntimeError(
+                                "Repository search failed; check workspace health"
+                            ) from exc
+                        output = ""
+                    for match in output.splitlines():
+                        parts = match.split(":", 2)
+                        if len(parts) != 3 or not parts[1].isdigit():
+                            continue
+                        path, line, content = parts
+                        displayed = path if len(self.workspaces) == 1 else f"{prefix}/{path}"
+                        try:
+                            self._source_path(displayed)
+                        except (ValueError, PermissionError, OSError):
+                            continue
+                        content = content[:300]
+                        size = len(content.encode())
+                        if len(result) >= 20 or size > self.remaining:
+                            break
+                        self.remaining -= size
+                        result.append({"path": displayed, "line": int(line), "content": content})
+            elif name == "ask_agent":
                 target, question = args.get("target_node_id"), args.get("question")
                 if (
                     target not in self.consultants
@@ -109,7 +290,7 @@ class RepositoryTools:
                 ):
                     raise ValueError("Choose an allowed recipient and a focused question")
                 self.consultation = {"target_node_id": target, "question": question.strip()}
-                result: Any = {"status": "WAITING_FOR_AGENT"}
+                result = {"status": "WAITING_FOR_AGENT"}
             elif name == "read_repository_files":
                 paths = args.get("paths")
                 if (
@@ -131,6 +312,11 @@ class RepositoryTools:
                     max_context_bytes=max(self.remaining, 0),
                     path_filter=source_path_allowed,
                 )
+                for item in result:
+                    if item.get("status") == "CONTEXT_LIMIT":
+                        item["reason"] = (
+                            "Use read_repository_ranges for a focused section; do not repeat the whole-file request."
+                        )
                 self.remaining -= sum(len(item.get("content", "").encode()) for item in result)
                 for item in result:
                     if item.get("status") == "LOADED":

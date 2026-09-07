@@ -439,6 +439,25 @@ async def persist_attempts(
     audit_snapshot: RuntimeAuditSnapshot,
 ) -> None:
     for attempt in attempts:
+        if (
+            attempt.response.cached_input_tokens is not None
+            or attempt.response.cache_write_tokens is not None
+        ):
+            session.add(
+                TaskEvent(
+                    task_id=job.task_id,
+                    source="worker",
+                    event_type="PROVIDER_TOKEN_USAGE",
+                    payload={
+                        "job_id": str(job.id),
+                        "provider_request_id": attempt.response.request_id,
+                        "input_tokens": attempt.response.input_tokens,
+                        "output_tokens": attempt.response.output_tokens,
+                        "cached_input_tokens": attempt.response.cached_input_tokens,
+                        "cache_write_tokens": attempt.response.cache_write_tokens,
+                    },
+                )
+            )
         session.add(
             WorkerRun(
                 job_id=job.id,
@@ -493,6 +512,26 @@ def stream_progress_reporter(
                 )
             )
             await progress_session.commit()
+
+    return report
+
+
+def tool_result_reporter(
+    task_id: uuid.UUID, job_id: uuid.UUID
+) -> Callable[[dict[str, Any]], Awaitable[None]]:
+    async def report(trace: dict[str, Any]) -> None:
+        if not trace:
+            return
+        async with SessionLocal() as trace_session:
+            trace_session.add(
+                TaskEvent(
+                    task_id=task_id,
+                    source="worker",
+                    event_type="REPOSITORY_TOOL_RESULT",
+                    payload={"job_id": str(job_id), **trace},
+                )
+            )
+            await trace_session.commit()
 
     return report
 
@@ -699,6 +738,7 @@ async def run(job_id: uuid.UUID) -> WorkerResult:
             max_context_chars,
             include_repository_knowledge=use_repository_knowledge is not False and can_read_rag,
             retrieval_depth=str(config.configuration.get("rag_retrieval_depth", "normal")),
+            native_repository_tools=provider.supports_repository_tools,
         )
         tester_checks = []
         execution_strategy = task.execution_strategy or {}
@@ -968,6 +1008,17 @@ async def run(job_id: uuid.UUID) -> WorkerResult:
             )
             if scoped_workspaces:
                 system_prompt += "\nRepository inspection tools are available. Missing prompt snippets are not a blocker: list, search, and read current files. Never treat stale RAG as current source."
+            if scoped_workspaces and job.role == JobRole.THINKER:
+                system_prompt += (
+                    "\nPlanning protocol: inspect representative contracts and execution points, "
+                    "then produce an actionable plan. Use search_repository_snippets to locate "
+                    "symbols and batch read_repository_ranges to inspect focused sections. "
+                    "CONTEXT_LIMIT means use ranges, not ask the user to supply source. "
+                    "You do not need every implementation file in full to plan. Put remaining "
+                    "routine source audits in Executor steps; never invent contracts or exact "
+                    "migration revisions. Reserve NEEDS_CONTEXT for missing requirements, not "
+                    "for ordinary source inspection delegated to Executor."
+                )
             if consultants:
                 system_prompt += "\nYou may ask a focused question of allowed_consultants using ask_agent. Prefer direct repository evidence; ask only when another specialist's input is necessary. The orchestrator will persist the reply and resume this job."
             if executor_tools is not None:
@@ -1036,6 +1087,7 @@ async def run(job_id: uuid.UUID) -> WorkerResult:
                             attempts + pending,
                         ),
                         on_text_delta=stream_progress_reporter(task.id, job.id),
+                        on_tool_result=tool_result_reporter(task.id, job.id),
                         is_cancelled=stream_cancellation_checker(job.id, job.lease_token),
                         repository_tools=repository_tools,
                         response_model=ConsultationReply

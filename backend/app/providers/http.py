@@ -1,3 +1,4 @@
+import hashlib
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -27,6 +28,9 @@ class OpenAIProvider(AIProvider):
             "input": (request.cacheable_prompt_prefix or "") + request.prompt,
             "max_output_tokens": request.max_output_tokens,
             "store": False,
+            "prompt_cache_key": hashlib.sha256(
+                (request.model + "\n" + request.system).encode()
+            ).hexdigest(),
         }
         if stream:
             payload["stream"] = True
@@ -96,6 +100,8 @@ class OpenAIProvider(AIProvider):
             request_id=data.get("id"),
             input_tokens=usage.get("input_tokens"),
             output_tokens=usage.get("output_tokens"),
+            cached_input_tokens=(usage.get("input_tokens_details") or {}).get("cached_tokens"),
+            cache_write_tokens=(usage.get("input_tokens_details") or {}).get("cache_write_tokens"),
             tool_calls=tuple(
                 item for item in data.get("output", []) if item.get("type") == "function_call"
             ),

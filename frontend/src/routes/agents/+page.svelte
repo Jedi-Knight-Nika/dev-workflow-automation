@@ -47,6 +47,7 @@
   } from '$lib/types';
   let agents: AgentConfig[] = [];
   let activity: WorkflowActivity[] = [];
+  let taskTitles: Record<string, string> = {};
   let activityError = '';
   let error = '';
   let saved = '';
@@ -253,6 +254,29 @@
       const result = await getWorkflowActivity(requestedTeam);
       if (requestedTeam !== teamId) return;
       activity = result;
+      const missingTaskIds = [
+        ...new Set(
+          result
+            .map((item) => item.task_id)
+            .filter(
+              (taskId): taskId is string =>
+                typeof taskId === 'string' && taskId.length > 0 && !taskTitles[taskId]
+            )
+        )
+      ];
+      if (missingTaskIds.length) {
+        const resolvedTasks = await Promise.allSettled(
+          missingTaskIds.map((taskId) => getTask(taskId))
+        );
+        if (requestedTeam !== teamId) return;
+        const nextTitles = { ...taskTitles };
+        resolvedTasks.forEach((resolvedTask, index) => {
+          if (resolvedTask.status === 'fulfilled') {
+            nextTitles[missingTaskIds[index]] = resolvedTask.value.title;
+          }
+        });
+        taskTitles = nextTitles;
+      }
       activityError = '';
     } catch {
       if (requestedTeam === teamId)
@@ -326,6 +350,7 @@
         {workflow}
         {agents}
         {activity}
+        {taskTitles}
         {integrations}
         {repositories}
         {selectedRole}

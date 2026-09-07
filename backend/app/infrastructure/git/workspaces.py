@@ -42,9 +42,32 @@ def git_authorization_header(token: str) -> str:
 
 
 def task_branch(task: Task) -> str:
+    if task.branch_name:
+        return task.branch_name
     source = task.external_key or str(task.id)[:8]
     slug = re.sub(r"[^a-zA-Z0-9._-]+", "-", source).strip("-").lower()
     return f"agent/{slug}"
+
+
+async def add_task_worktree(cache: Path, workspace: Path, task: Task, base: str) -> str:
+    """Never reset another task's branch when a card is imported again."""
+    preferred = task_branch(task)
+    branches = set(
+        (
+            await run_git("for-each-ref", "--format=%(refname:short)", "refs/heads", cwd=cache)
+        ).splitlines()
+    )
+    branch = preferred
+    if branch in branches:
+        # A new task incarnation gets an independent branch. Preserve both old
+        # committed work and dirty worktrees; neither reset nor prune them here.
+        branch = f"{preferred}-{task.id}"
+        if branch in branches:
+            raise GitCommandError(
+                "Task recovery branch already exists; inspect its worktree before retrying"
+            )
+    await run_git("worktree", "add", "-b", branch, str(workspace), base, cwd=cache)
+    return branch
 
 
 async def run_git(*args: str, cwd: Path | None = None, token: str | None = None) -> str:
@@ -117,15 +140,11 @@ async def prepare_workspace(session: AsyncSession, task: Task, repository: Repos
 
         branch = task_branch(task)
         if not workspace.exists():
-            await run_git(
-                "worktree",
-                "add",
-                "-B",
-                branch,
-                str(workspace),
-                f"origin/{repository.default_branch}",
-                cwd=cache,
+            branch = await add_task_worktree(
+                cache, workspace, task, f"origin/{repository.default_branch}"
             )
+        else:
+            branch = await run_git("branch", "--show-current", cwd=workspace)
         revision = await run_git("rev-parse", "HEAD", cwd=workspace)
         task.repository_id = repository.id
         task.branch_name = branch
@@ -174,18 +193,12 @@ async def prepare_task_workspaces(session: AsyncSession, task: Task) -> list[Sco
             async with repository_lock(session, repository.id):
                 cache = await _prepare_repository_cache(session, repository)
                 if not workspace.exists():
-                    await run_git(
-                        "worktree",
-                        "add",
-                        "-B",
-                        task_branch(task),
-                        str(workspace),
-                        f"origin/{repository.default_branch}",
-                        cwd=cache,
+                    await add_task_worktree(
+                        cache, workspace, task, f"origin/{repository.default_branch}"
                     )
         revision = await run_git("rev-parse", "HEAD", cwd=workspace)
         scope.workspace_path = str(workspace)
-        scope.branch_name = task_branch(task)
+        scope.branch_name = await run_git("branch", "--show-current", cwd=workspace)
         scope.base_revision = scope.base_revision or revision
         scope.current_revision = revision
         prepared.append(ScopedWorkspace(scope, repository, workspace))
