@@ -6,6 +6,7 @@
 
   let {
     messages,
+    taskState,
     resumeOnSend,
     hasOlder,
     loadingOlder,
@@ -14,6 +15,7 @@
     onSend
   }: {
     messages: TaskMessage[];
+    taskState: string;
     resumeOnSend: boolean;
     hasOlder: boolean;
     loadingOlder: boolean;
@@ -23,13 +25,30 @@
   } = $props();
 
   let draft = $state('');
+  let showRoutine = $state(false);
   let feed: HTMLDivElement;
   let previousLastId = $state<number | null>(null);
 
-  function needsResponse(message: TaskMessage): boolean {
+  function isBlocker(message: TaskMessage): boolean {
     const result = String(message.context.result ?? '');
     return ['BLOCKED', 'NEEDS_HUMAN', 'NEEDS_CONTEXT'].includes(result);
   }
+
+  function needsResponse(message: TaskMessage): boolean {
+    return isBlocker(message) && ['NEEDS_HUMAN', 'CONTEXT_PENDING'].includes(taskState);
+  }
+
+  function isRoutine(message: TaskMessage): boolean {
+    return (
+      message.author_type === 'AGENT' &&
+      ['EVENT_INTERPRETED', 'PLAN_READY'].includes(String(message.context.result ?? ''))
+    );
+  }
+
+  let hiddenRoutineCount = $derived(messages.filter(isRoutine).length);
+  let visibleMessages = $derived(
+    showRoutine ? messages : messages.filter((item) => !isRoutine(item))
+  );
 
   $effect(() => {
     const lastId = messages.at(-1)?.id ?? null;
@@ -79,6 +98,17 @@
         </Button>
       </div>
     {/if}
+    {#if hiddenRoutineCount}
+      <button
+        type="button"
+        class="border-line bg-panel text-muted mx-auto mb-5 block rounded-full border px-3 py-1.5 text-[10px] font-semibold hover:text-heading"
+        onclick={() => (showRoutine = !showRoutine)}
+      >
+        {showRoutine
+          ? 'Hide routine workflow updates'
+          : `${hiddenRoutineCount} routine workflow updates hidden`}
+      </button>
+    {/if}
     {#if messages.length === 0}
       <div class="text-muted grid min-h-36 place-content-center text-center text-sm">
         <p class="text-heading font-medium">No internal messages yet</p>
@@ -88,7 +118,7 @@
       </div>
     {:else}
       <div class="space-y-5">
-        {#each messages as message (message.id)}
+        {#each visibleMessages as message (message.id)}
           <article class="flex gap-3 {message.author_type === 'USER' ? 'flex-row-reverse' : ''}">
             {#if message.author_type === 'AGENT'}
               <PixelAgentAvatar
@@ -125,10 +155,14 @@
               >
                 {message.body}
               </div>
-              {#if needsResponse(message)}
+              {#if isBlocker(message)}
                 <span
-                  class="mt-1.5 rounded-full bg-warning/15 px-2 py-1 text-[10px] font-bold text-warning"
-                  >REPLY NEEDED · {String(message.context.result).replaceAll('_', ' ')}</span
+                  class="mt-1.5 rounded-full px-2 py-1 text-[10px] font-bold {needsResponse(message)
+                    ? 'bg-warning/15 text-warning'
+                    : 'bg-accent/10 text-accent'}"
+                  >{needsResponse(message) ? 'REPLY NEEDED' : 'RESOLVED'} · {String(
+                    message.context.result
+                  ).replaceAll('_', ' ')}</span
                 >
               {/if}
               {#if message.context.task_state}

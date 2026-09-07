@@ -71,6 +71,9 @@ async def _record_agent_summary(
     summary = str(job.result.get("summary") or "").strip()
     if not summary:
         return
+    result = str(job.result.get("result") or "")
+    if result in {"EVENT_INTERPRETED", "PLAN_READY"}:
+        return
     agent = await session.get(AIAgent, job.agent_id) if job.agent_id else None
     task = await session.get(Task, task_id)
     session.add(
@@ -84,7 +87,7 @@ async def _record_agent_summary(
             kind="STATUS_UPDATE",
             body=summary[:8_000],
             context={
-                "result": job.result.get("result"),
+                "result": result,
                 "task_state": task.state.value if task else None,
             },
         )

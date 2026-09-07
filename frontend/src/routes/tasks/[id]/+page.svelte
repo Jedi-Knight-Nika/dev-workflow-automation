@@ -264,6 +264,7 @@
     <GenerationProgress progress={generationProgress} connected={eventStreamConnected} />
     <TaskConversation
       {messages}
+      taskState={task.state}
       resumeOnSend={task.state === 'NEEDS_HUMAN' || task.state === 'CONTEXT_PENDING'}
       hasOlder={nextMessageCursor !== null}
       loadingOlder={loadingOlderMessages}

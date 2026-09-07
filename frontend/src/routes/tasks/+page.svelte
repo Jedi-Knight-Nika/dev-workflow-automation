@@ -583,6 +583,7 @@
       {:else}
         <TaskConversation
           {messages}
+          taskState={selected.state}
           resumeOnSend={['NEEDS_HUMAN', 'CONTEXT_PENDING'].includes(selected.state)}
           hasOlder={nextMessageCursor !== null}
           loadingOlder={loadingOlderMessages}
@@ -612,7 +613,7 @@
       </section>
       <section>
         <h3>Description</h3>
-        <p class="description">{selected.description || 'No description provided.'}</p>
+        <p class="description">{taskSummary(selected) || 'No description provided.'}</p>
       </section>
       <section>
         <h3>Details</h3>
