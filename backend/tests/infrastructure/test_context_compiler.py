@@ -6,6 +6,7 @@ from app.infrastructure.workers.context_compiler import (
     MIN_CONTEXT_CHARS,
     ContextCompiler,
     _repository_relevance_hint,
+    _trim_complete_file_context,
     fit_context,
 )
 from app.infrastructure.workers.executor import _relevance_score, _relevance_terms
@@ -52,6 +53,21 @@ def test_nested_repository_knowledge_and_old_conversation_are_trimmed() -> None:
     assert len(json.dumps(fitted, ensure_ascii=False)) <= MIN_CONTEXT_CHARS
     assert fitted["internal_task_conversation"][-1]["body"] == "latest instruction"
     assert len(fitted["repositories"][0]["retrieved_knowledge"]) < 5
+
+
+def test_repository_context_trimming_keeps_only_complete_files() -> None:
+    bundle = (
+        "\n--- FILE: first.py ---\nfirst = True\n"
+        "\n--- FILE: oversized.py ---\n" + "x" * 200 + "\n--- FILE: last.py ---\nlast = True\n"
+        "\n--- TRACKED FILE MANIFEST ---\nfirst.py\noversized.py\nlast.py"
+    )
+
+    trimmed = _trim_complete_file_context(bundle, 100)
+
+    assert "first = True" in trimmed
+    assert "last = True" in trimmed
+    assert "oversized.py" not in trimmed
+    assert not trimmed.endswith("[TRUNCATED]")
 
 
 def test_non_ascii_context_is_measured_without_escape_inflation() -> None:

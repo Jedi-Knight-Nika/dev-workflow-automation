@@ -15,7 +15,6 @@ from app.db.models import (
     ReviewFinding,
     Task,
     TaskMessage,
-    TaskRepositoryScope,
     TaskState,
     Team,
 )
@@ -49,6 +48,27 @@ def _repository_relevance_hint(context: dict[str, Any]) -> str:
     return json.dumps(values, ensure_ascii=False)
 
 
+def _trim_complete_file_context(value: str, limit: int) -> str:
+    """Fit repository context without ever returning a partial source file."""
+    file_marker = "\n--- FILE: "
+    manifest_marker = "\n--- TRACKED FILE MANIFEST ---\n"
+    file_area, _, manifest = value.partition(manifest_marker)
+    sections = [file_marker + item for item in file_area.split(file_marker)[1:]]
+    kept: list[str] = []
+    used = 0
+    for section in sections:
+        if used + len(section) > limit:
+            continue
+        kept.append(section)
+        used += len(section)
+    if manifest and used < limit:
+        remaining = limit - used
+        manifest_section = manifest_marker + manifest
+        if len(manifest_section) <= remaining:
+            kept.append(manifest_section)
+    return "".join(kept)
+
+
 def fit_context(context: dict[str, Any], limit: int) -> dict[str, Any]:
     """Trim low-priority context while preserving valid structured JSON."""
     limit = min(max(limit, MIN_CONTEXT_CHARS), MAX_CONTEXT_CHARS)
@@ -56,18 +76,27 @@ def fit_context(context: dict[str, Any], limit: int) -> dict[str, Any]:
     if isinstance(repository, dict):
         for key in ("files", "diff"):
             value = repository.get(key)
-            if isinstance(value, str) and len(value) > limit // 2:
-                repository[key] = value[: limit // 2] + "\n[TRUNCATED]"
+            if not isinstance(value, str) or len(value) <= limit * 3 // 4:
+                continue
+            repository[key] = (
+                _trim_complete_file_context(value, limit * 3 // 4)
+                if key == "files"
+                else value[: limit * 3 // 4] + "\n[TRUNCATED]"
+            )
     repositories = context.get("repositories")
     if isinstance(repositories, list) and repositories:
-        per_repository = max(2_000, limit // (len(repositories) * 2))
+        per_repository = max(2_000, (limit * 3) // (len(repositories) * 4))
         for item in repositories:
             if not isinstance(item, dict):
                 continue
             for key in ("files", "diff"):
                 value = item.get(key)
                 if isinstance(value, str) and len(value) > per_repository:
-                    item[key] = value[:per_repository] + "\n[TRUNCATED]"
+                    item[key] = (
+                        _trim_complete_file_context(value, per_repository)
+                        if key == "files"
+                        else value[:per_repository] + "\n[TRUNCATED]"
+                    )
     for key in ("retrieved_knowledge", "open_findings"):
         values = context.get(key)
         while isinstance(values, list) and values and _context_size(context) > limit:
@@ -408,31 +437,34 @@ class ContextCompiler:
         context["retrieved_knowledge"] = await self._knowledge(task, repository, JobRole.THINKER)
         return await self._finish(task, job, context, started)
 
-    async def compile_for_scoped_thinker(self, task: Task, job: Job) -> dict[str, Any]:
+    async def compile_for_scoped_thinker(
+        self, task: Task, job: Job, workspaces: list[ScopedWorkspace]
+    ) -> dict[str, Any]:
         started = time.monotonic()
         context = self._base(task, job)
         await self._include_conversation(task, context)
         context["task_memory"] = await self._persistent_memory(task, JobRole.THINKER)
         context["previous_role_checkpoint"] = await self._previous_checkpoint(task, JobRole.THINKER)
-        scope_rows = (
-            await self.session.execute(
-                select(TaskRepositoryScope, Repository)
-                .join(Repository, Repository.id == TaskRepositoryScope.repository_id)
-                .where(TaskRepositoryScope.task_id == task.id)
-                .order_by(TaskRepositoryScope.is_primary.desc())
+        repositories: list[dict[str, Any]] = []
+        manifest_budget = max(4_000, min(20_000, self.max_chars // max(len(workspaces), 1) // 4))
+        for item in workspaces:
+            tracked_files = await run_git("ls-files", cwd=item.path)
+            if len(tracked_files) > manifest_budget:
+                tracked_files = tracked_files[:manifest_budget] + "\n[TRUNCATED]"
+            repositories.append(
+                {
+                    "id": str(item.repository.id),
+                    "name": f"{item.repository.owner}/{item.repository.name}",
+                    "default_branch": item.repository.default_branch,
+                    "latest_sha": item.repository.latest_sha,
+                    "indexed_sha": item.repository.indexed_sha,
+                    "tracked_files": tracked_files,
+                    "retrieved_knowledge": await self._knowledge(
+                        task, item.repository, JobRole.THINKER
+                    ),
+                }
             )
-        ).all()
-        context["repositories"] = [
-            {
-                "id": str(repository.id),
-                "name": f"{repository.owner}/{repository.name}",
-                "default_branch": repository.default_branch,
-                "latest_sha": repository.latest_sha,
-                "indexed_sha": repository.indexed_sha,
-                "retrieved_knowledge": await self._knowledge(task, repository, JobRole.THINKER),
-            }
-            for _, repository in scope_rows
-        ]
+        context["repositories"] = repositories
         return await self._finish(task, job, context, started)
 
     async def compile_for_executor(

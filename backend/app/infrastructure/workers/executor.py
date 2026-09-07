@@ -13,8 +13,8 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from app.infrastructure.git.workspaces import run_git
 from app.infrastructure.tools import ToolGateway
 
-MAX_CONTEXT_BYTES = 120_000
-MAX_FILE_BYTES = 40_000
+MAX_CONTEXT_BYTES = 300_000
+MAX_FILE_BYTES = 160_000
 
 
 class FileWrite(BaseModel):
@@ -22,25 +22,128 @@ class FileWrite(BaseModel):
     content: str
 
 
+class FilePatch(BaseModel):
+    path: str
+    patch: str
+
+
 class ExecutorProposal(BaseModel):
-    result: Literal["IMPLEMENTED", "PLAN_MISMATCH", "BLOCKED", "NEEDS_REPLAN", "NEEDS_HUMAN"] = (
-        "IMPLEMENTED"
-    )
+    result: Literal[
+        "IMPLEMENTED",
+        "REQUEST_CONTEXT",
+        "PLAN_MISMATCH",
+        "BLOCKED",
+        "NEEDS_REPLAN",
+        "NEEDS_HUMAN",
+    ] = "IMPLEMENTED"
     summary: str
     files: list[FileWrite] = Field(default_factory=list)
+    patches: list[FilePatch] = Field(default_factory=list)
     delete_files: list[str] = Field(default_factory=list)
     plan_mismatch: str | None = None
     reason: str | None = None
+    requested_files: list[str] = Field(default_factory=list, max_length=20)
 
     @model_validator(mode="after")
     def validate_outcome(self) -> "ExecutorProposal":
-        if self.result != "IMPLEMENTED" and (self.files or self.delete_files):
+        if self.result != "IMPLEMENTED" and (self.files or self.patches or self.delete_files):
             raise ValueError(f"{self.result} must not include file changes")
+        if self.result == "REQUEST_CONTEXT" and not self.requested_files:
+            raise ValueError("REQUEST_CONTEXT requires requested_files")
+        if self.result != "REQUEST_CONTEXT" and self.requested_files:
+            raise ValueError(f"{self.result} must not request files")
         if self.result in {"PLAN_MISMATCH", "NEEDS_REPLAN"} and not self.plan_mismatch:
             raise ValueError(f"{self.result} requires plan_mismatch details")
         if self.result in {"BLOCKED", "NEEDS_HUMAN"} and not self.reason:
             raise ValueError(f"{self.result} requires a reason")
         return self
+
+
+async def requested_file_context(
+    workspaces: list[tuple[str, Path]],
+    requested_files: list[str],
+    *,
+    max_context_bytes: int = MAX_CONTEXT_BYTES,
+) -> list[dict[str, str]]:
+    """Load bounded, tracked source files explicitly requested by an Executor."""
+    results: list[dict[str, str]] = []
+    used = 0
+    tracked_by_workspace = {
+        workspace: (await run_git("ls-files", cwd=workspace)).splitlines()
+        for _, workspace in workspaces
+    }
+    for requested in dict.fromkeys(requested_files):
+        candidate = PurePosixPath(requested)
+        if candidate.is_absolute() or ".." in candidate.parts:
+            results.append({"path": requested, "status": "INVALID_PATH"})
+            continue
+        selected: tuple[str, Path] | None = None
+        relative = requested
+        for prefix, workspace in workspaces:
+            if len(workspaces) == 1:
+                selected = (prefix, workspace)
+                break
+            if requested == prefix or requested.startswith(f"{prefix}/"):
+                selected = (prefix, workspace)
+                relative = requested.removeprefix(f"{prefix}/")
+                break
+        if selected is None:
+            results.append({"path": requested, "status": "UNKNOWN_REPOSITORY"})
+            continue
+        prefix, workspace = selected
+        tracked = tracked_by_workspace[workspace]
+        if relative not in tracked:
+            suffix_matches = [path for path in tracked if path.endswith(f"/{relative}")]
+            if len(suffix_matches) == 1:
+                relative = suffix_matches[0]
+            else:
+                basename_matches = [
+                    path for path in tracked if PurePosixPath(path).name == candidate.name
+                ]
+                if len(basename_matches) == 1:
+                    relative = basename_matches[0]
+        path = _safe_path(workspace, relative)
+        if relative not in tracked:
+            results.append(
+                {"path": requested, "requested_path": requested, "status": "NOT_TRACKED_OR_NEW"}
+            )
+            continue
+        if not path.is_file() or path.is_symlink():
+            results.append({"path": requested, "status": "NOT_READABLE"})
+            continue
+        content = path.read_text(encoding="utf-8")
+        size = len(content.encode())
+        if size > MAX_FILE_BYTES or used + size > max_context_bytes:
+            results.append(
+                {"path": requested, "requested_path": requested, "status": "CONTEXT_LIMIT"}
+            )
+            continue
+        display_path = relative if len(workspaces) == 1 else f"{prefix}/{relative}"
+        results.append(
+            {
+                "path": display_path,
+                "requested_path": requested,
+                "status": "LOADED",
+                "content": content,
+            }
+        )
+        used += size
+    return results
+
+
+def merge_requested_file_context(
+    accumulated: list[dict[str, str]], current: list[dict[str, str]]
+) -> list[dict[str, str]]:
+    """Retain loaded source across bounded context-expansion rounds."""
+    merged = list(accumulated)
+    loaded_paths = {item["path"] for item in merged if item.get("status") == "LOADED"}
+    for item in current:
+        if item.get("status") == "LOADED" and item["path"] in loaded_paths:
+            continue
+        merged.append(item)
+        if item.get("status") == "LOADED":
+            loaded_paths.add(item["path"])
+    return merged
 
 
 class CheckResult(BaseModel):
@@ -184,12 +287,11 @@ async def repository_context(workspace: Path, relevance_hint: str = "") -> str:
             continue
         candidates.append((_relevance_score(relative, content, terms), relative, content))
     candidates.sort(key=lambda item: (-item[0], item[1]))
-    manifest_body = "\n".join(tracked)
-    if len(manifest_body.encode()) > 30_000:
-        manifest_body = manifest_body.encode()[:30_000].decode(errors="ignore") + "\n[TRUNCATED]"
-    manifest = "\n--- TRACKED FILE MANIFEST ---\n" + manifest_body
-    sections: list[str] = [manifest]
-    used = len(manifest.encode())
+    # Full relevant files are the Executor's only source-reading interface. Put
+    # them before the manifest so context fitting can never preserve a long file
+    # list while cutting a source file in half.
+    sections: list[str] = []
+    used = 0
     for _, relative, content in candidates:
         section = f"\n--- FILE: {relative} ---\n{content}"
         size = len(section.encode())
@@ -197,10 +299,18 @@ async def repository_context(workspace: Path, relevance_hint: str = "") -> str:
             continue
         sections.append(section)
         used += size
+    manifest_body = "\n".join(tracked)
+    if len(manifest_body.encode()) > 15_000:
+        manifest_body = manifest_body.encode()[:15_000].decode(errors="ignore") + "\n[TRUNCATED]"
+    manifest = "\n--- TRACKED FILE MANIFEST ---\n" + manifest_body
+    if used + len(manifest.encode()) <= MAX_CONTEXT_BYTES:
+        sections.append(manifest)
     return "".join(sections)
 
 
 def apply_proposal(workspace: Path, proposal: ExecutorProposal) -> None:
+    if proposal.patches:
+        raise ValueError("Patch proposals must be applied through the Tool Gateway")
     for change in proposal.files:
         path = _safe_path(workspace, change.path)
         if path.exists() and path.is_symlink():
@@ -217,6 +327,8 @@ def apply_proposal(workspace: Path, proposal: ExecutorProposal) -> None:
 async def apply_proposal_via_gateway(gateway: ToolGateway, proposal: ExecutorProposal) -> None:
     for change in proposal.files:
         await gateway.write_file(change.path, change.content)
+    for patch_change in proposal.patches:
+        await gateway.apply_patch(patch_change.path, patch_change.patch)
     for relative in proposal.delete_files:
         await gateway.delete_file(relative)
 

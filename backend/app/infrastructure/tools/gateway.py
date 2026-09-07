@@ -99,6 +99,38 @@ class ToolGateway:
             raise ToolDenied("Only regular workspace files may be deleted")
         path.unlink()
 
+    async def apply_patch(self, relative: str, patch: str) -> None:
+        """Apply a unified diff after validating its target and write authority."""
+        self._consume_tool_call()
+        resolve_workspace_path(self._context.workspace, relative, must_exist=True)
+        await self._authorize("filesystem", "patch", "WRITE_REPOSITORY", {"path": relative})
+        old_headers = re.findall(r"^--- (\S+)", patch, flags=re.MULTILINE)
+        new_headers = re.findall(r"^\+\+\+ (\S+)", patch, flags=re.MULTILINE)
+        if old_headers != [f"a/{relative}"] or new_headers != [f"b/{relative}"]:
+            raise ToolDenied("Patch must modify exactly its declared existing workspace file")
+        process = await asyncio.create_subprocess_exec(
+            "git",
+            "apply",
+            "--whitespace=nowarn",
+            "-",
+            cwd=self._context.workspace,
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await process.communicate(patch.encode())
+        if process.returncode:
+            safe_error = self._sanitize(stderr.decode(errors="replace"), {})
+            raise ToolDenied(f"Patch did not apply cleanly: {safe_error[-1000:]}")
+        await self._audit(
+            "filesystem",
+            "patch",
+            Decision.ALLOW,
+            "executed",
+            {"path": relative},
+            process.returncode,
+        )
+
     async def run_command(
         self,
         command: list[str],

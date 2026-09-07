@@ -26,3 +26,18 @@ def test_executor_accepts_bounded_replan_outcome() -> None:
         plan_mismatch="The planned module was removed",
     )
     assert proposal.files == []
+
+
+def test_executor_context_request_requires_explicit_paths() -> None:
+    with pytest.raises(ValidationError, match="requires requested_files"):
+        ExecutorProposal(result="REQUEST_CONTEXT", summary="Need source")
+
+
+def test_executor_accepts_bounded_context_request() -> None:
+    proposal = ExecutorProposal(
+        result="REQUEST_CONTEXT",
+        summary="Need the Team model",
+        requested_files=["backend/app/db/models/teams.py"],
+    )
+
+    assert proposal.requested_files == ["backend/app/db/models/teams.py"]

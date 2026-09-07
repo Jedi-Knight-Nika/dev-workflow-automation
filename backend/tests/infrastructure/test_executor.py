@@ -11,7 +11,9 @@ from app.infrastructure.workers.executor import (
     credential_subprocess_environment,
     dependency_setup_commands,
     detected_checks,
+    merge_requested_file_context,
     redact_credentials,
+    requested_file_context,
 )
 
 
@@ -34,6 +36,66 @@ def test_executor_rejects_path_escape(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="Unsafe workspace path"):
         apply_proposal(tmp_path, proposal)
+
+
+@pytest.mark.asyncio
+async def test_executor_loads_explicit_tracked_context_request(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "app" / "teams.py"
+    source.parent.mkdir(parents=True)
+    source.write_text("TEAM_SETTING = True\n")
+
+    async def tracked_file(*args: str, cwd: Path | None = None, **_: object) -> str:
+        assert args == ("ls-files",)
+        assert cwd == tmp_path
+        return "app/teams.py"
+
+    monkeypatch.setattr("app.infrastructure.workers.executor.run_git", tracked_file)
+
+    result = await requested_file_context([(".", tmp_path)], ["app/teams.py", "../secret"])
+
+    assert result[0] == {
+        "path": "app/teams.py",
+        "requested_path": "app/teams.py",
+        "status": "LOADED",
+        "content": "TEAM_SETTING = True\n",
+    }
+    assert result[1] == {"path": "../secret", "status": "INVALID_PATH"}
+
+
+@pytest.mark.asyncio
+async def test_executor_resolves_a_unique_requested_basename(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "app" / "db" / "models" / "teams.py"
+    source.parent.mkdir(parents=True)
+    source.write_text("TEAM_SETTING = True\n")
+
+    async def tracked_files(*args: str, **_: object) -> str:
+        assert args == ("ls-files",)
+        return "app/db/models/teams.py"
+
+    monkeypatch.setattr("app.infrastructure.workers.executor.run_git", tracked_files)
+
+    result = await requested_file_context([(".", tmp_path)], ["teams.py"])
+
+    assert result[0]["status"] == "LOADED"
+    assert result[0]["path"] == "app/db/models/teams.py"
+    assert result[0]["requested_path"] == "teams.py"
+
+
+def test_executor_accumulates_loaded_context_between_rounds() -> None:
+    first = [{"path": "a.py", "requested_path": "a.py", "status": "LOADED", "content": "a"}]
+    second = [
+        {"path": "a.py", "requested_path": "a.py", "status": "LOADED", "content": "a"},
+        {"path": "b.py", "requested_path": "b.py", "status": "LOADED", "content": "b"},
+    ]
+
+    assert [item["path"] for item in merge_requested_file_context(first, second)] == [
+        "a.py",
+        "b.py",
+    ]
 
 
 def test_checks_are_derived_from_manifests_not_model_commands(tmp_path: Path) -> None:

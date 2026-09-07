@@ -43,6 +43,8 @@ from app.infrastructure.workers.executor import (
     TesterProposal,
     apply_proposal_via_gateway,
     changed_files,
+    merge_requested_file_context,
+    requested_file_context,
     run_checks,
     workspace_fingerprint,
 )
@@ -66,8 +68,8 @@ class BudgetExceeded(RuntimeError):
 
 ROLE_INSTRUCTIONS = {
     "INTAKE": "Normalize the supplied event and select every relevant repository from repository_candidates. Return concise JSON with result EVENT_INTERPRETED; event_type (NEW_TASK, INFORMATIONAL, REVIEW_FIX, ARCHITECTURAL_FINDING, REQUIREMENT_CHANGE, or NEEDS_HUMAN); actionability (ACTION_REQUIRED, INFORMATIONAL, or NEEDS_HUMAN); blocking; summary; confidence; repository_ids; repository_selection_reason; and external_delivery_actions (always include this list, empty when none). Select multiple repository IDs when the work genuinely crosses repositories. Never invent an ID. For GitHub PR comments only, translate explicit delivery requests into typed external_delivery_actions: UPDATE_PR_TITLE, UPDATE_PR_BODY, or UPDATE_COMMIT_MESSAGE with the desired value, and MERGE_PULL_REQUEST only when the human explicitly requests merging. When the human requests a clear naming convention but does not provide exact replacement text, derive a concise, accurate value from the task and verified implementation context; do not ask the human to write routine PR or commit metadata. Imperative feedback such as 'merge it', 'after this merge', or 'then ready to merge' is explicit merge authorization and MUST produce MERGE_PULL_REQUEST; a descriptive statement that a PR is ready does not. A comment containing only delivery actions is INFORMATIONAL and must not create a code-repair Job. Do not use delivery actions for source-code changes or inferred wishes. Classify ordinary concrete review fixes as REVIEW_FIX, architecture/design changes as ARCHITECTURAL_FINDING, changed requirements as REQUIREMENT_CHANGE, and harmless messages as INFORMATIONAL. Product or implementation work that delegates design decisions to the engineering team is ACTION_REQUIRED and non-blocking; the Thinker owns safe, reversible technical decisions. Use NEEDS_HUMAN only when essential external information or authority is genuinely absent. Historical Agent blockers in the conversation are not current blockers after a task is reopened. Never propagate an old complaint about unavailable repository, shell, or file-editing tools; assess current task input and current platform context independently.",
-    "THINKER": "Act as the technical planning agent. Return concise JSON with result (PLAN_READY, NEEDS_CONTEXT, or NEEDS_HUMAN), goal, targets, ordered_steps, constraints, required_tests, risks, acceptance_criteria, reason, and questions. PLAN_READY requires a concrete goal, steps, and acceptance criteria. NEEDS_CONTEXT requires a reason and precise questions. NEEDS_HUMAN requires a reason. Make reasonable, safe, reversible implementation decisions when the task delegates design to you; record those decisions as constraints and proceed. Ordinary defaults, naming, fallback behavior, compatibility choices, and distinctions discoverable from the repository are not human blockers. Use NEEDS_CONTEXT or NEEDS_HUMAN only when essential information or authority is missing and materially different answers would cause an irreversible, unsafe, or externally consequential result. Never ask the human to decide routine engineering details that can be implemented with a backward-compatible default. Do not modify code.",
-    "EXECUTOR": "Act as the implementation agent. The repository context supplied in this prompt is your file-reading interface; you do not need or receive interactive filesystem or shell tools. Inspect those supplied file contents and return the complete contents of every file that must change. Return only JSON matching: {result, summary, files: [{path, content}], delete_files: [], plan_mismatch, reason}. result must be IMPLEMENTED, PLAN_MISMATCH, BLOCKED, NEEDS_REPLAN, or NEEDS_HUMAN. Only IMPLEMENTED may contain file changes. PLAN_MISMATCH and NEEDS_REPLAN require plan_mismatch details; BLOCKED and NEEDS_HUMAN require a concrete task-level reason. Never claim you are blocked merely because interactive tools are unavailable. Modify only files needed for the task; never include secrets, generated dependencies, lockfiles unless necessary, or paths outside the repository.",
+    "THINKER": "Act as the technical planning agent. Return concise JSON with result (PLAN_READY, NEEDS_CONTEXT, or NEEDS_HUMAN), goal, targets, ordered_steps, constraints, required_tests, risks, acceptance_criteria, reason, and questions. PLAN_READY requires a concrete goal, steps, and acceptance criteria. NEEDS_CONTEXT requires a reason and precise questions. NEEDS_HUMAN requires a reason. Use repositories[].tracked_files and retrieved knowledge to identify concrete existing file paths; include those paths in targets and ordered steps so Executor can load the correct complete sources. Distinguish existing files from new files that must be created. Make reasonable, safe, reversible implementation decisions when the task delegates design to you; record those decisions as constraints and proceed. Ordinary defaults, naming, fallback behavior, compatibility choices, and distinctions discoverable from the repository are not human blockers. Use NEEDS_CONTEXT or NEEDS_HUMAN only when essential information or authority is missing and materially different answers would cause an irreversible, unsafe, or externally consequential result. Never ask the human to decide routine engineering details that can be implemented with a backward-compatible default. Do not modify code.",
+    "EXECUTOR": "Act as the implementation agent. The repository context supplied in this prompt is your file-reading interface; you do not need or receive interactive filesystem or shell tools. Return JSON matching: {result, summary, files: [{path, content}], patches: [{path, patch}], delete_files: [], requested_files: [], plan_mismatch, reason}. Prefer patches for existing large files; each must be a standard unified diff with headers exactly --- a/<path> and +++ b/<path>. Use files with complete content for new files and small replacements. result must be IMPLEMENTED, REQUEST_CONTEXT, PLAN_MISMATCH, BLOCKED, NEEDS_REPLAN, or NEEDS_HUMAN. When an existing source file required for implementation is absent, return REQUEST_CONTEXT with its exact tracked path in requested_files; do not classify missing supplied source as BLOCKED. The runtime will validate and accumulate requested files, then continue this same Job. Only IMPLEMENTED may contain file changes. PLAN_MISMATCH and NEEDS_REPLAN require plan_mismatch details; BLOCKED and NEEDS_HUMAN require a concrete task-level reason. Never claim you are blocked merely because interactive tools are unavailable. Modify only files needed for the task; never include secrets, generated dependencies, lockfiles unless necessary, or paths outside the repository.",
     "REVIEWER": "Act as an independent code reviewer. Inspect the supplied task, plan, and actual Git diff. Return only JSON matching {result, summary, findings: [{severity, path, line, message}], reason}. result must be PASS, FAIL_ACTIONABLE, FAIL_ARCHITECTURAL, UNCERTAIN, or NEEDS_HUMAN. PASS has no findings. Failure outcomes require concrete findings. UNCERTAIN and NEEDS_HUMAN require a reason. Report only evidenced correctness, security, architectural, regression, or missing-test problems; do not invent evidence.",
     "TESTER": "Act as an independent verification agent. Evaluate the supplied changes and captured validation evidence. Return only JSON matching {result, summary, findings: [{severity, path, line, message}], reason}. result must be TEST_PASS, TEST_FAILED, TEST_ENVIRONMENT_FAILURE, TEST_INCOMPLETE, NEEDS_HUMAN, or BLOCKED. TEST_PASS has no findings. TEST_FAILED requires concrete findings. Other non-pass outcomes require a reason. Never claim a command ran unless its captured result is supplied.",
 }
@@ -613,7 +615,7 @@ async def run(job_id: uuid.UUID) -> WorkerResult:
         )
         scoped_workspaces = []
         workspace = None
-        if job.role in {JobRole.EXECUTOR, JobRole.REVIEWER, JobRole.TESTER}:
+        if job.role in {JobRole.THINKER, JobRole.EXECUTOR, JobRole.REVIEWER, JobRole.TESTER}:
             require_permission(config, "READ_REPOSITORY")
             scoped_workspaces = await prepare_task_workspaces(session, task)
             if not scoped_workspaces:
@@ -743,7 +745,7 @@ async def run(job_id: uuid.UUID) -> WorkerResult:
         if job.role == JobRole.INTAKE:
             prompt_data = await compiler.compile_for_intake(task, job)
         elif job.role == JobRole.THINKER:
-            prompt_data = await compiler.compile_for_scoped_thinker(task, job)
+            prompt_data = await compiler.compile_for_scoped_thinker(task, job, scoped_workspaces)
         elif job.role == JobRole.EXECUTOR and scoped_workspaces:
             prompt_data = await compiler.compile_for_scoped_executor(task, job, scoped_workspaces)
         elif job.role == JobRole.REVIEWER and scoped_workspaces:
@@ -766,39 +768,125 @@ async def run(job_id: uuid.UUID) -> WorkerResult:
         max_job_turns = int(execution_strategy.get("max_job_turns", max_repairs + 1))
         max_repairs = min(max_repairs, max(max_job_turns - 1, 0))
         budget_error: BudgetExceeded | None = None
+        attempts: list[ProviderAttempt] = []
         try:
             try:
-                data, attempts = await run_with_structured_repair(
-                    provider,
-                    ProviderRequest(
-                        model=config.model,
-                        system=config.system_prompt,
-                        prompt=prompt,
-                        max_output_tokens=int(
-                            config.configuration.get("max_output_tokens") or 4096
+                accumulated_requested_context: list[dict[str, str]] = []
+                context_request_history: list[dict[str, Any]] = []
+                for context_round in range(4):
+                    data, current_attempts = await run_with_structured_repair(
+                        provider,
+                        ProviderRequest(
+                            model=config.model,
+                            system=config.system_prompt,
+                            prompt=prompt,
+                            max_output_tokens=int(
+                                config.configuration.get("max_output_tokens") or 4096
+                            ),
+                            temperature=config.configuration.get("temperature"),
+                            reasoning_effort=str(
+                                config.configuration.get("reasoning_effort", "default")
+                            ),
+                            timeout_seconds=int(config.configuration.get("timeout_minutes", 60))
+                            * 60,
+                            response_schema=role_output_schema(job.role),
                         ),
-                        temperature=config.configuration.get("temperature"),
-                        reasoning_effort=str(
-                            config.configuration.get("reasoning_effort", "default")
+                        job.role,
+                        max_repairs,
+                        before_attempt=lambda pending: enforce_spending_budget(
+                            session,
+                            job,
+                            task,
+                            settings,
+                            config.configuration,
+                            attempts + pending,
                         ),
-                        timeout_seconds=int(config.configuration.get("timeout_minutes", 60)) * 60,
-                        response_schema=role_output_schema(job.role),
-                    ),
-                    job.role,
-                    max_repairs,
-                    before_attempt=lambda pending: enforce_spending_budget(
-                        session, job, task, settings, config.configuration, pending
-                    ),
-                    on_text_delta=stream_progress_reporter(task.id, job.id),
-                    is_cancelled=stream_cancellation_checker(job.id, job.lease_token),
-                )
+                        on_text_delta=stream_progress_reporter(task.id, job.id),
+                        is_cancelled=stream_cancellation_checker(job.id, job.lease_token),
+                    )
+                    attempts.extend(current_attempts)
+                    if job.role != JobRole.EXECUTOR:
+                        break
+                    proposal = ExecutorProposal.model_validate(data)
+                    if proposal.result != "REQUEST_CONTEXT":
+                        break
+                    if context_round == 3:
+                        unresolved = [
+                            f"{item.get('requested_path', item.get('path'))} ({item.get('status')})"
+                            for request in context_request_history
+                            for item in request["results"]
+                            if isinstance(item, dict) and item.get("status") != "LOADED"
+                        ]
+                        data = {
+                            "result": "BLOCKED",
+                            "summary": "Executor source-request budget was exhausted",
+                            "files": [],
+                            "patches": [],
+                            "delete_files": [],
+                            "requested_files": [],
+                            "plan_mismatch": None,
+                            "reason": "Required source files were still unresolved after three bounded context expansions."
+                            + (
+                                f" Unresolved: {', '.join(unresolved[-12:])}." if unresolved else ""
+                            ),
+                        }
+                        break
+                    workspace_paths = [
+                        (
+                            "." if task.workspace_path == str(item.path) else item.path.name,
+                            item.path,
+                        )
+                        for item in scoped_workspaces
+                    ]
+                    requested = await requested_file_context(
+                        workspace_paths,
+                        proposal.requested_files,
+                        max_context_bytes=max(
+                            0,
+                            300_000
+                            - sum(
+                                len(item.get("content", "").encode())
+                                for item in accumulated_requested_context
+                            ),
+                        ),
+                    )
+                    context_request_history.append(
+                        {
+                            "round": context_round + 1,
+                            "requested_files": proposal.requested_files,
+                            "results": [
+                                {key: value for key, value in item.items() if key != "content"}
+                                for item in requested
+                            ],
+                        }
+                    )
+                    accumulated_requested_context = merge_requested_file_context(
+                        accumulated_requested_context, requested
+                    )
+                    for key in ("repository",):
+                        repository_context_data = prompt_data.get(key)
+                        if isinstance(repository_context_data, dict):
+                            repository_context_data.pop("files", None)
+                    repository_contexts = prompt_data.get("repositories")
+                    if isinstance(repository_contexts, list):
+                        for repository_context_data in repository_contexts:
+                            if isinstance(repository_context_data, dict):
+                                repository_context_data.pop("files", None)
+                    prompt_data["requested_file_context"] = accumulated_requested_context
+                    prompt_data["context_request_history"] = context_request_history
+                    prompt_data["context_request"] = {
+                        "round": context_round + 1,
+                        "previous_summary": proposal.summary,
+                        "instruction": "Continue implementation using the loaded files. Request another bounded set only if essential existing sources remain absent.",
+                    }
+                    prompt = json.dumps(prompt_data, ensure_ascii=False)
             except StructuredOutputError as exc:
                 await persist_attempts(
                     session,
                     job,
                     config.provider,
                     config.model,
-                    exc.attempts,
+                    attempts + exc.attempts,
                     config.configuration,
                     audit_snapshot,
                 )
