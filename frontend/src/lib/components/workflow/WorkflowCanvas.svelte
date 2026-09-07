@@ -1048,23 +1048,40 @@
         {:else}
           {#each activity as item (item.node_id)}
             {@const itemNode = nodes.find((node) => node.id === item.node_id)}
+            {@const itemTaskTitle = item.task_id ? taskTitles[item.task_id] : null}
             <button
               type="button"
               class="activity-item"
               class:active={item.active_jobs > 0}
               onclick={() => itemNode && onSelect(itemNode.data.role, itemNode.id)}
             >
-              <span class="activity-status" class:working={item.active_jobs > 0}></span>
-              <span class="activity-copy"
-                ><strong>{itemNode?.data.displayName || item.node_id}</strong><small
-                  >{item.current_job_action?.replaceAll('_', ' ') || 'Waiting'}</small
-                >{#if item.task_id}<small class="activity-task"
-                    >Task {item.task_id.slice(0, 8)}</small
-                  >{/if}</span
-              >
-              <span class="activity-counts"
-                >{item.active_jobs} active · {item.queued_jobs} queued</span
-              >
+              <span class="activity-avatar">
+                <PixelAgentAvatar
+                  seed={`${item.node_id}:${itemNode?.data.role || 'agent'}`}
+                  label={itemNode?.data.displayName || 'Workflow agent'}
+                  size={34}
+                />
+                <i class="activity-status" class:working={item.active_jobs > 0}></i>
+              </span>
+              <span class="activity-copy">
+                <span class="activity-agent">
+                  <strong>{itemNode?.data.displayName || item.node_id}</strong>
+                  {#if itemNode}<small>{itemNode.data.role.replaceAll('_', ' ')}</small>{/if}
+                </span>
+                <small class="activity-action"
+                  >{item.current_job_action?.replaceAll('_', ' ') || 'Waiting for work'}</small
+                >
+                {#if item.task_id}
+                  <span class="activity-task" title={itemTaskTitle || `Task ${item.task_id}`}>
+                    <small>Current task</small>
+                    <b>{itemTaskTitle || `Task ${item.task_id.slice(0, 8)}`}</b>
+                  </span>
+                {/if}
+              </span>
+              <span class="activity-counts">
+                <b class:nonzero={item.active_jobs > 0}>{item.active_jobs}<small>active</small></b>
+                <b class:nonzero={item.queued_jobs > 0}>{item.queued_jobs}<small>queued</small></b>
+              </span>
             </button>
           {/each}
         {/if}
@@ -1073,12 +1090,29 @@
           {@const selected = nodes.find((node) => node.id === selectedNodeId)}
           {#if selected}
             <div class="activity-details">
-              <small>Selected agent</small><strong>{selected.data.displayName}</strong><span
-                >{selected.data.provider} / {selected.data.model || 'Model not configured'}</span
-              ><span
+              <small>Selected agent</small>
+              <div class="selected-agent">
+                <PixelAgentAvatar
+                  seed={`${selected.id}:${selected.data.role}`}
+                  label={selected.data.displayName}
+                  size={30}
+                />
+                <span
+                  ><strong>{selected.data.displayName}</strong><small>{selected.data.role}</small
+                  ></span
+                >
+              </div>
+              <span>{selected.data.provider} / {selected.data.model || 'Model not configured'}</span
+              >
+              <span
                 >{selectedLive?.current_job_action?.replaceAll('_', ' ') ||
                   selected.data.status.replaceAll('_', ' ')}</span
-              >{#if selectedLive?.task_id}<span>Task {selectedLive.task_id}</span>{/if}<Button
+              >{#if selectedLive?.task_id}<span class="selected-task"
+                  ><small>Current task</small><b
+                    >{taskTitles[selectedLive.task_id] ||
+                      `Task ${selectedLive.task_id.slice(0, 8)}`}</b
+                  ></span
+                >{/if}<Button
                 size="sm"
                 variant="ghost"
                 onclick={() => onConsole(selected.data.role, selected.id)}>Open live view</Button
@@ -2279,24 +2313,101 @@
   }
   .activity-item {
     display: grid;
-    grid-template-columns: auto 1fr auto;
-    gap: 0.55rem;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: start;
+    gap: 0.65rem;
     width: 100%;
+    border: 1px solid transparent;
     border-radius: 0.5rem;
-    padding: 0.55rem;
+    padding: 0.62rem;
     text-align: left;
   }
   .activity-item:hover,
   .activity-item.active {
+    border-color: color-mix(in srgb, var(--color-brand) 20%, var(--color-line));
     background: color-mix(in srgb, var(--color-brand) 10%, transparent);
   }
-  .activity-counts {
-    color: var(--color-muted);
-    font-size: 0.6rem;
+  .activity-avatar {
+    position: relative;
+    display: block;
+  }
+  .activity-avatar .activity-status {
+    position: absolute;
+    right: -0.12rem;
+    bottom: -0.12rem;
+    border: 2px solid var(--color-panel);
+  }
+  .activity-agent {
+    display: flex;
+    min-width: 0;
+    align-items: baseline;
+    gap: 0.4rem;
+  }
+  .activity-agent strong {
+    overflow: hidden;
+    color: var(--color-heading);
+    font-size: 0.72rem;
+    text-overflow: ellipsis;
     white-space: nowrap;
   }
+  .activity-agent small {
+    flex: none;
+    color: var(--color-brand-2);
+    font: 700 0.48rem var(--font-mono);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+  .activity-action {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .activity-counts {
+    display: flex;
+    gap: 0.25rem;
+  }
+  .activity-counts b {
+    display: grid;
+    min-width: 2.25rem;
+    justify-items: center;
+    gap: 0.05rem;
+    border: 1px solid var(--color-line);
+    border-radius: 0.35rem;
+    padding: 0.24rem 0.3rem;
+    color: var(--color-muted);
+    font-size: 0.65rem;
+  }
+  .activity-counts b.nonzero {
+    border-color: color-mix(in srgb, var(--color-brand-2) 25%, var(--color-line));
+    color: var(--color-text);
+  }
+  .activity-counts small {
+    font-size: 0.42rem;
+    font-weight: 500;
+  }
   .activity-task {
-    font-family: ui-monospace, SFMono-Regular, monospace;
+    display: grid;
+    min-width: 0;
+    gap: 0.05rem;
+    margin-top: 0.2rem;
+    border-left: 2px solid color-mix(in srgb, var(--color-brand-2) 55%, var(--color-line));
+    padding-left: 0.42rem;
+  }
+  .activity-task small,
+  .selected-task small {
+    color: var(--color-muted);
+    font-size: 0.45rem;
+    font-weight: 700;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+  }
+  .activity-task b {
+    overflow: hidden;
+    color: var(--color-text);
+    font-size: 0.62rem;
+    font-weight: 600;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .activity-empty {
     color: var(--color-muted);
@@ -2310,6 +2421,24 @@
     border-top: 1px solid var(--color-line);
     padding-top: 0.75rem;
     font-size: 0.7rem;
+  }
+  .selected-agent {
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+  }
+  .selected-agent > span,
+  .selected-task {
+    display: grid;
+    gap: 0.1rem;
+    min-width: 0;
+  }
+  .selected-agent strong,
+  .selected-task b {
+    overflow: hidden;
+    color: var(--color-heading);
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .resize-hint {
     position: absolute;
