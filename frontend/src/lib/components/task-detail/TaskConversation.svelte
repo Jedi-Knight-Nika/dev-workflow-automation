@@ -12,7 +12,9 @@
     loadingOlder,
     sending,
     onLoadOlder,
-    onSend
+    onSend,
+    onReact,
+    onDelete
   }: {
     messages: TaskMessage[];
     taskState: string;
@@ -21,11 +23,15 @@
     loadingOlder: boolean;
     sending: boolean;
     onLoadOlder: () => Promise<void>;
-    onSend: (body: string) => Promise<void>;
+    onSend: (body: string, replyToId?: number) => Promise<void>;
+    onReact: (messageId: number, reaction: string) => Promise<void>;
+    onDelete: (messageId: number) => Promise<void>;
   } = $props();
 
   let draft = $state('');
   let showRoutine = $state(false);
+  let replyingTo = $state<TaskMessage | null>(null);
+  let menu = $state<{ message: TaskMessage; x: number; y: number } | null>(null);
   let feed: HTMLDivElement;
   let previousLastId = $state<number | null>(null);
 
@@ -63,8 +69,9 @@
   async function submit() {
     const body = draft.trim();
     if (!body || sending) return;
-    await onSend(body);
+    await onSend(body, replyingTo?.id);
     draft = '';
+    replyingTo = null;
   }
 
   function keydown(event: KeyboardEvent) {
@@ -119,7 +126,13 @@
     {:else}
       <div class="space-y-5">
         {#each visibleMessages as message (message.id)}
-          <article class="flex gap-3 {message.author_type === 'USER' ? 'flex-row-reverse' : ''}">
+          <article
+            class="flex gap-3 {message.author_type === 'USER' ? 'flex-row-reverse' : ''}"
+            oncontextmenu={(event) => {
+              event.preventDefault();
+              menu = { message, x: event.clientX, y: event.clientY };
+            }}
+          >
             {#if message.author_type === 'AGENT'}
               <PixelAgentAvatar
                 seed={message.agent_id ?? message.author_name}
@@ -153,8 +166,27 @@
                     ? 'border-line bg-brand/12 rounded-tr-sm'
                     : 'border-line bg-panel rounded-tl-sm'}"
               >
+                {#if message.reply_to_id}
+                  {@const parent = messages.find((item) => item.id === message.reply_to_id)}
+                  <div class="border-line text-muted mb-2 border-l-2 pl-2 text-[11px]">
+                    Reply to {parent?.author_name || 'message'} · {parent?.body.slice(0, 90) ||
+                      'Unavailable'}
+                  </div>
+                {/if}
                 {message.body}
               </div>
+              {#if Array.isArray(message.context.user_reactions) && message.context.user_reactions.length}
+                <div class="mt-1.5 flex gap-1">
+                  {#each message.context.user_reactions as reaction (String(reaction))}
+                    <button
+                      type="button"
+                      class="border-line bg-panel rounded-full border px-2 py-0.5 text-xs"
+                      onclick={() => void onReact(message.id, String(reaction))}
+                      >{String(reaction)}</button
+                    >
+                  {/each}
+                </div>
+              {/if}
               {#if isBlocker(message)}
                 <span
                   class="mt-1.5 rounded-full px-2 py-1 text-[10px] font-bold {needsResponse(message)
@@ -184,6 +216,17 @@
       void submit();
     }}
   >
+    {#if replyingTo}
+      <div
+        class="border-line bg-input mb-2 flex items-center gap-2 rounded-lg border px-3 py-2 text-xs"
+      >
+        <span class="text-muted">Replying to</span><strong>{replyingTo.author_name}</strong>
+        <span class="text-muted min-w-0 flex-1 truncate">{replyingTo.body}</span>
+        <button type="button" aria-label="Cancel reply" onclick={() => (replyingTo = null)}
+          >×</button
+        >
+      </div>
+    {/if}
     <textarea
       bind:value={draft}
       onkeydown={keydown}
@@ -205,3 +248,43 @@
     </div>
   </form>
 </section>
+
+{#if menu}
+  <button
+    class="fixed inset-0 z-[80] cursor-default"
+    aria-label="Close message menu"
+    onclick={() => (menu = null)}
+  ></button>
+  <div
+    class="border-line bg-panel fixed z-[81] w-48 rounded-xl border p-1.5 text-sm shadow-2xl"
+    style={`left:${Math.min(menu.x, window.innerWidth - 205)}px;top:${Math.min(menu.y, window.innerHeight - 230)}px`}
+  >
+    <button
+      class="hover:bg-input w-full rounded-lg px-3 py-2 text-left"
+      onclick={() => {
+        replyingTo = menu!.message;
+        menu = null;
+      }}>Reply</button
+    >
+    <div class="border-line my-1 flex justify-around border-y py-1.5">
+      {#each ['👍', '👎', '❤️', '👀'] as reaction (reaction)}
+        <button
+          class="hover:bg-input rounded-md p-1.5"
+          onclick={() => {
+            void onReact(menu!.message.id, reaction);
+            menu = null;
+          }}>{reaction}</button
+        >
+      {/each}
+    </div>
+    {#if menu.message.author_type === 'USER' && !menu.message.deleted_at}
+      <button
+        class="hover:bg-danger/10 text-danger w-full rounded-lg px-3 py-2 text-left"
+        onclick={() => {
+          void onDelete(menu!.message.id);
+          menu = null;
+        }}>Delete</button
+      >
+    {/if}
+  </div>
+{/if}

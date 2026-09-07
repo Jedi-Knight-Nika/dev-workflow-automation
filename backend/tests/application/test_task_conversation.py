@@ -11,7 +11,9 @@ class RecordingConversationStore:
     def __init__(self) -> None:
         self.body = ""
 
-    async def add_user_message(self, task_id: uuid.UUID, body: str) -> TaskMessageView:
+    async def add_user_message(
+        self, task_id: uuid.UUID, body: str, reply_to_id: int | None
+    ) -> TaskMessageView:
         self.body = body
         return cast(TaskMessageView, object())
 

@@ -91,11 +91,30 @@ export function listTaskMessages(taskId: string, beforeId?: number): Promise<Tas
   return api<TaskMessagePage>(`/tasks/${taskId}/messages?${query.toString()}`);
 }
 
-export function addTaskMessage(taskId: string, body: string): Promise<TaskMessage> {
+export function addTaskMessage(
+  taskId: string,
+  body: string,
+  replyToId?: number
+): Promise<TaskMessage> {
   return api<TaskMessage>(`/tasks/${taskId}/messages`, {
     method: 'POST',
-    body: JSON.stringify({ body })
+    body: JSON.stringify({ body, reply_to_id: replyToId ?? null })
   });
+}
+
+export function reactToTaskMessage(
+  taskId: string,
+  messageId: number,
+  reaction: string
+): Promise<TaskMessage> {
+  return api<TaskMessage>(`/tasks/${taskId}/messages/${messageId}/reactions`, {
+    method: 'POST',
+    body: JSON.stringify({ reaction })
+  });
+}
+
+export function deleteTaskMessage(taskId: string, messageId: number): Promise<void> {
+  return api<void>(`/tasks/${taskId}/messages/${messageId}`, { method: 'DELETE' });
 }
 
 export function listTaskValidations(taskId: string): Promise<ValidationRecord[]> {

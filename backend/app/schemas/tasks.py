@@ -130,6 +130,11 @@ class EventRead(BaseModel):
 
 class TaskMessageCreate(BaseModel):
     body: str = Field(min_length=1, max_length=8_000)
+    reply_to_id: int | None = Field(default=None, ge=1)
+
+
+class TaskMessageReaction(BaseModel):
+    reaction: str = Field(min_length=1, max_length=8)
 
 
 class TaskMessageRead(BaseModel):
@@ -137,6 +142,7 @@ class TaskMessageRead(BaseModel):
     id: int
     task_id: uuid.UUID
     job_id: uuid.UUID | None
+    reply_to_id: int | None
     agent_id: uuid.UUID | None
     author_type: str
     author_name: str
@@ -145,6 +151,7 @@ class TaskMessageRead(BaseModel):
     body: str
     context: dict[str, Any]
     created_at: datetime
+    deleted_at: datetime | None
 
 
 class TaskMessagePageRead(BaseModel):

@@ -1,4 +1,5 @@
 import uuid
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -7,8 +8,8 @@ from app.application.ports.task_conversation import (
     TaskMessagePage,
     TaskMessageView,
 )
-from app.db.models import Task, TaskMessage
-from app.infrastructure.persistence.job_operations import record_event
+from app.db.models import Job, JobRole, JobState, Task, TaskMessage, TaskState
+from app.infrastructure.persistence.job_operations import enqueue_job, record_event
 
 
 def _view(message: TaskMessage) -> TaskMessageView:
@@ -16,6 +17,7 @@ def _view(message: TaskMessage) -> TaskMessageView:
         message.id,
         message.task_id,
         message.job_id,
+        message.reply_to_id,
         message.agent_id,
         message.author_type,
         message.author_name,
@@ -24,6 +26,7 @@ def _view(message: TaskMessage) -> TaskMessageView:
         message.body,
         message.context,
         message.created_at,
+        message.deleted_at,
     )
 
 
@@ -52,12 +55,19 @@ class SqlAlchemyTaskConversationStore:
             visible[0].id if has_more and visible else None,
         )
 
-    async def add_user_message(self, task_id: uuid.UUID, body: str) -> TaskMessageView:
+    async def add_user_message(
+        self, task_id: uuid.UUID, body: str, reply_to_id: int | None
+    ) -> TaskMessageView:
         task = await self._session.get(Task, task_id)
         if task is None:
             raise LookupError("Task not found")
+        if reply_to_id is not None:
+            parent = await self._session.get(TaskMessage, reply_to_id)
+            if parent is None or parent.task_id != task_id:
+                raise ValueError("Reply target does not belong to this task")
         message = TaskMessage(
             task_id=task_id,
+            reply_to_id=reply_to_id,
             author_type="USER",
             author_name="You",
             kind="COMMENT",
@@ -72,5 +82,69 @@ class SqlAlchemyTaskConversationStore:
             "TASK_MESSAGE_ADDED",
             {"message_id": message.id, "author_type": "USER"},
         )
+        active_job = await self._session.scalar(
+            select(Job.id).where(
+                Job.task_id == task_id,
+                Job.state.in_([JobState.QUEUED, JobState.CLAIMED, JobState.RUNNING]),
+            )
+        )
+        if (
+            active_job is None
+            and task.team_id is not None
+            and task.state not in {TaskState.MERGED, TaskState.CANCELLED}
+        ):
+            if task.state in {
+                TaskState.NEEDS_HUMAN,
+                TaskState.CONTEXT_PENDING,
+                TaskState.FAILED,
+                TaskState.PAUSED,
+            }:
+                task.state = TaskState.NEW
+                task.manual_takeover = False
+            await enqueue_job(
+                self._session,
+                task,
+                JobRole.INTAKE,
+                "INTERPRET_MESSAGE",
+                payload={"message_id": message.id, "reply_to_id": reply_to_id},
+            )
         await self._session.commit()
         return _view(message)
+
+    async def toggle_reaction(
+        self, task_id: uuid.UUID, message_id: int, reaction: str
+    ) -> TaskMessageView:
+        message = await self._session.scalar(
+            select(TaskMessage)
+            .where(TaskMessage.id == message_id, TaskMessage.task_id == task_id)
+            .with_for_update()
+        )
+        if message is None:
+            raise LookupError("Message not found")
+        reactions = [str(item) for item in message.context.get("user_reactions", [])]
+        reactions = (
+            [item for item in reactions if item != reaction]
+            if reaction in reactions
+            else [*reactions, reaction]
+        )
+        message.context = {**message.context, "user_reactions": reactions}
+        await self._session.commit()
+        return _view(message)
+
+    async def delete_user_message(self, task_id: uuid.UUID, message_id: int) -> bool:
+        message = await self._session.scalar(
+            select(TaskMessage)
+            .where(TaskMessage.id == message_id, TaskMessage.task_id == task_id)
+            .with_for_update()
+        )
+        if message is None:
+            return False
+        if message.author_type != "USER":
+            raise ValueError("Only your own messages can be deleted")
+        message.body = "Message deleted"
+        message.deleted_at = datetime.now(UTC)
+        message.context = {
+            key: value for key, value in message.context.items() if key != "user_reactions"
+        }
+        await self._session.commit()
+        return True

@@ -32,7 +32,9 @@
     getTaskMemory,
     listTaskCheckpoints,
     listTaskMessages,
-    addTaskMessage
+    addTaskMessage,
+    reactToTaskMessage,
+    deleteTaskMessage
   } from '$lib/services/tasks';
   import type {
     AgentCheckpoint,
@@ -217,12 +219,12 @@
     }
   }
 
-  async function sendMessage(body: string) {
+  async function sendMessage(body: string, replyToId?: number) {
     if (!task || sendingMessage) return;
     sendingMessage = true;
     error = '';
     try {
-      const message = await addTaskMessage(task.id, body);
+      const message = await addTaskMessage(task.id, body, replyToId);
       messages = [...messages, message];
       if (task.state === 'NEEDS_HUMAN' || task.state === 'CONTEXT_PENDING') {
         task = await runTaskCommand(task.id, 'resume');
@@ -234,6 +236,19 @@
     } finally {
       sendingMessage = false;
     }
+  }
+
+  async function reactMessage(messageId: number, reaction: string) {
+    if (!task) return;
+    const updated = await reactToTaskMessage(task.id, messageId, reaction);
+    messages = messages.map((item) => (item.id === messageId ? updated : item));
+  }
+
+  async function deleteMessage(messageId: number) {
+    if (!task) return;
+    await deleteTaskMessage(task.id, messageId);
+    const page = await listTaskMessages(task.id);
+    messages = page.items;
   }
 </script>
 
@@ -271,6 +286,8 @@
       sending={sendingMessage}
       onLoadOlder={loadOlderMessages}
       onSend={sendMessage}
+      onReact={reactMessage}
+      onDelete={deleteMessage}
     />
     <TaskWorkspacePanel {task} {preparing} onPrepareWorkspace={prepareWorkspace} />
     <TaskPlanPanel {latestPlan} {latestThinker} />

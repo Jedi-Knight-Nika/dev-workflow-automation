@@ -26,6 +26,9 @@ class TaskMessage(Base):
     job_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("jobs.id", ondelete="SET NULL"), unique=True
     )
+    reply_to_id: Mapped[int | None] = mapped_column(
+        ForeignKey("task_messages.id", ondelete="SET NULL")
+    )
     agent_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("ai_agents.id", ondelete="SET NULL")
     )
@@ -36,3 +39,4 @@ class TaskMessage(Base):
     body: Mapped[str] = mapped_column(Text)
     context: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

@@ -11,9 +11,11 @@
   import { t } from '$lib/i18n/index.svelte';
   import {
     addTaskMessage,
+    deleteTaskMessage,
     createTask,
     listTaskMessages,
     listTasks,
+    reactToTaskMessage,
     runTaskCommand,
     type TaskFilters
   } from '$lib/services/tasks';
@@ -118,12 +120,12 @@
     }
   }
 
-  async function sendMessage(body: string) {
+  async function sendMessage(body: string, replyToId?: number) {
     if (!selected || sendingMessage) return;
     sendingMessage = true;
     const taskId = selected.id;
     try {
-      const message = await addTaskMessage(taskId, body);
+      const message = await addTaskMessage(taskId, body, replyToId);
       messages = [...messages, message];
       if (['NEEDS_HUMAN', 'CONTEXT_PENDING'].includes(selected.state)) {
         selected = await runTaskCommand(taskId, 'resume');
@@ -135,6 +137,18 @@
     } finally {
       sendingMessage = false;
     }
+  }
+
+  async function reactMessage(messageId: number, reaction: string) {
+    if (!selected) return;
+    const updated = await reactToTaskMessage(selected.id, messageId, reaction);
+    messages = messages.map((item) => (item.id === messageId ? updated : item));
+  }
+
+  async function deleteMessage(messageId: number) {
+    if (!selected) return;
+    await deleteTaskMessage(selected.id, messageId);
+    await loadConversation(selected.id);
   }
   function resetFilters() {
     filters = { sort: 'priority', direction: 'asc' };
@@ -590,6 +604,8 @@
           sending={sendingMessage}
           onLoadOlder={loadOlderMessages}
           onSend={sendMessage}
+          onReact={reactMessage}
+          onDelete={deleteMessage}
         />
       {/if}
       <section class="assignment">

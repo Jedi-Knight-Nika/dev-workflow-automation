@@ -50,6 +50,7 @@ from .tasks import (
     TaskCreate,
     TaskMessageCreate,
     TaskMessagePageRead,
+    TaskMessageReaction,
     TaskMessageRead,
     TaskRead,
 )
@@ -122,6 +123,7 @@ __all__ = [
     "TaskCreate",
     "TaskMessageCreate",
     "TaskMessagePageRead",
+    "TaskMessageReaction",
     "TaskMessageRead",
     "TaskRead",
     "TeamRead",

@@ -21,8 +21,28 @@ class AddTaskMessage:
     def __init__(self, store: TaskConversationStore) -> None:
         self._store = store
 
-    async def execute(self, task_id: uuid.UUID, body: str) -> TaskMessageView:
+    async def execute(
+        self, task_id: uuid.UUID, body: str, reply_to_id: int | None = None
+    ) -> TaskMessageView:
         normalized = body.strip()
         if not normalized:
             raise ValueError("Message cannot be empty")
-        return await self._store.add_user_message(task_id, normalized)
+        return await self._store.add_user_message(task_id, normalized, reply_to_id)
+
+
+class ReactToTaskMessage:
+    def __init__(self, store: TaskConversationStore) -> None:
+        self._store = store
+
+    async def execute(self, task_id: uuid.UUID, message_id: int, reaction: str) -> TaskMessageView:
+        if reaction not in {"👍", "👎", "❤️", "👀"}:
+            raise ValueError("Unsupported reaction")
+        return await self._store.toggle_reaction(task_id, message_id, reaction)
+
+
+class DeleteTaskMessage:
+    def __init__(self, store: TaskConversationStore) -> None:
+        self._store = store
+
+    async def execute(self, task_id: uuid.UUID, message_id: int) -> bool:
+        return await self._store.delete_user_message(task_id, message_id)

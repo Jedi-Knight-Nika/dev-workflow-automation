@@ -6,7 +6,12 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.application.jobs import EnqueueTaskJob
-from app.application.manage_task_conversation import AddTaskMessage, QueryTaskConversation
+from app.application.manage_task_conversation import (
+    AddTaskMessage,
+    DeleteTaskMessage,
+    QueryTaskConversation,
+    ReactToTaskMessage,
+)
 from app.application.ports.job_enqueueing import (
     EnqueueJobCommand,
     EnqueueTaskConflict,
@@ -80,6 +85,7 @@ from app.schemas import (
     TaskCreate,
     TaskMessageCreate,
     TaskMessagePageRead,
+    TaskMessageReaction,
     TaskMessageRead,
     TaskRead,
     ValidationRead,
@@ -332,12 +338,42 @@ async def add_task_message(
     store: TaskConversationStore = Depends(get_task_conversation_store),
 ) -> TaskMessageRead:
     try:
-        message = await AddTaskMessage(store).execute(task_id, body.body)
+        message = await AddTaskMessage(store).execute(task_id, body.body, body.reply_to_id)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return TaskMessageRead.model_validate(message)
+
+
+@router.post("/{task_id}/messages/{message_id}/reactions", response_model=TaskMessageRead)
+async def react_to_task_message(
+    task_id: uuid.UUID,
+    message_id: int,
+    body: TaskMessageReaction,
+    store: TaskConversationStore = Depends(get_task_conversation_store),
+) -> TaskMessageRead:
+    try:
+        message = await ReactToTaskMessage(store).execute(task_id, message_id, body.reaction)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return TaskMessageRead.model_validate(message)
+
+
+@router.delete("/{task_id}/messages/{message_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_task_message(
+    task_id: uuid.UUID,
+    message_id: int,
+    store: TaskConversationStore = Depends(get_task_conversation_store),
+) -> None:
+    try:
+        deleted = await DeleteTaskMessage(store).execute(task_id, message_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Message not found")
 
 
 @router.post("/{task_id}/pause", response_model=TaskRead)

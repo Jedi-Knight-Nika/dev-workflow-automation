@@ -460,6 +460,7 @@ export type TaskMessage = {
   id: number;
   task_id: string;
   job_id: string | null;
+  reply_to_id: number | null;
   agent_id: string | null;
   author_type: 'USER' | 'AGENT' | 'SYSTEM';
   author_name: string;
@@ -468,6 +469,7 @@ export type TaskMessage = {
   body: string;
   context: Record<string, unknown>;
   created_at: string;
+  deleted_at: string | null;
 };
 
 export type TaskMessagePage = {
