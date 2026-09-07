@@ -70,7 +70,7 @@
 <div class="min-h-screen md:grid" style="grid-template-columns: {sidebarWidth}px 1fr">
   <MobileNav />
   <aside
-    class="border-line bg-panel-alt/80 relative hidden backdrop-blur-md bg-[radial-gradient(circle_at_0%_0%,color-mix(in_srgb,var(--color-brand)_14%,transparent),transparent_45%),radial-gradient(circle_at_100%_100%,color-mix(in_srgb,var(--color-brand-2)_10%,transparent),transparent_50%)] md:sticky md:top-0 md:flex md:h-screen md:flex-col md:overflow-y-auto md:border-r"
+    class="border-line bg-panel-alt/70 relative hidden backdrop-blur-md bg-[radial-gradient(circle_at_0%_0%,color-mix(in_srgb,var(--color-brand)_14%,transparent),transparent_45%),radial-gradient(circle_at_100%_100%,color-mix(in_srgb,var(--color-brand-2)_10%,transparent),transparent_50%)] md:sticky md:top-0 md:flex md:h-screen md:flex-col md:overflow-y-auto md:border-r"
   >
     <div class="border-line flex h-[72px] items-center border-b px-5">
       <a
