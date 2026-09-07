@@ -319,7 +319,7 @@
       />
     </details>
     <GenerationProgress progress={generationProgress} connected={eventStreamConnected} />
-    <TaskMetricsPanel {metrics} />
+    <TaskMetricsPanel {metrics} taskId={task.id} taskTitle={task.title} />
     <div class="min-w-0 xl:col-span-2">
       <TaskConversation
         {messages}
