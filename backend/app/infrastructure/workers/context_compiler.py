@@ -111,13 +111,32 @@ class ContextCompiler:
             selected.append(message)
             remaining_chars -= len(message.body)
         selected.reverse()
+        reaction_meanings = {
+            "✅": "approved or confirmed",
+            "💩": "this is bad, broken, or needs correction",
+            "😂": "amusing or lighthearted approval",
+            "👍": "agreement",
+            "👎": "disagreement",
+            "❤️": "appreciation",
+            "👀": "seen or under review",
+        }
         return [
             {
+                "message_id": message.id,
                 "author": message.author_name,
                 "author_type": message.author_type,
                 "role": message.author_role,
                 "body": message.body,
+                "reply_to_message_id": message.reply_to_id,
+                "reactions": [
+                    {
+                        "symbol": str(reaction),
+                        "meaning": reaction_meanings.get(str(reaction), "user reaction"),
+                    }
+                    for reaction in message.context.get("user_reactions", [])
+                ],
                 "created_at": message.created_at.isoformat(),
+                "edited_at": message.edited_at.isoformat() if message.edited_at else None,
             }
             for message in selected
         ]

@@ -137,6 +137,10 @@ class TaskMessageReaction(BaseModel):
     reaction: str = Field(min_length=1, max_length=8)
 
 
+class TaskMessageEdit(BaseModel):
+    body: str = Field(min_length=1, max_length=8_000)
+
+
 class TaskMessageRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
@@ -151,6 +155,7 @@ class TaskMessageRead(BaseModel):
     body: str
     context: dict[str, Any]
     created_at: datetime
+    edited_at: datetime | None
     deleted_at: datetime | None
 
 

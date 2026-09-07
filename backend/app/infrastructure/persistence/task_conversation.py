@@ -26,6 +26,7 @@ def _view(message: TaskMessage) -> TaskMessageView:
         message.body,
         message.context,
         message.created_at,
+        message.edited_at,
         message.deleted_at,
     )
 
@@ -108,6 +109,30 @@ class SqlAlchemyTaskConversationStore:
                 "INTERPRET_MESSAGE",
                 payload={"message_id": message.id, "reply_to_id": reply_to_id},
             )
+        await self._session.commit()
+        return _view(message)
+
+    async def edit_user_message(
+        self, task_id: uuid.UUID, message_id: int, body: str
+    ) -> TaskMessageView:
+        message = await self._session.scalar(
+            select(TaskMessage)
+            .where(TaskMessage.id == message_id, TaskMessage.task_id == task_id)
+            .with_for_update()
+        )
+        if message is None:
+            raise LookupError("Message not found")
+        if message.author_type != "USER" or message.deleted_at is not None:
+            raise ValueError("Only your own active messages can be edited")
+        message.body = body
+        message.edited_at = datetime.now(UTC)
+        await record_event(
+            self._session,
+            task_id,
+            "TASK_MESSAGE_EDITED",
+            {"message_id": message.id},
+            source="user",
+        )
         await self._session.commit()
         return _view(message)
 

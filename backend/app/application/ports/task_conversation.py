@@ -18,6 +18,7 @@ class TaskMessageView:
     body: str
     context: dict[str, Any]
     created_at: datetime
+    edited_at: datetime | None
     deleted_at: datetime | None
 
 
@@ -38,6 +39,10 @@ class TaskConversationStore(Protocol):
 
     async def toggle_reaction(
         self, task_id: uuid.UUID, message_id: int, reaction: str
+    ) -> TaskMessageView: ...
+
+    async def edit_user_message(
+        self, task_id: uuid.UUID, message_id: int, body: str
     ) -> TaskMessageView: ...
 
     async def delete_user_message(self, task_id: uuid.UUID, message_id: int) -> bool: ...

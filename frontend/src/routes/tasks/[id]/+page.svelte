@@ -34,6 +34,7 @@
     listTaskMessages,
     addTaskMessage,
     reactToTaskMessage,
+    editTaskMessage,
     deleteTaskMessage
   } from '$lib/services/tasks';
   import type {
@@ -250,6 +251,11 @@
     const page = await listTaskMessages(task.id);
     messages = page.items;
   }
+  async function editMessage(messageId: number, body: string) {
+    if (!task) return;
+    const updated = await editTaskMessage(task.id, messageId, body);
+    messages = messages.map((item) => (item.id === messageId ? updated : item));
+  }
 </script>
 
 <PageHeader
@@ -287,6 +293,7 @@
       onLoadOlder={loadOlderMessages}
       onSend={sendMessage}
       onReact={reactMessage}
+      onEdit={editMessage}
       onDelete={deleteMessage}
     />
     <TaskWorkspacePanel {task} {preparing} onPrepareWorkspace={prepareWorkspace} />

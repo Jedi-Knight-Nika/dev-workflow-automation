@@ -113,6 +113,17 @@ export function reactToTaskMessage(
   });
 }
 
+export function editTaskMessage(
+  taskId: string,
+  messageId: number,
+  body: string
+): Promise<TaskMessage> {
+  return api<TaskMessage>(`/tasks/${taskId}/messages/${messageId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ body })
+  });
+}
+
 export function deleteTaskMessage(taskId: string, messageId: number): Promise<void> {
   return api<void>(`/tasks/${taskId}/messages/${messageId}`, { method: 'DELETE' });
 }

@@ -11,13 +11,13 @@ from app.application.ports.task_lifecycle import (
     TaskLifecycleContext,
     WorkspaceRefreshUnavailable,
 )
-from app.db.models import Job, JobState, TaskAssignment
+from app.db.models import Job, JobRole, JobState, TaskAssignment
 from app.db.models import Task as TaskRecord
 from app.db.models import TaskState as TaskRecordState
 from app.domain.tasks import LifecycleDirective, Task, TaskState
 from app.infrastructure.external_task_sync import sync_external_task_state
 from app.infrastructure.git.workspaces import GitCommandError, run_git
-from app.infrastructure.persistence.job_operations import record_event
+from app.infrastructure.persistence.job_operations import enqueue_job, record_event
 from app.infrastructure.persistence.repositories import task_to_domain
 from app.infrastructure.workers.executor import workspace_fingerprint
 
@@ -119,6 +119,20 @@ class SqlAlchemyTaskLifecycleUnitOfWork:
             if assignment is not None:
                 assignment.status = "QUEUED"
                 assignment.started_at = None
+            active_job = await session.scalar(
+                select(Job.id).where(
+                    Job.task_id == self._task.id,
+                    Job.state.in_([JobState.QUEUED, JobState.CLAIMED, JobState.RUNNING]),
+                )
+            )
+            if active_job is None and self._task.team_id is not None:
+                await enqueue_job(
+                    session,
+                    self._task,
+                    JobRole.INTAKE,
+                    "INTERPRET_TASK",
+                    payload={"reason": "manual_status_change"},
+                )
         payload: dict[str, Any]
         if directive.archive:
             event_type, payload = "TASK_ARCHIVED", {}

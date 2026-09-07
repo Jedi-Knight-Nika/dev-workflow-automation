@@ -9,6 +9,7 @@ from app.application.jobs import EnqueueTaskJob
 from app.application.manage_task_conversation import (
     AddTaskMessage,
     DeleteTaskMessage,
+    EditTaskMessage,
     QueryTaskConversation,
     ReactToTaskMessage,
 )
@@ -84,6 +85,7 @@ from app.schemas import (
     ReviewFindingRead,
     TaskCreate,
     TaskMessageCreate,
+    TaskMessageEdit,
     TaskMessagePageRead,
     TaskMessageReaction,
     TaskMessageRead,
@@ -339,6 +341,22 @@ async def add_task_message(
 ) -> TaskMessageRead:
     try:
         message = await AddTaskMessage(store).execute(task_id, body.body, body.reply_to_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return TaskMessageRead.model_validate(message)
+
+
+@router.patch("/{task_id}/messages/{message_id}", response_model=TaskMessageRead)
+async def edit_task_message(
+    task_id: uuid.UUID,
+    message_id: int,
+    body: TaskMessageEdit,
+    store: TaskConversationStore = Depends(get_task_conversation_store),
+) -> TaskMessageRead:
+    try:
+        message = await EditTaskMessage(store).execute(task_id, message_id, body.body)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:

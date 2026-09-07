@@ -12,6 +12,7 @@
   import {
     addTaskMessage,
     deleteTaskMessage,
+    editTaskMessage,
     createTask,
     listTaskMessages,
     listTasks,
@@ -149,6 +150,11 @@
     if (!selected) return;
     await deleteTaskMessage(selected.id, messageId);
     await loadConversation(selected.id);
+  }
+  async function editMessage(messageId: number, body: string) {
+    if (!selected) return;
+    const updated = await editTaskMessage(selected.id, messageId, body);
+    messages = messages.map((item) => (item.id === messageId ? updated : item));
   }
   function resetFilters() {
     filters = { sort: 'priority', direction: 'asc' };
@@ -605,6 +611,7 @@
           onLoadOlder={loadOlderMessages}
           onSend={sendMessage}
           onReact={reactMessage}
+          onEdit={editMessage}
           onDelete={deleteMessage}
         />
       {/if}

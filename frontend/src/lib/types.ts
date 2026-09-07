@@ -469,6 +469,7 @@ export type TaskMessage = {
   body: string;
   context: Record<string, unknown>;
   created_at: string;
+  edited_at: string | null;
   deleted_at: string | null;
 };
 

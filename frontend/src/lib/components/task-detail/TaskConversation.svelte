@@ -14,6 +14,7 @@
     onLoadOlder,
     onSend,
     onReact,
+    onEdit,
     onDelete
   }: {
     messages: TaskMessage[];
@@ -25,12 +26,14 @@
     onLoadOlder: () => Promise<void>;
     onSend: (body: string, replyToId?: number) => Promise<void>;
     onReact: (messageId: number, reaction: string) => Promise<void>;
+    onEdit: (messageId: number, body: string) => Promise<void>;
     onDelete: (messageId: number) => Promise<void>;
   } = $props();
 
   let draft = $state('');
   let showRoutine = $state(false);
   let replyingTo = $state<TaskMessage | null>(null);
+  let editingMessage = $state<TaskMessage | null>(null);
   let menu = $state<{ message: TaskMessage; x: number; y: number } | null>(null);
   let feed: HTMLDivElement;
   let previousLastId = $state<number | null>(null);
@@ -51,6 +54,16 @@
     );
   }
 
+  const reactionMeanings: Record<string, string> = {
+    '✅': 'Approved or confirmed',
+    '💩': 'This is bad, broken, or needs correction',
+    '😂': 'Amusing or lighthearted approval',
+    '👍': 'Agree',
+    '👎': 'Disagree',
+    '❤️': 'Appreciate',
+    '👀': 'Seen or reviewing'
+  };
+
   let hiddenRoutineCount = $derived(messages.filter(isRoutine).length);
   let visibleMessages = $derived(
     showRoutine ? messages : messages.filter((item) => !isRoutine(item))
@@ -69,9 +82,11 @@
   async function submit() {
     const body = draft.trim();
     if (!body || sending) return;
-    await onSend(body, replyingTo?.id);
+    if (editingMessage) await onEdit(editingMessage.id, body);
+    else await onSend(body, replyingTo?.id);
     draft = '';
     replyingTo = null;
+    editingMessage = null;
   }
 
   function keydown(event: KeyboardEvent) {
@@ -156,6 +171,7 @@
                 {#if message.author_role}<span>{message.author_role}</span>{/if}
                 {#if message.kind === 'STATUS_UPDATE'}<span class="text-accent">UPDATE</span>{/if}
                 <time>{new Date(message.created_at).toLocaleString()}</time>
+                {#if message.edited_at}<span>edited</span>{/if}
               </div>
               <div
                 class="whitespace-pre-wrap rounded-2xl border px-4 py-3 text-sm leading-relaxed shadow-sm {needsResponse(
@@ -180,7 +196,9 @@
                   {#each message.context.user_reactions as reaction (String(reaction))}
                     <button
                       type="button"
-                      class="border-line bg-panel rounded-full border px-2 py-0.5 text-xs"
+                      class="border-brand/50 bg-brand/10 hover:bg-brand/20 rounded-full border px-2 py-0.5 text-xs shadow-sm transition duration-150 hover:scale-125 active:scale-95"
+                      title={reactionMeanings[String(reaction)] ?? 'Reaction'}
+                      aria-label={`Remove ${reactionMeanings[String(reaction)] ?? 'reaction'}`}
                       onclick={() => void onReact(message.id, String(reaction))}
                       >{String(reaction)}</button
                     >
@@ -216,7 +234,22 @@
       void submit();
     }}
   >
-    {#if replyingTo}
+    {#if editingMessage}
+      <div
+        class="border-line bg-input mb-2 flex items-center gap-2 rounded-lg border px-3 py-2 text-xs"
+      >
+        <span class="text-muted">Editing your message</span>
+        <button
+          type="button"
+          class="ml-auto"
+          aria-label="Cancel edit"
+          onclick={() => {
+            editingMessage = null;
+            draft = '';
+          }}>×</button
+        >
+      </div>
+    {:else if replyingTo}
       <div
         class="border-line bg-input mb-2 flex items-center gap-2 rounded-lg border px-3 py-2 text-xs"
       >
@@ -243,7 +276,13 @@
           : 'Not synced to Trello or Linear'}</span
       >
       <Button variant="primary" size="sm" type="submit" disabled={sending || !draft.trim()}
-        >{sending ? 'Sending…' : resumeOnSend ? 'Send & resume' : 'Send message'}</Button
+        >{sending
+          ? 'Saving…'
+          : editingMessage
+            ? 'Save edit'
+            : resumeOnSend
+              ? 'Send & resume'
+              : 'Send message'}</Button
       >
     </div>
   </form>
@@ -267,9 +306,11 @@
       }}>Reply</button
     >
     <div class="border-line my-1 flex justify-around border-y py-1.5">
-      {#each ['👍', '👎', '❤️', '👀'] as reaction (reaction)}
+      {#each ['✅', '💩', '😂', '👍', '👎', '❤️', '👀'] as reaction (reaction)}
         <button
-          class="hover:bg-input rounded-md p-1.5"
+          class="hover:bg-brand/15 rounded-md p-1.5 text-base transition duration-150 hover:scale-150 active:scale-90"
+          title={reactionMeanings[reaction]}
+          aria-label={reactionMeanings[reaction]}
           onclick={() => {
             void onReact(menu!.message.id, reaction);
             menu = null;
@@ -278,6 +319,16 @@
       {/each}
     </div>
     {#if menu.message.author_type === 'USER' && !menu.message.deleted_at}
+      <button
+        class="hover:bg-input w-full rounded-lg px-3 py-2 text-left"
+        onclick={() => {
+          editingMessage = menu!.message;
+          replyingTo = null;
+          draft = menu!.message.body;
+          menu = null;
+          void tick();
+        }}>Edit</button
+      >
       <button
         class="hover:bg-danger/10 text-danger w-full rounded-lg px-3 py-2 text-left"
         onclick={() => {
