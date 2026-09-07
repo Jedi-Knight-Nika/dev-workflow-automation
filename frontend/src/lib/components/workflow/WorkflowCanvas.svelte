@@ -109,7 +109,7 @@
 
   function edgeClass(sourceRole?: string) {
     const agent = agents.find((item) => item.role === sourceRole);
-    if (agent?.status === 'RUNNING') return 'route-running';
+    if (agent && (agent.status === 'RUNNING' || agent.active_jobs > 0)) return 'route-running';
     if (agent?.queued_jobs) return 'route-queued';
     if (agent?.status === 'CONFIGURATION_ERROR') return 'route-blocked';
     if (agent?.status === 'READY') return 'route-ready';
@@ -182,7 +182,9 @@
   );
   let saving = $state(false);
   let dirty = $state(false);
-  let runningAgent = $derived(agents.find((agent) => agent.status === 'RUNNING'));
+  let runningAgent = $derived(
+    agents.find((agent) => agent.status === 'RUNNING' || agent.active_jobs > 0)
+  );
   let canvasViewport: HTMLDivElement;
 
   onMount(() => {
@@ -234,9 +236,9 @@
   const titleCase = (value: string) => value[0].toUpperCase() + value.slice(1);
   const percent = (value: number, min: number, max: number) => ((value - min) / (max - min)) * 100;
 
-  function nodeStatus(node: CanvasNode, liveStatus?: string) {
+  function nodeStatus(node: CanvasNode, liveStatus?: string, activeJobs = 0) {
     if (!node.data.enabled) return 'DISABLED';
-    if (liveStatus === 'RUNNING') return 'RUNNING';
+    if (liveStatus === 'RUNNING' || activeJobs > 0) return 'RUNNING';
     if (node.data.role === 'ORCHESTRATOR') return 'SYSTEM_READY';
     if (!node.data.provider || !node.data.model) return 'NEEDS_CONFIGURATION';
     if (node.data.modelValidationStatus === 'AVAILABLE') return 'READY';
@@ -261,7 +263,7 @@
     const statuses = new Map(agents.map((agent) => [agent.role, agent]));
     nodes = untrack(() => nodes).map((node) => {
       const liveAgent = statuses.get(node.data.role);
-      const status = nodeStatus(node, liveAgent?.status);
+      const status = nodeStatus(node, liveAgent?.status, liveAgent?.active_jobs ?? 0);
       const integrationNames = node.data.integrationIds.flatMap((id) => {
         const integration = integrations.find((item) => item.id === id);
         return integration ? [integration.provider_name] : [];
@@ -1574,17 +1576,34 @@
   }
   :global(.workflow-node.running) {
     border-color: var(--color-accent) !important;
-    animation: agent-running 1.4s ease-in-out infinite;
+    box-shadow:
+      0 0 0 3px color-mix(in srgb, var(--color-accent) 24%, transparent),
+      0 0 24px color-mix(in srgb, var(--color-accent) 36%, transparent),
+      0 16px 34px rgb(0 0 0 / 32%);
+    animation: agent-running 1.6s ease-in-out infinite;
   }
   :global(.workflow-node.disabled) {
     border-style: dashed !important;
     opacity: 0.72;
   }
   @keyframes agent-running {
+    0%,
+    100% {
+      box-shadow:
+        0 0 0 3px color-mix(in srgb, var(--color-accent) 20%, transparent),
+        0 0 18px color-mix(in srgb, var(--color-accent) 28%, transparent),
+        0 16px 34px rgb(0 0 0 / 32%);
+    }
     50% {
       box-shadow:
-        0 0 0 7px color-mix(in srgb, var(--color-accent) 12%, transparent),
+        0 0 0 8px color-mix(in srgb, var(--color-accent) 13%, transparent),
+        0 0 34px color-mix(in srgb, var(--color-accent) 48%, transparent),
         0 16px 34px rgb(0 0 0 / 32%);
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    :global(.workflow-node.running) {
+      animation: none;
     }
   }
   :global(.svelte-flow__edge-path) {
