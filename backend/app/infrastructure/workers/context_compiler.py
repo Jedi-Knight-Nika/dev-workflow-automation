@@ -16,6 +16,7 @@ from app.db.models import (
     Task,
     TaskMessage,
     TaskRepositoryScope,
+    TaskState,
     Team,
 )
 from app.domain.memory import render_memory
@@ -28,6 +29,24 @@ from app.infrastructure.workers.executor import repository_context
 DEFAULT_CONTEXT_CHARS = 160_000
 MIN_CONTEXT_CHARS = 20_000
 MAX_CONTEXT_CHARS = 500_000
+
+
+def _context_size(context: dict[str, Any]) -> int:
+    return len(json.dumps(context, ensure_ascii=False))
+
+
+def _repository_relevance_hint(context: dict[str, Any]) -> str:
+    task = context.get("task")
+    plan = context.get("technical_plan")
+    values: list[object] = []
+    if isinstance(task, dict):
+        values.extend([task.get("title"), task.get("description")])
+    if isinstance(plan, dict):
+        values.append(plan.get("summary"))
+        data = plan.get("data")
+        if isinstance(data, dict):
+            values.extend([data.get("goal"), data.get("targets")])
+    return json.dumps(values, ensure_ascii=False)
 
 
 def fit_context(context: dict[str, Any], limit: int) -> dict[str, Any]:
@@ -51,17 +70,32 @@ def fit_context(context: dict[str, Any], limit: int) -> dict[str, Any]:
                     item[key] = value[:per_repository] + "\n[TRUNCATED]"
     for key in ("retrieved_knowledge", "open_findings"):
         values = context.get(key)
-        while isinstance(values, list) and values and len(json.dumps(context)) > limit:
+        while isinstance(values, list) and values and _context_size(context) > limit:
             values.pop()
+    if isinstance(repositories, list):
+        for item in repositories:
+            if not isinstance(item, dict):
+                continue
+            knowledge = item.get("retrieved_knowledge")
+            while isinstance(knowledge, list) and knowledge and _context_size(context) > limit:
+                knowledge.pop()
+    conversation = context.get("internal_task_conversation")
+    while (
+        isinstance(conversation, list) and len(conversation) > 1 and _context_size(context) > limit
+    ):
+        conversation.pop(0)
     task = context.get("task")
-    if isinstance(task, dict) and len(json.dumps(context)) > limit:
+    if isinstance(task, dict) and _context_size(context) > limit:
         description = task.get("description")
         if isinstance(description, str) and len(description) > 4_000:
             task["description"] = description[:4_000] + "\n[TRUNCATED]"
     job = context.get("job")
-    if isinstance(job, dict) and len(json.dumps(context)) > limit:
+    if isinstance(job, dict) and _context_size(context) > limit:
         job["payload"] = {"trimmed": True}
-    if len(json.dumps(context)) > limit:
+    previous = context.get("previous_role_checkpoint")
+    if isinstance(previous, dict) and _context_size(context) > limit:
+        previous["structured_data"] = {"trimmed": True}
+    if _context_size(context) > limit:
         raise ValueError("Essential worker context exceeds configured limit")
     return context
 
@@ -120,6 +154,8 @@ class ContextCompiler:
             "❤️": "appreciation",
             "👀": "seen or under review",
         }
+        blocking_results = {"BLOCKED", "NEEDS_HUMAN", "NEEDS_CONTEXT"}
+        currently_blocked = task.state in {TaskState.NEEDS_HUMAN, TaskState.CONTEXT_PENDING}
         return [
             {
                 "message_id": message.id,
@@ -137,6 +173,13 @@ class ContextCompiler:
                 ],
                 "created_at": message.created_at.isoformat(),
                 "edited_at": message.edited_at.isoformat() if message.edited_at else None,
+                "current_relevance": (
+                    "active_blocker"
+                    if str(message.context.get("result")) in blocking_results and currently_blocked
+                    else "resolved_historical_blocker"
+                    if str(message.context.get("result")) in blocking_results
+                    else "context"
+                ),
             }
             for message in selected
         ]
@@ -145,6 +188,11 @@ class ContextCompiler:
         messages = await self._conversation(task)
         if messages:
             context["internal_task_conversation"] = messages
+            context["conversation_guidance"] = (
+                "Messages marked resolved_historical_blocker are audit history, not current "
+                "blockers. Re-evaluate them against current runtime capabilities and task state; "
+                "do not propagate an old tool-availability complaint as a new blocker."
+            )
         return context
 
     async def _persistent_memory(self, task: Task, role: JobRole) -> dict[str, Any]:
@@ -399,10 +447,14 @@ class ContextCompiler:
                 }
                 repository_data["context_mode"] = "delta"
             except RuntimeError:
-                repository_data["files"] = await repository_context(workspace)
+                repository_data["files"] = await repository_context(
+                    workspace, _repository_relevance_hint(context)
+                )
                 repository_data["context_mode"] = "full_fallback"
         else:
-            repository_data["files"] = await repository_context(workspace)
+            repository_data["files"] = await repository_context(
+                workspace, _repository_relevance_hint(context)
+            )
             repository_data["context_mode"] = "full"
         context["repository"] = repository_data
         return await self._finish(task, job, context, started)
@@ -430,7 +482,11 @@ class ContextCompiler:
                 "branch": item.scope.branch_name,
                 "base_revision": item.scope.base_revision,
                 "current_revision": item.scope.current_revision,
-                "files": await repository_context(item.path),
+                "files": await repository_context(
+                    item.path,
+                    _repository_relevance_hint(context)
+                    + f" {item.repository.owner}/{item.repository.name}",
+                ),
                 "retrieved_knowledge": await self._knowledge(
                     task, item.repository, JobRole.EXECUTOR
                 ),

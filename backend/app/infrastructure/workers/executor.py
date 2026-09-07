@@ -2,6 +2,7 @@ import asyncio
 import hashlib
 import json
 import os
+import re
 import signal
 from contextlib import suppress
 from pathlib import Path, PurePosixPath
@@ -130,10 +131,49 @@ def _safe_path(workspace: Path, relative: str) -> Path:
     return resolved
 
 
-async def repository_context(workspace: Path) -> str:
+def _relevance_terms(hint: str) -> set[str]:
+    ignored = {
+        "and",
+        "application",
+        "background",
+        "for",
+        "from",
+        "global",
+        "into",
+        "make",
+        "shared",
+        "subtly",
+        "that",
+        "targets",
+        "the",
+        "this",
+        "with",
+        "without",
+        "visible",
+        "responsive",
+    }
+    return {
+        term for term in re.findall(r"[a-zA-Z0-9_+-]{3,}", hint.casefold()) if term not in ignored
+    }
+
+
+def _relevance_score(relative: str, content: str, terms: set[str]) -> int:
+    path = relative.casefold()
+    sample = content[:20_000].casefold()
+    structural_bonus = (
+        300 if "sidebar" in terms and any(marker in path for marker in ("layout", "nav")) else 0
+    )
+    return (
+        structural_bonus
+        + sum(100 for term in terms if term in path)
+        + sum(min(sample.count(term), 3) * 10 for term in terms)
+    )
+
+
+async def repository_context(workspace: Path, relevance_hint: str = "") -> str:
     tracked = (await run_git("ls-files", cwd=workspace)).splitlines()
-    sections: list[str] = []
-    used = 0
+    terms = _relevance_terms(relevance_hint)
+    candidates: list[tuple[int, str, str]] = []
     for relative in tracked:
         path = _safe_path(workspace, relative)
         if not path.is_file() or path.is_symlink() or path.stat().st_size > MAX_FILE_BYTES:
@@ -142,6 +182,15 @@ async def repository_context(workspace: Path) -> str:
             content = path.read_text(encoding="utf-8")
         except UnicodeDecodeError:
             continue
+        candidates.append((_relevance_score(relative, content, terms), relative, content))
+    candidates.sort(key=lambda item: (-item[0], item[1]))
+    manifest_body = "\n".join(tracked)
+    if len(manifest_body.encode()) > 30_000:
+        manifest_body = manifest_body.encode()[:30_000].decode(errors="ignore") + "\n[TRUNCATED]"
+    manifest = "\n--- TRACKED FILE MANIFEST ---\n" + manifest_body
+    sections: list[str] = [manifest]
+    used = len(manifest.encode())
+    for _, relative, content in candidates:
         section = f"\n--- FILE: {relative} ---\n{content}"
         size = len(section.encode())
         if used + size > MAX_CONTEXT_BYTES:
