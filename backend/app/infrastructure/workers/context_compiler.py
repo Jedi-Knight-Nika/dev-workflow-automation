@@ -126,7 +126,9 @@ class ContextCompiler:
             "job": {"id": str(job.id), "action": job.action, "payload": job.payload},
         }
 
-    async def _conversation(self, task: Task) -> list[dict[str, Any]]:
+    async def _conversation(
+        self, task: Task, *, omit_resolved_agent_blockers: bool = False
+    ) -> list[dict[str, Any]]:
         messages = list(
             (
                 await self.session.scalars(
@@ -139,9 +141,16 @@ class ContextCompiler:
         )
         selected: list[TaskMessage] = []
         remaining_chars = 16_000
+        blocking_results = {"BLOCKED", "NEEDS_HUMAN", "NEEDS_CONTEXT"}
         for message in messages:
             if remaining_chars <= 0:
                 break
+            if (
+                omit_resolved_agent_blockers
+                and message.author_type == "AGENT"
+                and str(message.context.get("result")) in blocking_results
+            ):
+                continue
             selected.append(message)
             remaining_chars -= len(message.body)
         selected.reverse()
@@ -154,7 +163,6 @@ class ContextCompiler:
             "❤️": "appreciation",
             "👀": "seen or under review",
         }
-        blocking_results = {"BLOCKED", "NEEDS_HUMAN", "NEEDS_CONTEXT"}
         currently_blocked = task.state in {TaskState.NEEDS_HUMAN, TaskState.CONTEXT_PENDING}
         return [
             {
@@ -184,8 +192,16 @@ class ContextCompiler:
             for message in selected
         ]
 
-    async def _include_conversation(self, task: Task, context: dict[str, Any]) -> dict[str, Any]:
-        messages = await self._conversation(task)
+    async def _include_conversation(
+        self,
+        task: Task,
+        context: dict[str, Any],
+        *,
+        omit_resolved_agent_blockers: bool = False,
+    ) -> dict[str, Any]:
+        messages = await self._conversation(
+            task, omit_resolved_agent_blockers=omit_resolved_agent_blockers
+        )
         if messages:
             context["internal_task_conversation"] = messages
             context["conversation_guidance"] = (
@@ -314,7 +330,10 @@ class ContextCompiler:
     async def compile_for_intake(self, task: Task, job: Job) -> dict[str, Any]:
         started = time.monotonic()
         context = self._base(task, job)
-        await self._include_conversation(task, context)
+        manually_reopened = job.payload.get("reason") == "manual_status_change"
+        await self._include_conversation(
+            task, context, omit_resolved_agent_blockers=manually_reopened
+        )
         repositories = await self._team_repositories(task)
         context["repository_candidates"] = [
             {
@@ -334,7 +353,9 @@ class ContextCompiler:
             }
             for repository in repositories
         ]
-        context["task_memory"] = await self._persistent_memory(task, JobRole.INTAKE)
+        context["task_memory"] = (
+            {} if manually_reopened else await self._persistent_memory(task, JobRole.INTAKE)
+        )
         context["retrieved_knowledge"] = await self._intake_knowledge(task, repositories)
         return await self._finish(task, job, context, started)
 
