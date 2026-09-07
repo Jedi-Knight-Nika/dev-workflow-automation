@@ -23,6 +23,7 @@ class FakeLifecycleUnitOfWork:
         self.refreshed = False
         self.committed = False
         self.synchronized = False
+        self.reopened_enqueued = False
 
     async def __aenter__(self) -> Self:
         return self
@@ -73,6 +74,9 @@ class FakeLifecycleUnitOfWork:
     async def commit(self) -> None:
         self.committed = True
 
+    async def enqueue_reopened_task(self, _context: TaskLifecycleContext) -> None:
+        self.reopened_enqueued = True
+
     async def synchronize_tracker(self, _task_id: uuid.UUID) -> None:
         self.synchronized = True
 
@@ -117,6 +121,20 @@ async def test_attention_task_can_be_reopened_to_backlog() -> None:
     assert result.state == TaskState.NEW
     assert unit.directive == LifecycleDirective(TaskState.NEW, False, True)
     assert unit.committed and unit.synchronized
+    assert unit.reopened_enqueued
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("state", [TaskState.WAITING_GITHUB, TaskState.READY_TO_MERGE])
+async def test_pull_request_task_can_be_moved_back_to_todo(state: TaskState) -> None:
+    unit = FakeLifecycleUnitOfWork(context(state=state, pull_request=True))
+
+    result = await ChangeTaskLifecycle(lambda: unit).execute(  # type: ignore[arg-type,union-attr]
+        unit.context.task_id, LifecycleAction.REOPEN
+    )
+
+    assert result.state == TaskState.NEW
+    assert unit.directive == LifecycleDirective(TaskState.NEW, False, True)
 
 
 @pytest.mark.asyncio

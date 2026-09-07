@@ -25,7 +25,10 @@ STATE_CONFIGURATION: dict[TaskState, tuple[str, str]] = {
     TaskState.CONTEXT_PENDING: ("blocked", "Blocked"),
     TaskState.NEEDS_HUMAN: ("blocked", "Blocked"),
     TaskState.FAILED: ("blocked", "Blocked"),
-    TaskState.MERGED: ("ready_for_testing", "Ready for Testing"),
+    # A merged pull request is terminal for the engineering workflow. External
+    # trackers must therefore receive their completed state, not another active
+    # testing lane that leaves successfully delivered cards looking unfinished.
+    TaskState.MERGED: ("done", "Done"),
     TaskState.CANCELLED: ("done", "Done"),
 }
 

@@ -27,6 +27,7 @@ from app.infrastructure.persistence.job_operations import (
     release_workspace_lease,
 )
 from app.infrastructure.persistence.workflow_routing import route_completed_job
+from app.infrastructure.pull_requests.comment_actions import GitHubCommentActionExecutor
 
 
 class SqlAlchemyIntakeCompletionUnitOfWork:
@@ -100,6 +101,9 @@ class SqlAlchemyIntakeCompletionUnitOfWork:
         if task is None:
             raise RuntimeError("Task disappeared during Intake completion")
         await self._apply_repository_scope(task, context.data)
+        delivery_actions = context.data.get("external_delivery_actions")
+        if isinstance(delivery_actions, list) and delivery_actions:
+            directive = CompletionDirective.INTAKE_INFORMATIONAL
         route = await route_completed_job(
             session, task, context.job_id, context.outcome, {"intake": context.data}
         )
@@ -276,6 +280,9 @@ class SqlAlchemyIntakeCompletionUnitOfWork:
 
     async def commit(self) -> None:
         await self._active().commit()
+
+    async def execute_external_delivery_actions(self, context: IntakeCompletionContext) -> None:
+        await GitHubCommentActionExecutor(self._active()).execute(context)
 
     async def synchronize_tracker(self, task_id: uuid.UUID) -> None:
         task = await self._active().get(Task, task_id)

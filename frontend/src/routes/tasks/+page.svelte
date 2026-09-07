@@ -61,7 +61,9 @@
     'FAILED',
     'PAUSED',
     'CANCELLED',
-    'CONTEXT_PENDING'
+    'CONTEXT_PENDING',
+    'WAITING_GITHUB',
+    'READY_TO_MERGE'
   ]);
 
   async function refresh() {
@@ -723,13 +725,13 @@
       </details>
     </div>
     <footer>
-      {#if ['NEEDS_HUMAN', 'FAILED', 'PAUSED', 'CANCELLED'].includes(selected.state)}
+      {#if ['NEEDS_HUMAN', 'FAILED', 'PAUSED', 'CANCELLED', 'CONTEXT_PENDING', 'WAITING_GITHUB', 'READY_TO_MERGE'].includes(selected.state)}
         <button
           class="secondary"
           disabled={movingTaskId === selected.id}
           onclick={() => void moveToBacklog(selected!.id)}
         >
-          {movingTaskId === selected.id ? 'Moving…' : 'Move to backlog'}
+          {movingTaskId === selected.id ? 'Moving…' : 'Move to To do'}
         </button>
       {/if}
       <a class="primary" href={resolve('/tasks/[id]', { id: selected.id })}>Open full task</a>

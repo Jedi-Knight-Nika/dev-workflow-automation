@@ -102,6 +102,45 @@ class GitHubClient:
             merge_commit_sha=data.get("merge_commit_sha"),
         )
 
+    async def latest_pull_request_feedback(
+        self, owner: str, repository: str, number: int
+    ) -> dict[str, str] | None:
+        endpoints = (
+            f"/repos/{owner}/{repository}/issues/{number}/comments",
+            f"/repos/{owner}/{repository}/pulls/{number}/reviews",
+            f"/repos/{owner}/{repository}/pulls/{number}/comments",
+        )
+        feedback: list[dict[str, str]] = []
+        for endpoint in endpoints:
+            response = await integration_http_pool.request(
+                "GET",
+                f"https://api.github.com{endpoint}",
+                headers=self.headers,
+                params={"per_page": 100},
+            )
+            response.raise_for_status()
+            payload: Any = response.json()
+            if not isinstance(payload, list):
+                continue
+            for item in payload:
+                if not isinstance(item, dict):
+                    continue
+                user = item.get("user") or {}
+                author = str(user.get("login") or "") if isinstance(user, dict) else ""
+                user_type = str(user.get("type") or "") if isinstance(user, dict) else ""
+                body = str(item.get("body") or "").strip()
+                if not body or user_type.casefold() == "bot" or author.endswith("[bot]"):
+                    continue
+                feedback.append(
+                    {
+                        "author": author,
+                        "raw_text": body,
+                        "url": str(item.get("html_url") or ""),
+                        "created_at": str(item.get("submitted_at") or item.get("created_at") or ""),
+                    }
+                )
+        return max(feedback, key=lambda item: item["created_at"]) if feedback else None
+
     async def get_pull_request(self, owner: str, repository: str, number: int) -> PullRequestRead:
         response = await integration_http_pool.request(
             "GET",
@@ -118,6 +157,37 @@ class GitHubClient:
             merged=bool(data.get("merged", False)),
             merge_commit_sha=data.get("merge_commit_sha"),
         )
+
+    async def update_pull_request(
+        self,
+        owner: str,
+        repository: str,
+        number: int,
+        *,
+        title: str | None = None,
+        body: str | None = None,
+    ) -> None:
+        changes = {key: value for key, value in {"title": title, "body": body}.items() if value}
+        if not changes:
+            return
+        response = await integration_http_pool.request(
+            "PATCH",
+            f"https://api.github.com/repos/{owner}/{repository}/pulls/{number}",
+            retry=False,
+            headers=self.headers,
+            json=changes,
+        )
+        response.raise_for_status()
+
+    async def collaborator_permission(self, owner: str, repository: str, username: str) -> str:
+        response = await integration_http_pool.request(
+            "GET",
+            f"https://api.github.com/repos/{owner}/{repository}/collaborators/{username}/permission",
+            headers=self.headers,
+        )
+        response.raise_for_status()
+        data: dict[str, Any] = response.json()
+        return str(data.get("permission") or "none").casefold()
 
     async def merge_pull_request(
         self, owner: str, repository: str, number: int, expected_sha: str

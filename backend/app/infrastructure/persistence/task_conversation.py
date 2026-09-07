@@ -102,11 +102,18 @@ class SqlAlchemyTaskConversationStore:
             }:
                 task.state = TaskState.NEW
                 task.manual_takeover = False
+            role, action = (
+                (JobRole.REVIEWER, "REVIEW_USER_MESSAGE")
+                if task.state in {TaskState.WAITING_GITHUB, TaskState.READY_TO_MERGE}
+                else (JobRole.TESTER, "VALIDATE_USER_MESSAGE")
+                if task.state == TaskState.LOCAL_VALIDATION
+                else (JobRole.INTAKE, "INTERPRET_MESSAGE")
+            )
             await enqueue_job(
                 self._session,
                 task,
-                JobRole.INTAKE,
-                "INTERPRET_MESSAGE",
+                role,
+                action,
                 payload={"message_id": message.id, "reply_to_id": reply_to_id},
             )
         await self._session.commit()

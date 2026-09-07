@@ -1,7 +1,7 @@
 import type { Task } from '$lib/types';
 
 export const TASK_COLUMNS = [
-  { id: 'backlog', label: 'Backlog', states: ['NEW', 'CONTEXT_PENDING', 'PLANNING', 'PLAN_READY'] },
+  { id: 'backlog', label: 'To do', states: ['NEW', 'CONTEXT_PENDING', 'PLANNING', 'PLAN_READY'] },
   {
     id: 'progress',
     label: 'In progress',

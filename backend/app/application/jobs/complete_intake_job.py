@@ -25,5 +25,7 @@ class CompleteIntakeJob:
                 )
                 await unit_of_work.apply(context, directive)
             await unit_of_work.commit()
+            if not context.manual_takeover:
+                await unit_of_work.execute_external_delivery_actions(context)
             await unit_of_work.synchronize_tracker(context.task_id)
             return True

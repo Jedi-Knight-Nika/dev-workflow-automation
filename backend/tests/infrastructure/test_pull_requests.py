@@ -132,6 +132,104 @@ async def test_merge_pull_request_sends_expected_sha(monkeypatch: pytest.MonkeyP
 
 
 @pytest.mark.asyncio
+async def test_update_pull_request_sends_only_requested_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "PATCH"
+        assert request.url.path == "/repos/acme/service/pulls/17"
+        assert request.content == b'{"title":"feat: improve shell translucency"}'
+        return httpx.Response(200, json={})
+
+    transport = httpx.MockTransport(handler)
+    original = httpx.AsyncClient
+
+    def client_factory(*args: Any, **kwargs: Any) -> httpx.AsyncClient:
+        kwargs["transport"] = transport
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(httpx, "AsyncClient", client_factory)
+    await GitHubClient("secret").update_pull_request(
+        "acme", "service", 17, title="feat: improve shell translucency"
+    )
+
+
+@pytest.mark.asyncio
+async def test_collaborator_permission_is_normalized(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/repos/acme/service/collaborators/nika/permission"
+        return httpx.Response(200, json={"permission": "MAINTAIN"})
+
+    transport = httpx.MockTransport(handler)
+    original = httpx.AsyncClient
+
+    def client_factory(*args: Any, **kwargs: Any) -> httpx.AsyncClient:
+        kwargs["transport"] = transport
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(httpx, "AsyncClient", client_factory)
+    permission = await GitHubClient("secret").collaborator_permission("acme", "service", "nika")
+
+    assert permission == "maintain"
+
+
+@pytest.mark.asyncio
+async def test_latest_pull_request_feedback_uses_newest_human_comment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/reviews"):
+            return httpx.Response(
+                200,
+                json=[
+                    {
+                        "body": "Rename with a conventional title, then ready to merge",
+                        "submitted_at": "2026-09-07T04:40:00Z",
+                        "html_url": "https://github.com/acme/service/pull/17#review",
+                        "user": {"login": "nika", "type": "User"},
+                    }
+                ],
+            )
+        if request.url.path.endswith("/comments") and "/issues/" in request.url.path:
+            return httpx.Response(
+                200,
+                json=[
+                    {
+                        "body": "Older comment",
+                        "created_at": "2026-09-07T04:30:00Z",
+                        "html_url": "https://github.com/acme/service/pull/17#issuecomment",
+                        "user": {"login": "nika", "type": "User"},
+                    }
+                ],
+            )
+        return httpx.Response(
+            200,
+            json=[
+                {
+                    "body": "Bot output",
+                    "created_at": "2026-09-07T04:50:00Z",
+                    "html_url": "https://github.com/acme/service/pull/17#discussion",
+                    "user": {"login": "ci[bot]", "type": "Bot"},
+                }
+            ],
+        )
+
+    transport = httpx.MockTransport(handler)
+    original = httpx.AsyncClient
+
+    def client_factory(*args: Any, **kwargs: Any) -> httpx.AsyncClient:
+        kwargs["transport"] = transport
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(httpx, "AsyncClient", client_factory)
+    feedback = await GitHubClient("secret").latest_pull_request_feedback("acme", "service", 17)
+
+    assert feedback is not None
+    assert feedback["author"] == "nika"
+    assert feedback["raw_text"].startswith("Rename with a conventional title")
+
+
+@pytest.mark.asyncio
 async def test_get_pull_request_maps_merge_reconciliation_fields(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -19,6 +19,7 @@ class FakeIntakeUnitOfWork:
         self.directive: CompletionDirective | None = None
         self.takeover = False
         self.committed = False
+        self.external_actions_executed = False
         self.synchronized = False
 
     async def __aenter__(self) -> Self:
@@ -45,6 +46,9 @@ class FakeIntakeUnitOfWork:
 
     async def commit(self) -> None:
         self.committed = True
+
+    async def execute_external_delivery_actions(self, _context: IntakeCompletionContext) -> None:
+        self.external_actions_executed = True
 
     async def synchronize_tracker(self, _task_id: uuid.UUID) -> None:
         self.synchronized = True
@@ -73,7 +77,7 @@ async def test_intake_completion_applies_domain_directive_and_commits() -> None:
 
     assert await handler.execute(command())
     assert unit.directive == CompletionDirective.INTAKE_INFORMATIONAL
-    assert unit.committed and unit.synchronized
+    assert unit.committed and unit.external_actions_executed and unit.synchronized
 
 
 @pytest.mark.asyncio
@@ -83,4 +87,5 @@ async def test_intake_completion_preserves_manual_takeover() -> None:
 
     assert await handler.execute(command())
     assert unit.takeover and unit.committed and unit.synchronized
+    assert not unit.external_actions_executed
     assert unit.directive is None

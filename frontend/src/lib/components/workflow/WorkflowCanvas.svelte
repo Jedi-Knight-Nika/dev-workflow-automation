@@ -576,6 +576,24 @@
     dirty = true;
   }
 
+  function hasUuidId(edge: { id: string }): boolean {
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+      edge.id
+    );
+  }
+
+  function normalizeEdgeIds(): void {
+    const previousSelection = selectedEdgeId;
+    let normalizedSelection = previousSelection;
+    edges = edges.map((edge) => {
+      if (hasUuidId(edge)) return edge;
+      const id = crypto.randomUUID();
+      if (edge.id === previousSelection) normalizedSelection = id;
+      return { ...edge, id };
+    });
+    selectedEdgeId = normalizedSelection;
+  }
+
   function addRole(role: string) {
     if (role === 'ORCHESTRATOR' || role === 'DELIVERER') {
       const existing = nodes.find((node) => node.data.role === role);
@@ -658,6 +676,10 @@
 
   async function persist() {
     saving = true;
+    // Svelte Flow creates an internal `xy-edge__...` ID before the onconnect
+    // callback for controlled canvases. Persistence IDs are UUIDs, so replace
+    // any renderer-owned IDs at the client boundary before building the API DTO.
+    normalizeEdgeIds();
     const canvasNodes = nodes;
     const nodeIds = new Set(canvasNodes.map((node) => node.id));
     const graph: WorkflowGraph = {

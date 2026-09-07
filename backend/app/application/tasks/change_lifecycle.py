@@ -30,5 +30,7 @@ class ChangeTaskLifecycle:
                 context, directive, revision=revision, workspace_fingerprint=fingerprint
             )
             await unit_of_work.commit()
+            if action == LifecycleAction.REOPEN:
+                await unit_of_work.enqueue_reopened_task(context)
             await unit_of_work.synchronize_tracker(task_id)
             return task

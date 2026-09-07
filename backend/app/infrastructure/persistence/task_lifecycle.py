@@ -19,6 +19,7 @@ from app.infrastructure.external_task_sync import sync_external_task_state
 from app.infrastructure.git.workspaces import GitCommandError, run_git
 from app.infrastructure.persistence.job_operations import enqueue_job, record_event
 from app.infrastructure.persistence.repositories import task_to_domain
+from app.infrastructure.pull_requests.feedback import latest_github_pull_request_feedback
 from app.infrastructure.workers.executor import workspace_fingerprint
 
 
@@ -119,20 +120,6 @@ class SqlAlchemyTaskLifecycleUnitOfWork:
             if assignment is not None:
                 assignment.status = "QUEUED"
                 assignment.started_at = None
-            active_job = await session.scalar(
-                select(Job.id).where(
-                    Job.task_id == self._task.id,
-                    Job.state.in_([JobState.QUEUED, JobState.CLAIMED, JobState.RUNNING]),
-                )
-            )
-            if active_job is None and self._task.team_id is not None:
-                await enqueue_job(
-                    session,
-                    self._task,
-                    JobRole.INTAKE,
-                    "INTERPRET_TASK",
-                    payload={"reason": "manual_status_change"},
-                )
         payload: dict[str, Any]
         if directive.archive:
             event_type, payload = "TASK_ARCHIVED", {}
@@ -164,6 +151,48 @@ class SqlAlchemyTaskLifecycleUnitOfWork:
 
     async def commit(self) -> None:
         await self._active().commit()
+
+    async def enqueue_reopened_task(self, context: TaskLifecycleContext) -> None:
+        session = self._active()
+        task = await session.get(TaskRecord, context.task_id)
+        if task is None or task.team_id is None or task.state != TaskRecordState.NEW:
+            return
+        active_job = await session.scalar(
+            select(Job.id).where(
+                Job.task_id == task.id,
+                Job.state.in_([JobState.QUEUED, JobState.CLAIMED, JobState.RUNNING]),
+            )
+        )
+        if active_job is not None:
+            return
+        job_payload = None
+        if context.has_pull_request:
+            job_payload = await latest_github_pull_request_feedback(session, task)
+            if job_payload is None:
+                previous = await session.scalar(
+                    select(Job)
+                    .where(
+                        Job.task_id == task.id,
+                        Job.role == JobRole.INTAKE,
+                        Job.action == "INTERPRET_EXTERNAL_COMMENT",
+                    )
+                    .order_by(Job.created_at.desc())
+                    .limit(1)
+                )
+                if previous is not None:
+                    job_payload = {
+                        **previous.payload,
+                        "previous_state": TaskState.NEW.value,
+                        "replayed_after_manual_reopen": True,
+                    }
+        await enqueue_job(
+            session,
+            task,
+            JobRole.INTAKE,
+            "INTERPRET_EXTERNAL_COMMENT" if job_payload else "INTERPRET_TASK",
+            payload=job_payload or {"reason": "manual_status_change"},
+        )
+        await session.commit()
 
     async def synchronize_tracker(self, task_id: uuid.UUID) -> None:
         task = await self._active().get(TaskRecord, task_id)

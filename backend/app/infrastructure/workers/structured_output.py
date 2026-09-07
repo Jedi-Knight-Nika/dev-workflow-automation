@@ -12,6 +12,41 @@ from app.providers import AIProvider, ProviderRequest, ProviderResponse
 from app.providers.streaming import collect_provider_stream
 
 
+class ExternalDeliveryAction(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    action: Literal[
+        "UPDATE_PR_TITLE",
+        "UPDATE_PR_BODY",
+        "UPDATE_COMMIT_MESSAGE",
+        "MERGE_PULL_REQUEST",
+    ]
+    value: str | None = None
+
+    @model_validator(mode="after")
+    def validate_value(self) -> "ExternalDeliveryAction":
+        if (
+            self.action
+            in {
+                "UPDATE_PR_TITLE",
+                "UPDATE_PR_BODY",
+                "UPDATE_COMMIT_MESSAGE",
+            }
+            and not self.value
+        ):
+            raise ValueError(f"{self.action} requires a value")
+        if (
+            self.action in {"UPDATE_PR_TITLE", "UPDATE_COMMIT_MESSAGE"}
+            and self.value
+            and len(self.value) > 256
+        ):
+            raise ValueError(f"{self.action} exceeds the supported length")
+        if self.action == "UPDATE_PR_BODY" and self.value and len(self.value) > 65_536:
+            raise ValueError("UPDATE_PR_BODY exceeds the supported body length")
+        if self.action == "MERGE_PULL_REQUEST" and self.value is not None:
+            raise ValueError("MERGE_PULL_REQUEST does not accept a value")
+        return self
+
+
 class IntakeProposal(BaseModel):
     model_config = ConfigDict(extra="forbid")
     result: Literal["EVENT_INTERPRETED"]
@@ -29,6 +64,7 @@ class IntakeProposal(BaseModel):
     confidence: float = Field(ge=0, le=1)
     repository_ids: list[str] = Field(default_factory=list)
     repository_selection_reason: str = ""
+    external_delivery_actions: list[ExternalDeliveryAction]
 
 
 class ThinkerProposal(BaseModel):

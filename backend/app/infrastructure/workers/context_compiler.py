@@ -510,16 +510,34 @@ class ContextCompiler:
         context["technical_plan"] = await self._plan(task)
         context["open_findings"] = await self._findings(task)
         context["checks"] = checks or []
-        context["repositories"] = [
-            {
-                "id": str(item.repository.id),
-                "name": f"{item.repository.owner}/{item.repository.name}",
-                "path_prefix": ("." if task.workspace_path == str(item.path) else item.path.name),
-                "current_revision": await run_git("rev-parse", "HEAD", cwd=item.path),
-                "diff": await run_git("diff", "--no-ext-diff", cwd=item.path),
-            }
-            for item in workspaces
-        ]
+        repositories: list[dict[str, Any]] = []
+        for item in workspaces:
+            current_revision = await run_git("rev-parse", "HEAD", cwd=item.path)
+            committed_diff = ""
+            if item.scope.base_revision:
+                committed_diff = await run_git(
+                    "diff",
+                    "--no-ext-diff",
+                    item.scope.base_revision,
+                    "HEAD",
+                    cwd=item.path,
+                )
+            working_diff = await run_git("diff", "--no-ext-diff", cwd=item.path)
+            repositories.append(
+                {
+                    "id": str(item.repository.id),
+                    "name": f"{item.repository.owner}/{item.repository.name}",
+                    "path_prefix": (
+                        "." if task.workspace_path == str(item.path) else item.path.name
+                    ),
+                    "base_revision": item.scope.base_revision,
+                    "current_revision": current_revision,
+                    "diff": "\n".join(filter(None, (committed_diff, working_diff))),
+                    "diff_scope": "base_revision_to_current_plus_working_tree",
+                    "pull_request_url": item.scope.pull_request_url,
+                }
+            )
+        context["repositories"] = repositories
         return await self._finish(task, job, context, started)
 
     async def compile_for_reviewer(

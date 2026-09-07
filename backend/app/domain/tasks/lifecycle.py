@@ -49,11 +49,11 @@ def lifecycle_directive(
             TaskState.PAUSED,
             TaskState.CANCELLED,
             TaskState.CONTEXT_PENDING,
+            TaskState.WAITING_GITHUB,
+            TaskState.READY_TO_MERGE,
             TaskState.NEW,
         }:
-            raise InvalidTaskTransition(
-                f"Only blocked or stopped tasks can be moved to backlog, not {current_state.value}"
-            )
+            raise InvalidTaskTransition(f"Task cannot be moved to To do from {current_state.value}")
         if current_state == TaskState.NEW:
             return LifecycleDirective(TaskState.NEW, False)
         return LifecycleDirective(TaskState.NEW, False, True)

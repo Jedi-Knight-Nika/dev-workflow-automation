@@ -5,6 +5,7 @@ import httpx
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.application.pull_requests import MergeConflict, MergeTask, MergeUnavailable
 from app.config import get_settings
 from app.db.models import (
     IndexStatus,
@@ -14,6 +15,8 @@ from app.db.models import (
     JobState,
     Repository,
     Task,
+    TaskEvent,
+    TaskMessage,
     TaskState,
     ValidationRecord,
     WebhookDelivery,
@@ -21,6 +24,7 @@ from app.db.models import (
 from app.domain.webhooks import DeliveryRetryPolicy
 from app.infrastructure.external_task_sync import sync_external_task_state
 from app.infrastructure.persistence.job_operations import enqueue_job, record_event
+from app.infrastructure.pull_requests.merge_workflow import SqlAlchemyGitHubMergeWorkflow
 from app.infrastructure.security.crypto import cipher
 from app.integrations.github import GitHubClient
 from app.integrations.github_auth import resolve_github_auth
@@ -37,6 +41,17 @@ FAILED_CHECKS = {
 }
 BLOCKING_REVIEWS = {"CHANGES_REQUESTED"}
 ACTIVE_JOB_STATES = {JobState.QUEUED, JobState.CLAIMED, JobState.RUNNING, JobState.RETRY_WAIT}
+AUTHORIZED_MERGE_PERMISSIONS = {"admin", "maintain", "write"}
+MERGE_APPROVAL_COMMENTS = {
+    "/merge",
+    "approve and merge",
+    "approved",
+    "looks good to me",
+    "lgtm",
+    "merge",
+    "merge it",
+    "ready to merge",
+}
 MAX_DIAGNOSTIC_CHARS = 12_000
 MAX_ANNOTATIONS = 20
 
@@ -159,6 +174,87 @@ def conversational_comment(event_type: str, payload: dict[str, Any]) -> dict[str
     }
 
 
+def merge_approval_actor(event_type: str, payload: dict[str, Any]) -> str | None:
+    """Return the actor for an explicit PR merge approval, never inferred prose."""
+    if event_type == "pull_request_review" and payload.get("action") == "submitted":
+        review = payload.get("review") or {}
+        if str(review.get("state") or "").upper() == "APPROVED":
+            return str((review.get("user") or {}).get("login") or "").strip() or None
+        return None
+    if (
+        event_type == "issue_comment"
+        and payload.get("action") == "created"
+        and "pull_request" in (payload.get("issue") or {})
+    ):
+        comment = payload.get("comment") or {}
+        body = " ".join(str(comment.get("body") or "").lower().split()).rstrip(".! ")
+        if body in MERGE_APPROVAL_COMMENTS:
+            return str((comment.get("user") or {}).get("login") or "").strip() or None
+    return None
+
+
+def pull_request_number(payload: dict[str, Any]) -> int | None:
+    value = (
+        (payload.get("pull_request") or {}).get("number")
+        or payload.get("number")
+        or (payload.get("issue") or {}).get("number")
+    )
+    return value if isinstance(value, int) else None
+
+
+async def _authorized_merge_approval(
+    session: AsyncSession, repository: Repository, actor: str
+) -> bool:
+    integration = await session.scalar(
+        select(Integration).where(Integration.provider_name == "github")
+    )
+    if integration is None or integration.encrypted_credentials is None:
+        return False
+    try:
+        auth = await resolve_github_auth(cipher.decrypt(integration.encrypted_credentials))
+        permission = await GitHubClient(auth.token, auth.installation).collaborator_permission(
+            repository.owner, repository.name, actor
+        )
+    except (httpx.HTTPError, RuntimeError, TypeError, ValueError):
+        return False
+    return permission in AUTHORIZED_MERGE_PERMISSIONS
+
+
+async def _request_merge_from_github(
+    session: AsyncSession,
+    task: Task,
+    repository: Repository,
+    actor: str,
+) -> None:
+    if not await _authorized_merge_approval(session, repository, actor):
+        await record_event(
+            session,
+            task.id,
+            "PULL_REQUEST_MERGE_APPROVAL_REJECTED",
+            {"actor": actor, "reason": "GitHub collaborator lacks write permission"},
+            source="github",
+        )
+        return
+    await record_event(
+        session,
+        task.id,
+        "PULL_REQUEST_MERGE_REQUESTED",
+        {"actor": actor, "source": "github", "trigger": "approval"},
+        source="github",
+    )
+    await session.flush()
+    try:
+        await MergeTask(SqlAlchemyGitHubMergeWorkflow(session)).execute(task.id)
+    except (MergeConflict, MergeUnavailable, ValueError) as exc:
+        await record_event(
+            session,
+            task.id,
+            "PULL_REQUEST_AUTO_MERGE_DEFERRED",
+            {"actor": actor, "reason": str(exc)},
+            source="github",
+        )
+
+
 def validation_from_event(
     event_type: str, payload: dict[str, Any]
 ) -> tuple[str, str, str, str, str | None] | None:
@@ -249,6 +345,25 @@ async def evaluate_current_revision(session: AsyncSession, task: Task) -> None:
         await record_event(
             session, task.id, "TASK_READY_TO_MERGE", {"revision": task.current_revision}
         )
+        merge_request = await session.scalar(
+            select(TaskEvent)
+            .where(
+                TaskEvent.task_id == task.id,
+                TaskEvent.event_type == "PULL_REQUEST_MERGE_REQUESTED",
+            )
+            .order_by(TaskEvent.created_at.desc())
+            .limit(1)
+        )
+        if merge_request is not None:
+            try:
+                await MergeTask(SqlAlchemyGitHubMergeWorkflow(session)).execute(task.id)
+            except (MergeConflict, MergeUnavailable, ValueError) as exc:
+                await record_event(
+                    session,
+                    task.id,
+                    "PULL_REQUEST_AUTO_MERGE_DEFERRED",
+                    {"reason": str(exc)},
+                )
         return
     blocking = failing + blocking_reviews + review_comments
     if not blocking:
@@ -328,7 +443,7 @@ async def process_github_event(
     if repository is None:
         return
     pull_request = payload.get("pull_request") or {}
-    number = pull_request.get("number") or payload.get("number")
+    number = pull_request_number(payload)
     if number is None and event_type in {"check_run", "check_suite"}:
         pull_requests = payload.get(event_type, {}).get("pull_requests", [])
         if pull_requests:
@@ -350,8 +465,11 @@ async def process_github_event(
         return
     if task is None:
         return
+    approval_actor = merge_approval_actor(event_type, payload)
+    if approval_actor:
+        await _request_merge_from_github(session, task, repository, approval_actor)
     comment = conversational_comment(event_type, payload)
-    if comment:
+    if comment and not approval_actor:
         comment["previous_state"] = task.state.value
         active_intake = await session.scalar(
             select(func.count(Job.id)).where(
@@ -361,12 +479,27 @@ async def process_github_event(
             )
         )
         if not active_intake:
-            await enqueue_job(
+            intake_job = await enqueue_job(
                 session,
                 task,
                 JobRole.INTAKE,
                 "INTERPRET_EXTERNAL_COMMENT",
                 payload=comment,
+            )
+            session.add(
+                TaskMessage(
+                    task_id=task.id,
+                    job_id=intake_job.id,
+                    author_type="EXTERNAL",
+                    author_name=str(comment.get("author") or "GitHub user")[:120],
+                    kind="COMMENT",
+                    body=str(comment["raw_text"])[:8_000],
+                    context={
+                        "source": "github",
+                        "url": comment.get("url"),
+                        "task_state": task.state.value,
+                    },
+                )
             )
             await record_event(
                 session,

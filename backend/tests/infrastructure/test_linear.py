@@ -65,10 +65,7 @@ def test_linear_state_mapping_covers_operational_lifecycle() -> None:
         == "in_review_state_id"
     )
     assert external_status_configuration_key("linear", TaskState.NEEDS_HUMAN) == "blocked_state_id"
-    assert (
-        external_status_configuration_key("linear", TaskState.MERGED)
-        == "ready_for_testing_state_id"
-    )
+    assert external_status_configuration_key("linear", TaskState.MERGED) == "done_state_id"
     assert external_status_configuration_key("linear", TaskState.CANCELLED) == "done_state_id"
     assert (
         external_status_configuration_key("trello", TaskState.IMPLEMENTING) == "in_progress_list_id"

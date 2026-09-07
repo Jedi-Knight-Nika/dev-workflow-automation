@@ -2,6 +2,8 @@ from app.infrastructure.github_events import (
     conversational_comment,
     extract_ci_diagnostics,
     focused_validation_payload,
+    merge_approval_actor,
+    pull_request_number,
     validation_from_event,
 )
 
@@ -32,6 +34,54 @@ def test_approval_is_not_sent_to_intake() -> None:
         )
         is None
     )
+
+
+def test_approved_review_requests_merge() -> None:
+    assert (
+        merge_approval_actor(
+            "pull_request_review",
+            {
+                "action": "submitted",
+                "review": {"state": "approved", "user": {"login": "maintainer"}},
+            },
+        )
+        == "maintainer"
+    )
+
+
+def test_explicit_lgtm_comment_requests_merge() -> None:
+    assert (
+        merge_approval_actor(
+            "issue_comment",
+            {
+                "action": "created",
+                "issue": {"pull_request": {}},
+                "comment": {"body": "  LGTM! ", "user": {"login": "maintainer"}},
+            },
+        )
+        == "maintainer"
+    )
+
+
+def test_general_positive_comment_does_not_request_merge() -> None:
+    assert (
+        merge_approval_actor(
+            "issue_comment",
+            {
+                "action": "created",
+                "issue": {"pull_request": {}},
+                "comment": {
+                    "body": "Looks good, but please rename this first",
+                    "user": {"login": "maintainer"},
+                },
+            },
+        )
+        is None
+    )
+
+
+def test_issue_comment_uses_nested_pull_request_number() -> None:
+    assert pull_request_number({"issue": {"number": 39, "pull_request": {}}}) == 39
 
 
 def test_check_run_is_bound_to_its_head_sha() -> None:
