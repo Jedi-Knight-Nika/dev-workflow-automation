@@ -64,6 +64,13 @@
     '👀': 'Seen or reviewing'
   };
 
+  function hasReaction(message: TaskMessage, reaction: string): boolean {
+    return (
+      Array.isArray(message.context.user_reactions) &&
+      message.context.user_reactions.some((value) => String(value) === reaction)
+    );
+  }
+
   let hiddenRoutineCount = $derived(messages.filter(isRoutine).length);
   let visibleMessages = $derived(
     showRoutine ? messages : messages.filter((item) => !isRoutine(item))
@@ -192,11 +199,11 @@
                 {message.body}
               </div>
               {#if Array.isArray(message.context.user_reactions) && message.context.user_reactions.length}
-                <div class="mt-1.5 flex gap-1">
+                <div class="mt-2 flex flex-wrap gap-1.5">
                   {#each message.context.user_reactions as reaction (String(reaction))}
                     <button
                       type="button"
-                      class="border-brand/50 bg-brand/10 hover:bg-brand/20 rounded-full border px-2 py-0.5 text-xs shadow-sm transition duration-150 hover:scale-125 active:scale-95"
+                      class="border-brand/45 bg-brand/12 hover:bg-brand/20 focus-visible:ring-brand/50 grid size-7 place-items-center rounded-full border text-sm shadow-sm transition duration-150 ease-out motion-safe:hover:-translate-y-0.5 motion-safe:hover:scale-110 active:scale-90 focus-visible:ring-2 focus-visible:outline-none"
                       title={reactionMeanings[String(reaction)] ?? 'Reaction'}
                       aria-label={`Remove ${reactionMeanings[String(reaction)] ?? 'reaction'}`}
                       onclick={() => void onReact(message.id, String(reaction))}
@@ -295,8 +302,8 @@
     onclick={() => (menu = null)}
   ></button>
   <div
-    class="border-line bg-panel fixed z-[81] w-48 rounded-xl border p-1.5 text-sm shadow-2xl"
-    style={`left:${Math.min(menu.x, window.innerWidth - 205)}px;top:${Math.min(menu.y, window.innerHeight - 230)}px`}
+    class="border-line bg-panel fixed z-[81] w-[min(18rem,calc(100vw-1rem))] rounded-xl border p-1.5 text-sm shadow-2xl"
+    style={`left:${Math.max(8, Math.min(menu.x, window.innerWidth - 296))}px;top:${Math.max(8, Math.min(menu.y, window.innerHeight - 250))}px`}
   >
     <button
       class="hover:bg-input w-full rounded-lg px-3 py-2 text-left"
@@ -305,18 +312,27 @@
         menu = null;
       }}>Reply</button
     >
-    <div class="border-line my-1 flex justify-around border-y py-1.5">
-      {#each ['✅', '💩', '😂', '👍', '👎', '❤️', '👀'] as reaction (reaction)}
-        <button
-          class="hover:bg-brand/15 rounded-md p-1.5 text-base transition duration-150 hover:scale-150 active:scale-90"
-          title={reactionMeanings[reaction]}
-          aria-label={reactionMeanings[reaction]}
-          onclick={() => {
-            void onReact(menu!.message.id, reaction);
-            menu = null;
-          }}>{reaction}</button
-        >
-      {/each}
+    <div class="border-line my-1 border-y px-1 py-2">
+      <p class="text-muted mb-1.5 px-1 text-[10px] font-semibold tracking-wider uppercase">React</p>
+      <div class="grid grid-cols-7 gap-1">
+        {#each ['✅', '💩', '😂', '👍', '👎', '❤️', '👀'] as reaction (reaction)}
+          <button
+            class="focus-visible:ring-brand/50 grid size-8 place-items-center rounded-lg text-lg transition duration-150 ease-out motion-safe:hover:-translate-y-0.5 motion-safe:hover:scale-110 active:scale-90 focus-visible:ring-2 focus-visible:outline-none {hasReaction(
+              menu.message,
+              reaction
+            )
+              ? 'bg-brand/20 ring-brand/40 shadow-sm ring-1'
+              : 'hover:bg-input'}"
+            title={reactionMeanings[reaction]}
+            aria-label={`${hasReaction(menu.message, reaction) ? 'Remove' : 'Add'} ${reactionMeanings[reaction]}`}
+            aria-pressed={hasReaction(menu.message, reaction)}
+            onclick={() => {
+              void onReact(menu!.message.id, reaction);
+              menu = null;
+            }}>{reaction}</button
+          >
+        {/each}
+      </div>
     </div>
     {#if menu.message.author_type === 'USER' && !menu.message.deleted_at}
       <button
