@@ -63,7 +63,7 @@ REPOSITORY_TOOLS = (
     },
     {
         "name": "read_repository_files",
-        "description": "Read complete current files. Batch related files in one call. Paths must be from list_repository_files, not stale RAG. Never request secrets.",
+        "description": "Read small complete files (8 KB combined per call). Use paths from the current source_map or search; no prerequisite listing is needed. For large files use read_repository_ranges. Never request secrets.",
         "parameters": {
             "type": "object",
             "properties": {"paths": {"type": "array", "items": {"type": "string"}, "maxItems": 20}},
@@ -126,6 +126,14 @@ class RepositoryTools:
         self.read_paths: set[str] = set()
         self.repeated_reads = 0
         self.last_trace: dict[str, Any] = {}
+        self.turn_remaining = 12_000
+
+    def begin_turn(self) -> None:
+        self.turn_remaining = 12_000
+
+    @property
+    def read_allowance(self) -> int:
+        return max(0, min(self.remaining, self.turn_remaining, 8_000))
 
     def begin_history(self) -> None:
         """A new provider conversation cannot reference an earlier discarded history."""
@@ -134,6 +142,7 @@ class RepositoryTools:
 
     async def execute(self, name: str, arguments: str) -> str:
         output = await self._execute_read(name, arguments)
+        self.turn_remaining = max(0, self.turn_remaining - len(output.encode()))
         parsed = json.loads(output)
         rows = parsed if isinstance(parsed, list) else [parsed]
         # Persist status/size metadata, never source contents or arbitrary command arguments.
@@ -144,7 +153,15 @@ class RepositoryTools:
             "results": [
                 {
                     key: row[key]
-                    for key in ("path", "status", "start_line", "end_line", "next_line")
+                    for key in (
+                        "path",
+                        "status",
+                        "start_line",
+                        "end_line",
+                        "next_line",
+                        "total",
+                        "next_offset",
+                    )
                     if key in row
                 }
                 for row in rows[:20]
@@ -174,6 +191,7 @@ class RepositoryTools:
         if not isinstance(ranges, list) or not 1 <= len(ranges) <= 10:
             raise ValueError("Provide 1–10 source ranges")
         results = []
+        allowance = self.read_allowance
         for item in ranges:
             requested = item.get("path") if isinstance(item, dict) else None
             try:
@@ -203,12 +221,13 @@ class RepositoryTools:
                     for number, line in enumerate(source, 1):
                         if number < start:
                             continue
-                        if number > end or used + len(line.encode()) > min(self.remaining, 12_000):
+                        if number > end or used + len(line.encode()) > allowance:
                             next_line = number
                             break
                         lines.append(line)
                         used += len(line.encode())
                 self.remaining -= used
+                allowance -= used
                 results.append(
                     {
                         "path": requested,
@@ -277,7 +296,7 @@ class RepositoryTools:
                             continue
                         content = content[:300]
                         size = len(content.encode())
-                        if len(result) >= 20 or size > self.remaining:
+                        if len(result) >= 20 or size > self.read_allowance:
                             break
                         self.remaining -= size
                         result.append({"path": displayed, "line": int(line), "content": content})
@@ -309,7 +328,7 @@ class RepositoryTools:
                 result = await requested_file_context(
                     self.workspaces,
                     fresh_paths,
-                    max_context_bytes=max(self.remaining, 0),
+                    max_context_bytes=self.read_allowance,
                     path_filter=source_path_allowed,
                 )
                 for item in result:
@@ -359,10 +378,19 @@ class RepositoryTools:
                 if not isinstance(pattern, str) or type(offset) is not int or offset < 0:
                     raise ValueError("Invalid pattern or offset")
                 matches = sorted(p for p in paths if fnmatch.fnmatch(p, pattern))
+                page: list[str] = []
+                size = 0
+                for path in matches[offset : offset + 40]:
+                    if size + len(path.encode()) > 3000:
+                        break
+                    page.append(path)
+                    size += len(path.encode())
+                next_offset = offset + len(page)
                 result = {
-                    "paths": matches[offset : offset + 100],
+                    "paths": page,
                     "total": len(matches),
-                    "next_offset": offset + 100 if offset + 100 < len(matches) else None,
+                    "next_offset": next_offset if next_offset < len(matches) else None,
+                    "guidance": "Read relevant paths from this page or source_map; do not paginate the whole repository. Empty results mean change the glob or search a symbol.",
                 }
             else:
                 raise ValueError("Unknown tool")

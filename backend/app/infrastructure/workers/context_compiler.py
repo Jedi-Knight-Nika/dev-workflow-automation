@@ -23,6 +23,7 @@ from app.infrastructure.agent_knowledge import search_agent_knowledge
 from app.infrastructure.git.workspaces import ScopedWorkspace, run_git
 from app.infrastructure.indexing import semantic_search, semantic_search_repositories
 from app.infrastructure.persistence.task_memory import TaskMemoryService
+from app.infrastructure.workers.context_efficiency import compact_checks, source_map
 from app.infrastructure.workers.executor import repository_context
 
 DEFAULT_CONTEXT_CHARS = 160_000
@@ -418,7 +419,12 @@ class ContextCompiler:
         context["task_memory"] = (
             {} if manually_reopened else await self._persistent_memory(task, JobRole.DELIVERER)
         )
-        context["retrieved_knowledge"] = await self._intake_knowledge(task, repositories)
+        # Routing a single candidate needs its metadata, not dozens of code chunks.
+        context["retrieved_knowledge"] = (
+            await self._intake_knowledge(task, repositories)
+            if len(repositories) > 1
+            else await self._knowledge(task, None, JobRole.DELIVERER)
+        )
         return await self._finish(task, job, context, started)
 
     async def _team_repositories(self, task: Task) -> list[Repository]:
@@ -443,7 +449,7 @@ class ContextCompiler:
         if not self.include_repository_knowledge or not ready:
             return await self._knowledge(task, None, JobRole.DELIVERER)
         query = f"{task.title}\n{task.description}"
-        limit = {"low": 12, "normal": 24, "deep": 40}.get(self.retrieval_depth, 24)
+        limit = {"low": 2, "normal": 4, "deep": 6}.get(self.retrieval_depth, 4)
         rows = await semantic_search_repositories(
             self.session, [repository.id for repository in ready], query, limit=limit
         )
@@ -451,6 +457,7 @@ class ContextCompiler:
         repository_rows = [
             {
                 **row,
+                "content": str(row.get("content", ""))[:1200],
                 "repository_id": str(row["repository_id"]),
                 "repository_name": names.get(row["repository_id"], "unknown"),
             }
@@ -483,6 +490,7 @@ class ContextCompiler:
         manifest_budget = max(4_000, min(20_000, self.max_chars // max(len(workspaces), 1) // 4))
         for item in workspaces:
             tracked_files = await run_git("ls-files", cwd=item.path)
+            live_map = source_map(tracked_files, json.dumps(context, ensure_ascii=False))
             if self.native_repository_tools:
                 # Discovery is paginated through live tools. Do not repeatedly send
                 # the full manifest or stale semantic snippets on every model turn.
@@ -498,6 +506,8 @@ class ContextCompiler:
                     "default_branch": item.repository.default_branch,
                     "latest_sha": item.repository.latest_sha,
                     "indexed_sha": item.repository.indexed_sha,
+                    "path_prefix": "." if len(workspaces) == 1 else item.path.name,
+                    "source_map": live_map,
                     "directory_outline"
                     if self.native_repository_tools
                     else "tracked_files": tracked_files,
@@ -521,7 +531,9 @@ class ContextCompiler:
         previous_checkpoint = await self._previous_checkpoint(task, JobRole.EXECUTOR)
         context["previous_role_checkpoint"] = previous_checkpoint
         context["technical_plan"] = await self.latest_plan(task)
-        context["retrieved_knowledge"] = await self._knowledge(task, repository, JobRole.EXECUTOR)
+        context["retrieved_knowledge"] = await self._knowledge(
+            task, None if self.native_repository_tools else repository, JobRole.EXECUTOR
+        )
         context["open_findings"] = await self._findings(task)
         repository_data: dict[str, Any] = {
             "branch": task.branch_name,
@@ -532,7 +544,13 @@ class ContextCompiler:
             if isinstance(previous_checkpoint, dict)
             else None
         )
-        if isinstance(previous_sha, str) and previous_sha:
+        if self.native_repository_tools:
+            repository_data["source_map"] = source_map(
+                await run_git("ls-files", cwd=workspace), json.dumps(context, ensure_ascii=False)
+            )
+            repository_data["workspace_status"] = await run_git("status", "--short", cwd=workspace)
+            repository_data["context_mode"] = "live_tools"
+        elif isinstance(previous_sha, str) and previous_sha:
             try:
                 committed_delta = await run_git(
                     "diff", "--no-ext-diff", previous_sha, "HEAD", cwd=workspace
@@ -580,12 +598,21 @@ class ContextCompiler:
                 "branch": item.scope.branch_name,
                 "base_revision": item.scope.base_revision,
                 "current_revision": item.scope.current_revision,
-                "files": await repository_context(
+                "source_map": source_map(
+                    await run_git("ls-files", cwd=item.path),
+                    json.dumps(context, ensure_ascii=False),
+                ),
+                "workspace_status": await run_git("status", "--short", cwd=item.path),
+                "files": ""
+                if self.native_repository_tools
+                else await repository_context(
                     item.path,
                     _repository_relevance_hint(context)
                     + f" {item.repository.owner}/{item.repository.name}",
                 ),
-                "retrieved_knowledge": await self._knowledge(
+                "retrieved_knowledge": []
+                if self.native_repository_tools
+                else await self._knowledge(
                     task, item.repository, JobRole.EXECUTOR, include_manual=False
                 ),
             }
@@ -607,7 +634,7 @@ class ContextCompiler:
         context["task_memory"] = await self._persistent_memory(task, role)
         context["technical_plan"] = await self.latest_plan(task)
         context["open_findings"] = await self._findings(task)
-        context["checks"] = checks or []
+        context["checks"] = compact_checks(checks or [])
         repositories: list[dict[str, Any]] = []
         for item in workspaces:
             current_revision = await run_git("rev-parse", "HEAD", cwd=item.path)
@@ -646,7 +673,9 @@ class ContextCompiler:
         await self._include_conversation(task, context)
         context["task_memory"] = await self._persistent_memory(task, JobRole.REVIEWER)
         context["technical_plan"] = await self.latest_plan(task)
-        context["retrieved_knowledge"] = await self._knowledge(task, repository, JobRole.REVIEWER)
+        context["retrieved_knowledge"] = await self._knowledge(
+            task, None if self.native_repository_tools else repository, JobRole.REVIEWER
+        )
         context["open_findings"] = await self._findings(task)
         context["repository"] = {
             "branch": task.branch_name,
@@ -669,7 +698,7 @@ class ContextCompiler:
         context["task_memory"] = await self._persistent_memory(task, JobRole.TESTER)
         context["technical_plan"] = await self.latest_plan(task)
         context["open_findings"] = await self._findings(task)
-        context["validation_results"] = checks
+        context["validation_results"] = compact_checks(checks)
         context["repository"] = {
             "branch": task.branch_name,
             "revision": task.current_revision,

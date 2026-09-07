@@ -26,6 +26,9 @@ docker compose up --build
 Read [PRODUCT.md](PRODUCT.md) for the complete product and architecture reference, and
 [DEVELOPMENT.md](DEVELOPMENT.md) for setup, operations, and validation commands.
 
+See [Role-by-role efficiency research](docs/role-efficiency-research.md) for the latest
+Planner, Executor, routing, review, and validation optimizations and their test evidence.
+
 See [Token efficiency and execution budgets](docs/token-efficiency.md) for cost controls,
 source-reading limits, plan reuse, and verification details.
 

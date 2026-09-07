@@ -2,6 +2,9 @@
 
 Implemented September 7, 2026.
 
+See [Role-by-role efficiency research](role-efficiency-research.md) for the subsequent
+pre-request token reserve, source-response limits and native tool batching changes.
+
 ## Problem and implementation plan
 
 The reported task consumed 5,362,404 input tokens over 125 model attempts, including

@@ -38,6 +38,7 @@ from app.infrastructure.persistence.task_memory import TaskMemoryService
 from app.infrastructure.security.crypto import cipher
 from app.infrastructure.tools import GatewayContext, ToolGateway, ToolNeedsApproval
 from app.infrastructure.workers.context_compiler import ContextCompiler
+from app.infrastructure.workers.context_efficiency import ROLE_PROTOCOLS, request_token_reserve
 from app.infrastructure.workers.executor import (
     ExecutorProposal,
     ReviewerProposal,
@@ -572,6 +573,7 @@ async def enforce_spending_budget(
     settings: Settings,
     configuration: dict[str, Any],
     pending_attempts: list[ProviderAttempt],
+    reserved_tokens: int = 0,
 ) -> None:
     account = await session.get(AccountSettings, "default")
     pending_tokens = sum(
@@ -652,6 +654,13 @@ async def enforce_spending_budget(
         if token_limit and total_tokens >= token_limit:
             raise BudgetExceeded(
                 f"{scope.title()} token budget exhausted ({total_tokens}/{token_limit})",
+                pending_attempts,
+            )
+        if token_limit and total_tokens + reserved_tokens > token_limit:
+            raise BudgetExceeded(
+                f"{scope.title()} token budget cannot fit next request "
+                f"({total_tokens} used + {reserved_tokens} estimated reserve / {token_limit}); "
+                "request was not sent, workspace changes are preserved",
                 pending_attempts,
             )
         if cost_limit and total_cost >= cost_limit:
@@ -877,6 +886,8 @@ async def run(job_id: uuid.UUID) -> WorkerResult:
                     "provider": config.provider,
                     "model": config.model,
                     "system": config.system_prompt,
+                    "efficiency_protocol": ROLE_PROTOCOLS.get(job.role.value, ""),
+                    "tool_protocol_version": 2,
                     "configuration": config.configuration,
                     "workflow_version": job.team_workflow_version,
                     "node": str(job.workflow_node_id),
@@ -912,7 +923,9 @@ async def run(job_id: uuid.UUID) -> WorkerResult:
                 await provider.aclose()
                 return reused_result
         prompt = json.dumps(prompt_data, ensure_ascii=False, separators=(",", ":"))
-        system_prompt = config.system_prompt
+        system_prompt = (
+            config.system_prompt + "\n\nROLE EFFICIENCY: " + ROLE_PROTOCOLS.get(job.role.value, "")
+        )
         repository_tools: RepositoryTools | None = None
         executor_tools: ExecutorTools | None = None
         consultants = (
@@ -1004,7 +1017,7 @@ async def run(job_id: uuid.UUID) -> WorkerResult:
             prompt = json.dumps(prompt_data, ensure_ascii=False, separators=(",", ":"))
             system_prompt = system_prompt.replace(
                 "The repository context supplied in this prompt is your file-reading interface; you do not need or receive interactive filesystem or shell tools.",
-                "Use the available repository tools to inspect live tracked files before editing. Search and batch-read related files on demand. Return file changes in the structured proposal; the runtime applies them through the Tool Gateway.",
+                "Use available repository tools to inspect current source. Start from source_map paths without prerequisite listings; batch focused reads. Follow the workspace protocol for applying edits.",
             )
             if scoped_workspaces:
                 system_prompt += "\nRepository inspection tools are available. Missing prompt snippets are not a blocker: list, search, and read current files. Never treat stale RAG as current source."
@@ -1075,6 +1088,7 @@ async def run(job_id: uuid.UUID) -> WorkerResult:
                             if executor_tools is not None
                             else role_output_schema(job.role),
                             tools=tool_definitions,
+                            parallel_tool_calls=bool(tool_definitions),
                         ),
                         job.role,
                         max_repairs,
@@ -1085,6 +1099,15 @@ async def run(job_id: uuid.UUID) -> WorkerResult:
                             settings,
                             config.configuration,
                             attempts + pending,
+                        ),
+                        before_request=lambda upcoming, pending: enforce_spending_budget(
+                            session,
+                            job,
+                            task,
+                            settings,
+                            config.configuration,
+                            attempts + pending,
+                            reserved_tokens=request_token_reserve(upcoming),
                         ),
                         on_text_delta=stream_progress_reporter(task.id, job.id),
                         on_tool_result=tool_result_reporter(task.id, job.id),

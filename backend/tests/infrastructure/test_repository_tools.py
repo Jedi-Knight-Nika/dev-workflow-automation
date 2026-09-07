@@ -115,6 +115,28 @@ async def test_zero_model_budget_never_contacts_provider() -> None:
 
 
 @pytest.mark.asyncio
+async def test_request_preflight_sees_complete_request_and_preserves_exception():
+    provider = ToolProvider([])
+
+    class StopBeforeSpend(RuntimeError):
+        pass
+
+    async def guard(request, attempts):
+        assert request.tools == REPOSITORY_TOOLS and attempts == []
+        raise StopBeforeSpend("not sent")
+
+    with pytest.raises(StopBeforeSpend):
+        await run_with_structured_repair(
+            provider,
+            ProviderRequest("test", "system", "task", tools=REPOSITORY_TOOLS),
+            JobRole.THINKER,
+            repository_tools=RepositoryTools([], 10),
+            before_request=guard,
+        )
+    assert provider.requests == []
+
+
+@pytest.mark.asyncio
 async def test_native_tool_loop_replays_reasoning_and_accounts_every_call(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

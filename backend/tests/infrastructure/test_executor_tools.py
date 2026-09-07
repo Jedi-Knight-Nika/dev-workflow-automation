@@ -103,6 +103,98 @@ class ScriptedProvider(AIProvider):
 
 
 @pytest.mark.asyncio
+async def test_batched_reads_edits_and_real_test_complete_in_four_model_calls(tmp_path: Path):
+    for name in ("one.py", "two.py"):
+        (tmp_path / name).write_text("value = 1\n")
+
+    class BatchProvider(ScriptedProvider):
+        async def run(self, request: ProviderRequest) -> ProviderResponse:
+            self.requests.append(request)
+            turn = len(self.requests)
+            if turn == 4:
+                return ProviderResponse(
+                    '{"result":"IMPLEMENTED","summary":"Both files updated and tested"}'
+                )
+            assert request.parallel_tool_calls
+            if turn == 1:
+                steps = [("read_workspace_file", {"path": p}) for p in ("one.py", "two.py")]
+            elif turn == 2:
+                steps = [
+                    (
+                        "edit_workspace_file",
+                        {"path": p, "old_text": "value = 1", "new_text": "value = 2"},
+                    )
+                    for p in ("one.py", "two.py")
+                ]
+            else:
+                steps = [
+                    (
+                        "run_workspace_command",
+                        {
+                            "command": [
+                                sys.executable,
+                                "-c",
+                                "import one,two; assert one.value == two.value == 2",
+                            ],
+                            "directory": ".",
+                            "timeout_seconds": 10,
+                        },
+                    )
+                ]
+            calls = tuple(
+                {
+                    "type": "function_call",
+                    "name": name,
+                    "arguments": json.dumps({"repository": ".", **args}),
+                    "call_id": f"{turn}-{i}",
+                }
+                for i, (name, args) in enumerate(steps)
+            )
+            return ProviderResponse("", tool_calls=calls, continuation=calls)
+
+    provider = BatchProvider([])
+    result, attempts = await run_with_structured_repair(
+        provider,
+        ProviderRequest(
+            "test", "implement", "task", tools=EXECUTOR_TOOLS, parallel_tool_calls=True
+        ),
+        JobRole.EXECUTOR,
+        repository_tools=executor(tmp_path),
+        response_model=InteractiveExecutorProposal,
+        max_model_calls=4,
+    )
+    assert result["result"] == "IMPLEMENTED" and len(attempts) == 4
+    assert all((tmp_path / p).read_text() == "value = 2\n" for p in ("one.py", "two.py"))
+    outputs = [
+        json.loads(i["output"])
+        for i in provider.requests[-1].tool_history
+        if i.get("type") == "function_call_output"
+    ]
+    assert outputs[-1]["exit_code"] == 0
+    assert len(outputs) == 5
+
+
+@pytest.mark.asyncio
+async def test_large_new_file_is_readable_in_bounded_ranges(tmp_path: Path):
+    (tmp_path / "new.py").write_text("value = 1\n" * 3000)
+    tools = executor(tmp_path)
+    first = await invoke(tools, "read_workspace_file", path="new.py")
+    assert len(first["content"].encode()) <= 8000 and first["next_line"]
+    tools.begin_turn()
+    second = await invoke(
+        tools,
+        "read_workspace_file",
+        path="new.py",
+        start_line=first["next_line"],
+        end_line=first["next_line"] + 2,
+    )
+    assert second["content"] == "value = 1\n" * 3
+    assert (await invoke(tools, "read_workspace_file", path="new.py", start_line=0))[
+        "status"
+    ] == "ERROR"
+
+
+@pytest.mark.asyncio
 async def test_edit_failure_and_test_failure_are_corrected_in_same_model_loop(
     tmp_path: Path,
 ) -> None:
@@ -169,7 +261,9 @@ async def test_new_files_are_readable_and_edits_do_not_reset_budgets(tmp_path: P
     )["status"] == "APPLIED"
     assert tools.remaining == 5 and tools.calls == 3
     assert (await invoke(tools, "read_workspace_file", path="new.txt"))["content"] == "world"
-    assert (await invoke(tools, "read_workspace_file", path="new.txt"))["status"] == "ERROR"
+    assert (await invoke(tools, "read_workspace_file", path="new.txt"))[
+        "status"
+    ] == "NO_LINES_WITHIN_BUDGET"
 
 
 @pytest.mark.asyncio

@@ -24,6 +24,7 @@ class ProviderRequest:
     tools: tuple[dict[str, Any], ...] = ()
     tool_history: tuple[dict[str, Any], ...] = ()
     allow_tool_calls: bool = True
+    parallel_tool_calls: bool = False
 
 
 @dataclass(frozen=True)

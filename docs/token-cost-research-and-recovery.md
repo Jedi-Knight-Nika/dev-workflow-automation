@@ -2,6 +2,10 @@
 
 Research and implementation: September 7, 2026.
 
+Follow-up: [Role-by-role efficiency research](role-efficiency-research.md) records the
+subsequent live failure and newer tool limits, batching, context selection and preflight.
+Its implementation details supersede the initial rollout described below.
+
 ## Conclusion
 
 Optimize cost per successfully completed task, not merely the maximum number of

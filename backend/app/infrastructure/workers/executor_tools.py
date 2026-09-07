@@ -10,6 +10,7 @@ from pydantic import model_validator
 
 from app.domain.security.paths import resolve_workspace_path
 from app.infrastructure.tools.gateway import ToolGateway, ToolNeedsApproval, ToolOperationError
+from app.infrastructure.workers.context_efficiency import compact_checks
 from app.infrastructure.workers.executor import ExecutorProposal, run_checks
 from app.infrastructure.workers.repository_tools import RepositoryTools, source_path_allowed
 
@@ -31,8 +32,12 @@ def _definition(name: str, description: str, properties: dict[str, Any]) -> dict
 EXECUTOR_TOOLS = (
     _definition(
         "read_workspace_file",
-        "Read a current workspace file, including a file you created. Repository must be an exact workspace key.",
-        {"path": {"type": "string"}},
+        "Read a current workspace file, including new files. Optional line bounds allow focused reads of large files. Output is bounded; use next_line to continue. Repository must be an exact workspace key.",
+        {
+            "path": {"type": "string"},
+            "start_line": {"type": ["integer", "null"]},
+            "end_line": {"type": ["integer", "null"]},
+        },
     ),
     _definition(
         "edit_workspace_file",
@@ -150,9 +155,37 @@ class ExecutorTools(RepositoryTools):
                     self.begin_history()
                     result = {"status": "DELETED", "path": relative}
                 elif name == "read_workspace_file":
-                    content = await gateway.read_file(relative, max_bytes=max(0, self.remaining))
+                    start = args.get("start_line")
+                    start = 1 if start is None else start
+                    end = args.get("end_line")
+                    if (
+                        type(start) is not int
+                        or start < 1
+                        or (end is not None and (type(end) is not int or end < start))
+                    ):
+                        raise ValueError("Use positive, ordered line bounds")
+                    # Gateway validates read permission; do not expose the large buffer
+                    # to the model. Line boundaries preserve exact edit spans.
+                    full = await gateway.read_file(relative, max_bytes=1_000_000)
+                    lines = full.splitlines(keepends=True)
+                    selected: list[str] = []
+                    used = 0
+                    for line in lines[start - 1 : end]:
+                        if used + len(line.encode()) > self.read_allowance:
+                            break
+                        selected.append(line)
+                        used += len(line.encode())
+                    content = "".join(selected)
                     self.remaining -= len(content.encode())
-                    result = {"path": relative, "content": content}
+                    self.turn_remaining = max(0, self.turn_remaining - used)
+                    next_line = start + len(selected)
+                    result = {
+                        "path": relative,
+                        "content": content,
+                        "start_line": start,
+                        "next_line": next_line if next_line <= len(lines) else None,
+                        "status": "LOADED_RANGE" if selected else "NO_LINES_WITHIN_BUDGET",
+                    }
                 else:
                     old, new = args.get("old_text"), args.get("new_text")
                     if (
@@ -222,7 +255,7 @@ class ExecutorTools(RepositoryTools):
                     timeout_seconds=120,
                 )
                 result = {
-                    "checks": [check.model_dump(mode="json") for check in checks],
+                    "checks": compact_checks([check.model_dump(mode="json") for check in checks]),
                     "passed": bool(checks) and all(check.passed for check in checks),
                 }
                 self.begin_history()

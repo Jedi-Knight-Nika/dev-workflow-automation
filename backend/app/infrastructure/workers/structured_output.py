@@ -177,6 +177,8 @@ async def run_with_structured_repair(
     response_model: type[BaseModel] | None = None,
     max_model_calls: int = 20,
     on_tool_result: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
+    before_request: Callable[[ProviderRequest, list[ProviderAttempt]], Awaitable[None]]
+    | None = None,
 ) -> tuple[dict[str, Any], list[ProviderAttempt]]:
     attempts: list[ProviderAttempt] = []
     if repository_tools is not None:
@@ -202,6 +204,7 @@ async def run_with_structured_repair(
             cacheable_prompt_prefix=cacheable_prefix,
             response_schema=request.response_schema,
             tools=request.tools,
+            parallel_tool_calls=request.parallel_tool_calls,
         )
         if repository_tools is not None and provider.supports_repository_tools:
             while True:
@@ -214,32 +217,32 @@ async def run_with_structured_repair(
                 if history and before_attempt is not None:
                     await before_attempt(attempts)
                 started = time.monotonic()
-                try:
-                    # Reserve the last call for a deliverable, retaining all source evidence.
-                    final_turn = (
-                        len(attempts) >= max_model_calls - 1
-                        or repository_tools.calls >= repository_tools.max_calls
-                        or repository_tools.remaining <= 0
-                        or repository_tools.repeated_reads >= 2
-                        or attempt_number > 0
-                    )
-                    response = await provider.run(
-                        replace(
-                            pending_request,
-                            tool_history=history
-                            + (
-                                (
-                                    {
-                                        "role": "user",
-                                        "content": "Tool allowance is complete for this run. Return your structured result using evidence already read. For planning, delegate remaining routine source audits in ordered steps; never invent contracts or report unverified success.",
-                                    },
-                                )
-                                if final_turn
-                                else ()
-                            ),
-                            allow_tool_calls=not final_turn,
+                # Reserve the last call for a deliverable, retaining source evidence.
+                final_turn = (
+                    len(attempts) >= max_model_calls - 1
+                    or repository_tools.calls >= repository_tools.max_calls
+                    or repository_tools.repeated_reads >= 2
+                    or attempt_number > 0
+                )
+                next_request = replace(
+                    pending_request,
+                    tool_history=history
+                    + (
+                        (
+                            {
+                                "role": "user",
+                                "content": "Tool allowance is complete for this run. Return your structured result using evidence already read. Never report unperformed edits or unverified success.",
+                            },
                         )
-                    )
+                        if final_turn
+                        else ()
+                    ),
+                    allow_tool_calls=not final_turn,
+                )
+                if before_request is not None:
+                    await before_request(next_request, attempts)
+                try:
+                    response = await provider.run(next_request)
                 except RuntimeError as exc:
                     raise ProviderRunInterrupted(exc, attempts) from exc
                 attempts.append(
@@ -250,6 +253,7 @@ async def run_with_structured_repair(
                         await on_text_delta(response.text)
                     break
                 history += response.continuation
+                repository_tools.begin_turn()
                 for call in response.tool_calls:
                     if is_cancelled is not None and await is_cancelled():
                         raise ProviderRunInterrupted(
@@ -259,9 +263,20 @@ async def run_with_structured_repair(
                     if on_text_delta:
                         await on_text_delta(f"\nUsing {name}\n")
                     try:
-                        output = await repository_tools.execute(
-                            name, str(call.get("arguments", "{}"))
-                        )
+                        # Multiple calls are allowed per response, but operations stay
+                        # ordered and policy/cancellation checked. Never run writes concurrently.
+                        if repository_tools.calls >= repository_tools.max_calls:
+                            output = json.dumps(
+                                {
+                                    "status": "NOT_EXECUTED",
+                                    "reason": "Tool allowance exhausted; this operation was not performed.",
+                                }
+                            )
+                            repository_tools.last_trace = {"tool": name, "status": "NOT_EXECUTED"}
+                        else:
+                            output = await repository_tools.execute(
+                                name, str(call.get("arguments", "{}"))
+                            )
                     except RuntimeError as exc:
                         raise StructuredOutputError(str(exc), attempts) from exc
                     if on_tool_result is not None:
@@ -286,6 +301,8 @@ async def run_with_structured_repair(
                         },
                     )
         else:
+            if before_request is not None:
+                await before_request(pending_request, attempts)
             response = await collect_provider_stream(
                 provider, pending_request, on_text_delta, is_cancelled
             )
