@@ -17,8 +17,8 @@ def test_worker_result_parser_uses_final_json_line_after_process_logs() -> None:
     worker_result = WorkerResult(
         job_id=job_id,
         task_id=task_id,
-        role=JobRole.INTAKE,
-        result="INTAKE_COMPLETE",
+        role=JobRole.DELIVERER,
+        result="DELIVERER_COMPLETE",
         summary="ready",
     )
     stdout = b"HTTP Request: POST https://api.openai.com/v1/responses 200 OK\n"

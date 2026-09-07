@@ -173,7 +173,7 @@ class SqlAlchemyTaskLifecycleUnitOfWork:
                     select(Job)
                     .where(
                         Job.task_id == task.id,
-                        Job.role == JobRole.INTAKE,
+                        Job.role == JobRole.DELIVERER,
                         Job.action == "INTERPRET_EXTERNAL_COMMENT",
                     )
                     .order_by(Job.created_at.desc())
@@ -188,7 +188,7 @@ class SqlAlchemyTaskLifecycleUnitOfWork:
         await enqueue_job(
             session,
             task,
-            JobRole.INTAKE,
+            JobRole.DELIVERER,
             "INTERPRET_EXTERNAL_COMMENT" if job_payload else "INTERPRET_TASK",
             payload=job_payload or {"reason": "manual_status_change"},
         )

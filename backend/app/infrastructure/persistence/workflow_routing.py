@@ -5,6 +5,7 @@ from dataclasses import dataclass
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import load_only
 
 from app.db.models import (
     Job,
@@ -16,14 +17,20 @@ from app.db.models import (
     WorkflowNode,
     WorkflowTransition,
 )
-from app.domain.workflows import WorkflowEdgeData, WorkflowRouteNotFound, resolve_route_edge
+from app.domain.workflows import (
+    WorkflowEdgeData,
+    WorkflowGraphData,
+    WorkflowNodeData,
+    WorkflowRouteNotFound,
+)
+from app.domain.workflows.routing import resolve_handoff, route_outcomes
 from app.infrastructure.persistence.job_operations import enqueue_job, record_event
 
 EXECUTABLE_AGENT_ROLES = frozenset(
-    {JobRole.INTAKE, JobRole.THINKER, JobRole.EXECUTOR, JobRole.TESTER, JobRole.REVIEWER}
+    {JobRole.DELIVERER, JobRole.THINKER, JobRole.EXECUTOR, JobRole.TESTER, JobRole.REVIEWER}
 )
 DEFAULT_JOB_TYPES = {
-    JobRole.INTAKE: "INTERPRET_TASK",
+    JobRole.DELIVERER: "INTERPRET_TASK",
     JobRole.THINKER: "CREATE_PLAN",
     JobRole.EXECUTOR: "IMPLEMENT_PLAN",
     JobRole.TESTER: "RUN_VALIDATION",
@@ -104,6 +111,13 @@ async def route_completed_job(
     """Apply a current, pinned graph edge or return None for legacy compatibility routing."""
     if not outcome or task.workflow_id is None:
         return None
+    intake = payload.get("intake")
+    if isinstance(intake, dict) and (
+        intake.get("actionability") in {"NEEDS_HUMAN", "INFORMATIONAL"}
+        or intake.get("external_delivery_actions")
+    ):
+        # Interpretation success does not authorize a new engineering handoff.
+        return None
     if await _stop_repeated_no_progress(session, task, outcome, payload):
         return ConfiguredRouteResult(stopped_for_no_progress=True)
     job = await session.get(Job, completed_job_id)
@@ -117,30 +131,61 @@ async def route_completed_job(
             await session.scalars(
                 select(WorkflowEdge).where(
                     WorkflowEdge.workflow_id == definition.id,
-                    WorkflowEdge.source_node_id == job.workflow_node_id,
-                    WorkflowEdge.outcome.in_([outcome, "always"]),
+                    WorkflowEdge.outcome.in_(route_outcomes(outcome)),
                 )
             )
         ).all()
     )
     edge_records = {str(edge.id): edge for edge in candidate_edges}
+    node_records = {
+        str(node.id): node
+        for node in await session.scalars(
+            select(WorkflowNode)
+            .where(WorkflowNode.workflow_id == definition.id)
+            .options(
+                load_only(
+                    WorkflowNode.id,
+                    WorkflowNode.agent_id,
+                    WorkflowNode.role,
+                    WorkflowNode.label,
+                    WorkflowNode.enabled,
+                    WorkflowNode.node_type,
+                    WorkflowNode.system_node_type,
+                )
+            )
+        )
+    }
     edge_data = tuple(
         WorkflowEdgeData(
             id=str(edge.id),
             source_node_id=str(edge.source_node_id),
             target_node_id=str(edge.target_node_id),
             outcome=edge.outcome,
+            configuration=edge.configuration,
         )
         for edge in candidate_edges
     )
     try:
-        selected = resolve_route_edge(edge_data, str(job.workflow_node_id), outcome)
+        graph = WorkflowGraphData(
+            definition.version,
+            tuple(
+                WorkflowNodeData(
+                    id=str(node.id),
+                    role=node.role,
+                    label=node.label,
+                    position_x=0,
+                    position_y=0,
+                    enabled=node.enabled,
+                )
+                for node in node_records.values()
+            ),
+            edge_data,
+        )
+        handoff = resolve_handoff(graph, str(job.workflow_node_id), outcome)
     except WorkflowRouteNotFound:
         return None
-    edge = edge_records[selected.id]
-    target = await session.get(WorkflowNode, edge.target_node_id)
-    if target is None or not target.enabled:
-        return None
+    edge = edge_records[handoff[-1].edge.id]
+    target = node_records[handoff[-1].target.id]
 
     publish = False
     if target.node_type != "AGENT":
@@ -152,9 +197,11 @@ async def route_completed_job(
             task.state = TaskState.READY_TO_MERGE
         else:
             return None
-    elif target.role == JobRole.DELIVERER.value:
-        if job.role != JobRole.REVIEWER:
-            return None
+    elif (
+        target.role == JobRole.DELIVERER.value
+        and job.role in {JobRole.REVIEWER, JobRole.TESTER}
+        and outcome in {"PASS", "REVIEW_PASS", "TEST_PASS"}
+    ):
         task.state = TaskState.WAITING_GITHUB
         publish = True
     else:
@@ -180,28 +227,34 @@ async def route_completed_job(
             except ValueError:
                 task.state = TaskState.NEEDS_HUMAN
 
-    session.add(
-        WorkflowTransition(
-            task_id=task.id,
-            job_id=job.id,
-            workflow_id=definition.id,
-            workflow_version=job.team_workflow_version,
-            from_node_id=job.workflow_node_id,
-            result_type=outcome,
-            matched_edge_id=edge.id,
-            to_node_id=target.id,
-            new_job_type=(
-                edge.job_type
-                or (
-                    DEFAULT_JOB_TYPES.get(JobRole(target.role))
-                    if target.role in {role.value for role in EXECUTABLE_AGENT_ROLES}
+    for decision in handoff:
+        route_edge = edge_records[decision.edge.id]
+        session.add(
+            WorkflowTransition(
+                task_id=task.id,
+                job_id=job.id,
+                workflow_id=definition.id,
+                workflow_version=job.team_workflow_version,
+                from_node_id=uuid.UUID(decision.source.id),
+                result_type=outcome,
+                matched_edge_id=route_edge.id,
+                to_node_id=uuid.UUID(decision.target.id),
+                new_job_type=(
+                    (
+                        route_edge.job_type
+                        or (
+                            DEFAULT_JOB_TYPES.get(JobRole(target.role))
+                            if target.role in {role.value for role in EXECUTABLE_AGENT_ROLES}
+                            else None
+                        )
+                    )
+                    if decision is handoff[-1]
                     else None
-                )
-            ),
-            internal_state=edge.internal_task_state,
-            external_status_key=edge.external_status_key,
+                ),
+                internal_state=route_edge.internal_task_state,
+                external_status_key=route_edge.external_status_key,
+            )
         )
-    )
     await record_event(
         session,
         task.id,
@@ -212,6 +265,7 @@ async def route_completed_job(
             "edge_id": str(edge.id),
             "target_node_id": str(target.id),
             "target_role": target.role,
+            "handoff_edges": [decision.edge.id for decision in handoff],
         },
     )
     task.current_workflow_node_id = target.id

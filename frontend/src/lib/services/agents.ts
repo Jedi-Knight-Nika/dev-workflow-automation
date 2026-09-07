@@ -56,6 +56,34 @@ export function saveWorkflow(workflow: WorkflowGraph, teamId?: string): Promise<
   });
 }
 
+export type WorkflowActivity = {
+  node_id: string;
+  active_jobs: number;
+  queued_jobs: number;
+  waiting_jobs: number;
+  current_job_action: string | null;
+  task_id: string | null;
+};
+
+export type WorkflowLayout = {
+  version: number;
+  positions: { node_id: string; x: number; y: number }[];
+};
+
+export function saveWorkflowLayout(layout: WorkflowLayout, teamId?: string): Promise<void> {
+  return api<void>(teamId ? `/teams/${teamId}/workflow/layout` : '/workflow/layout', {
+    method: 'PATCH',
+    keepalive: true,
+    body: JSON.stringify(layout)
+  });
+}
+
+export function getWorkflowActivity(teamId?: string): Promise<WorkflowActivity[]> {
+  return api<WorkflowActivity[]>(
+    teamId ? `/teams/${teamId}/workflow/activity` : '/workflow/activity'
+  );
+}
+
 export function getAgentRuntime(agentId: string): Promise<AgentRuntimeView> {
   return api<AgentRuntimeView>(`/agent-runtime/${agentId}`);
 }

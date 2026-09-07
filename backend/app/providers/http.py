@@ -17,6 +17,8 @@ async def _normalized_events(
 
 
 class OpenAIProvider(AIProvider):
+    supports_repository_tools = True
+
     @staticmethod
     def _payload(request: ProviderRequest, *, stream: bool = False) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -28,6 +30,17 @@ class OpenAIProvider(AIProvider):
         }
         if stream:
             payload["stream"] = True
+        if request.tools:
+            payload["tools"] = [{"type": "function", **tool} for tool in request.tools]
+            payload["parallel_tool_calls"] = False
+            payload["include"] = ["reasoning.encrypted_content"]
+            payload["input"] = [
+                {
+                    "role": "user",
+                    "content": (request.cacheable_prompt_prefix or "") + request.prompt,
+                },
+                *request.tool_history,
+            ]
         if request.temperature is not None:
             payload["temperature"] = request.temperature
         if request.reasoning_effort != "default":
@@ -81,6 +94,10 @@ class OpenAIProvider(AIProvider):
             request_id=data.get("id"),
             input_tokens=usage.get("input_tokens"),
             output_tokens=usage.get("output_tokens"),
+            tool_calls=tuple(
+                item for item in data.get("output", []) if item.get("type") == "function_call"
+            ),
+            continuation=tuple(data.get("output", [])),
         )
 
     async def stream(self, request: ProviderRequest) -> AsyncIterator[ProviderStreamEvent]:

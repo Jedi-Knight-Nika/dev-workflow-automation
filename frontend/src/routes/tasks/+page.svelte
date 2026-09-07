@@ -1,4 +1,6 @@
 <script lang="ts">
+  import TaskDescription from '$lib/components/task-detail/TaskDescription.svelte';
+  import { taskDescriptionParts } from '$lib/task-links';
   import { resolve } from '$app/paths';
   import { onMount } from 'svelte';
   import { API_URL } from '$lib/api';
@@ -242,16 +244,16 @@
       ? parsed.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
       : parsed.toLocaleString();
   }
-  function taskSummary(task: Task) {
-    return task.description
-      .replace(/(?:Trello|Linear|GitHub):\s*https?:\/\/\S+/gi, '')
-      .replace(/https?:\/\/\S+/g, '')
-      .trim();
-  }
   function providerLabel(task: Task) {
     const provider = task.source?.provider;
     if (!provider) return '';
     return `${provider[0].toUpperCase()}${provider.slice(1)}`;
+  }
+  function taskSummary(task: Task) {
+    return taskDescriptionParts(task.description, task.source?.url)
+      .map((part) => part.label || part.text)
+      .join('')
+      .slice(0, 240);
   }
   onMount(() => {
     void refresh();
@@ -634,7 +636,7 @@
       </section>
       <section>
         <h3>Description</h3>
-        <p class="description">{taskSummary(selected) || 'No description provided.'}</p>
+        <TaskDescription description={selected.description} sourceUrl={selected.source?.url} />
       </section>
       <section>
         <h3>Details</h3>
@@ -1159,12 +1161,6 @@
     font:
       0.72rem ui-monospace,
       monospace;
-  }
-  .description {
-    white-space: pre-wrap;
-    color: var(--color-muted);
-    font-size: 0.88rem;
-    line-height: 1.65;
   }
   .assignment {
     border: 1px solid var(--color-line);

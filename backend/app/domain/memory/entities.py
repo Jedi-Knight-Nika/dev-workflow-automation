@@ -29,7 +29,7 @@ def render_memory(memory: MemorySnapshot, role: JobRole) -> dict[str, Any]:
         "current_sha": memory.current_sha,
         "memory_version": memory.version,
     }
-    if role == JobRole.INTAKE:
+    if role == JobRole.DELIVERER:
         common["known_facts"] = list(memory.known_facts)
     elif role == JobRole.THINKER:
         common.update(

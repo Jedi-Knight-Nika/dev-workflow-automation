@@ -38,7 +38,7 @@ async def process_linear_delivery(session: AsyncSession, delivery: WebhookDelive
         active = await session.scalar(
             select(func.count(Job.id)).where(
                 Job.task_id == task.id,
-                Job.role == JobRole.INTAKE,
+                Job.role == JobRole.DELIVERER,
                 Job.state.in_(
                     [JobState.QUEUED, JobState.CLAIMED, JobState.RUNNING, JobState.RETRY_WAIT]
                 ),
@@ -49,7 +49,7 @@ async def process_linear_delivery(session: AsyncSession, delivery: WebhookDelive
             await enqueue_job(
                 session,
                 task,
-                JobRole.INTAKE,
+                JobRole.DELIVERER,
                 "INTERPRET_EXTERNAL_COMMENT",
                 payload=intake_payload,
             )
@@ -86,7 +86,7 @@ async def process_linear_delivery(session: AsyncSession, delivery: WebhookDelive
         (
             await session.scalars(
                 select(WorkflowNode).where(
-                    WorkflowNode.role == "INTAKE",
+                    WorkflowNode.role == "DELIVERER",
                     WorkflowNode.enabled.is_(True),
                     WorkflowNode.integration_mode.in_(["webhook", "hybrid"]),
                 )
@@ -133,7 +133,7 @@ async def process_linear_delivery(session: AsyncSession, delivery: WebhookDelive
         await enqueue_job(
             session,
             task,
-            JobRole.INTAKE,
+            JobRole.DELIVERER,
             "INTERPRET_TASK",
             payload={
                 "source": "linear",

@@ -4,11 +4,11 @@ from typing import Any
 
 
 class CompletionDirective(StrEnum):
-    INTAKE_NEEDS_HUMAN = "INTAKE_NEEDS_HUMAN"
-    INTAKE_INFORMATIONAL = "INTAKE_INFORMATIONAL"
-    INTAKE_REPAIR = "INTAKE_REPAIR"
-    INTAKE_REPLAN = "INTAKE_REPLAN"
-    INTAKE_PLAN = "INTAKE_PLAN"
+    DELIVERER_NEEDS_HUMAN = "DELIVERER_NEEDS_HUMAN"
+    DELIVERER_INFORMATIONAL = "DELIVERER_INFORMATIONAL"
+    DELIVERER_REPAIR = "DELIVERER_REPAIR"
+    DELIVERER_REPLAN = "DELIVERER_REPLAN"
+    DELIVERER_PLAN = "DELIVERER_PLAN"
     THINKER_EXECUTE = "THINKER_EXECUTE"
     THINKER_NEEDS_CONTEXT = "THINKER_NEEDS_CONTEXT"
     THINKER_NEEDS_HUMAN = "THINKER_NEEDS_HUMAN"
@@ -49,16 +49,16 @@ def success_directive(
     repeat_count: int = 0,
     max_same_finding_repeats: int = 2,
 ) -> CompletionDirective:
-    if role == "INTAKE":
+    if role == "DELIVERER":
         if outcome != "EVENT_INTERPRETED" or data.get("actionability") == "NEEDS_HUMAN":
-            return CompletionDirective.INTAKE_NEEDS_HUMAN
+            return CompletionDirective.DELIVERER_NEEDS_HUMAN
         if action != "INTERPRET_EXTERNAL_COMMENT":
-            return CompletionDirective.INTAKE_PLAN
+            return CompletionDirective.DELIVERER_PLAN
         if data.get("actionability") == "INFORMATIONAL":
-            return CompletionDirective.INTAKE_INFORMATIONAL
+            return CompletionDirective.DELIVERER_INFORMATIONAL
         if data.get("event_type") == "REVIEW_FIX":
-            return CompletionDirective.INTAKE_REPAIR
-        return CompletionDirective.INTAKE_REPLAN
+            return CompletionDirective.DELIVERER_REPAIR
+        return CompletionDirective.DELIVERER_REPLAN
     if role == "THINKER":
         if outcome == "PLAN_READY":
             return CompletionDirective.THINKER_EXECUTE

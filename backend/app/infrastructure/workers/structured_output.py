@@ -1,13 +1,14 @@
 import json
 import time
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from app.db.models import JobRole
 from app.infrastructure.workers.executor import ExecutorProposal, ReviewerProposal, TesterProposal
+from app.infrastructure.workers.repository_tools import RepositoryTools
 from app.providers import AIProvider, ProviderRequest, ProviderResponse
 from app.providers.streaming import collect_provider_stream
 
@@ -47,7 +48,13 @@ class ExternalDeliveryAction(BaseModel):
         return self
 
 
-class IntakeProposal(BaseModel):
+class ConsultationReply(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    result: Literal["CONSULTATION_REPLIED"]
+    summary: str = Field(min_length=1, max_length=8000)
+
+
+class DelivererProposal(BaseModel):
     model_config = ConfigDict(extra="forbid")
     result: Literal["EVENT_INTERPRETED"]
     event_type: Literal[
@@ -104,6 +111,15 @@ class StructuredOutputError(RuntimeError):
         self.attempts = attempts
 
 
+class ProviderRunInterrupted(RuntimeError):
+    """Retain paid usage without turning a provider outage into a protocol error."""
+
+    def __init__(self, cause: RuntimeError, attempts: list[ProviderAttempt]) -> None:
+        super().__init__(str(cause))
+        self.cause = cause
+        self.attempts = attempts
+
+
 def parse_model_data(text: str) -> dict[str, Any]:
     candidate = text.strip()
     if candidate.startswith("```"):
@@ -120,8 +136,8 @@ def parse_model_data(text: str) -> dict[str, Any]:
 def validate_role_output(role: JobRole, text: str) -> dict[str, Any]:
     data = parse_model_data(text)
     model: type[BaseModel]
-    if role == JobRole.INTAKE:
-        model = IntakeProposal
+    if role == JobRole.DELIVERER:
+        model = DelivererProposal
     elif role == JobRole.THINKER:
         model = ThinkerProposal
     elif role == JobRole.EXECUTOR:
@@ -137,7 +153,7 @@ def validate_role_output(role: JobRole, text: str) -> dict[str, Any]:
 
 def role_output_schema(role: JobRole) -> dict[str, Any]:
     models: dict[JobRole, type[BaseModel]] = {
-        JobRole.INTAKE: IntakeProposal,
+        JobRole.DELIVERER: DelivererProposal,
         JobRole.THINKER: ThinkerProposal,
         JobRole.EXECUTOR: ExecutorProposal,
         JobRole.REVIEWER: ReviewerProposal,
@@ -157,33 +173,86 @@ async def run_with_structured_repair(
     before_attempt: Callable[[list[ProviderAttempt]], Awaitable[None]] | None = None,
     on_text_delta: Callable[[str], Awaitable[None]] | None = None,
     is_cancelled: Callable[[], Awaitable[bool]] | None = None,
+    repository_tools: RepositoryTools | None = None,
+    response_model: type[BaseModel] | None = None,
+    max_model_calls: int = 20,
 ) -> tuple[dict[str, Any], list[ProviderAttempt]]:
     attempts: list[ProviderAttempt] = []
     prompt = request.prompt
     cacheable_prefix: str | None = None
     last_error: ValidationError | None = None
+    history: tuple[dict[str, Any], ...] = ()
     for attempt_number in range(max(0, min(max_repairs, 10)) + 1):
         if before_attempt is not None:
             await before_attempt(attempts)
         started = time.monotonic()
-        response = await collect_provider_stream(
-            provider,
-            ProviderRequest(
-                model=request.model,
-                system=request.system,
-                prompt=prompt,
-                max_output_tokens=request.max_output_tokens,
-                temperature=request.temperature,
-                reasoning_effort=request.reasoning_effort,
-                timeout_seconds=request.timeout_seconds,
-                cacheable_prompt_prefix=cacheable_prefix,
-                response_schema=request.response_schema,
-            ),
-            on_text_delta,
-            is_cancelled,
+        pending_request = ProviderRequest(
+            model=request.model,
+            system=request.system,
+            prompt=prompt,
+            max_output_tokens=request.max_output_tokens,
+            temperature=request.temperature,
+            reasoning_effort=request.reasoning_effort,
+            timeout_seconds=request.timeout_seconds,
+            cacheable_prompt_prefix=cacheable_prefix,
+            response_schema=request.response_schema,
+            tools=request.tools,
         )
-        attempts.append(ProviderAttempt(response, round((time.monotonic() - started) * 1000)))
+        if repository_tools is not None and provider.supports_repository_tools:
+            while True:
+                if len(attempts) >= max_model_calls:
+                    raise StructuredOutputError("Model-turn budget exhausted", attempts)
+                if is_cancelled is not None and await is_cancelled():
+                    raise ProviderRunInterrupted(
+                        RuntimeError("Worker cancelled during repository inspection"), attempts
+                    )
+                if history and before_attempt is not None:
+                    await before_attempt(attempts)
+                started = time.monotonic()
+                try:
+                    response = await provider.run(replace(pending_request, tool_history=history))
+                except RuntimeError as exc:
+                    raise ProviderRunInterrupted(exc, attempts) from exc
+                attempts.append(
+                    ProviderAttempt(response, round((time.monotonic() - started) * 1000))
+                )
+                if not response.tool_calls:
+                    if on_text_delta and response.text:
+                        await on_text_delta(response.text)
+                    break
+                history += response.continuation
+                for call in response.tool_calls:
+                    name = str(call.get("name", ""))
+                    if on_text_delta:
+                        await on_text_delta(f"\nUsing {name}\n")
+                    try:
+                        output = await repository_tools.execute(
+                            name, str(call.get("arguments", "{}"))
+                        )
+                    except RuntimeError as exc:
+                        raise StructuredOutputError(str(exc), attempts) from exc
+                    if repository_tools.consultation is not None:
+                        return {
+                            "result": "CONSULTATION_REQUESTED",
+                            **repository_tools.consultation,
+                        }, attempts
+                    history += (
+                        {
+                            "type": "function_call_output",
+                            "call_id": call["call_id"],
+                            "output": output,
+                        },
+                    )
+        else:
+            response = await collect_provider_stream(
+                provider, pending_request, on_text_delta, is_cancelled
+            )
+            attempts.append(ProviderAttempt(response, round((time.monotonic() - started) * 1000)))
         try:
+            if response_model is not None:
+                return response_model.model_validate(parse_model_data(response.text)).model_dump(
+                    mode="json"
+                ), attempts
             return validate_role_output(role, response.text), attempts
         except ValidationError as exc:
             last_error = exc

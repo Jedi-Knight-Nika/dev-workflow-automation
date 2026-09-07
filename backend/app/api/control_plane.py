@@ -49,7 +49,11 @@ from app.application.ports.repository_management import (
     RepositoryManagementWorkflow,
 )
 from app.application.ports.worker_queries import WorkerQueries
-from app.application.ports.workflow_designer import WorkflowDesigner, WorkflowVersionConflict
+from app.application.ports.workflow_designer import (
+    NodePosition,
+    WorkflowDesigner,
+    WorkflowVersionConflict,
+)
 from app.application.query_workers import QueryWorkers
 from app.application.search_knowledge import SearchKnowledge
 from app.application.validate_node_model import ValidateNodeModel
@@ -94,6 +98,7 @@ from app.schemas import (
     WorkflowGraphRead,
     WorkflowNodeModelValidationRead,
 )
+from app.schemas.workflows import WorkflowActivityRead, WorkflowLayoutWrite
 
 router = APIRouter(tags=["control-plane"])
 
@@ -493,6 +498,31 @@ async def get_workflow(
     designer: WorkflowDesigner = Depends(get_workflow_designer),
 ) -> WorkflowGraphRead:
     return workflow_response(await DesignWorkflow(designer).get())
+
+
+@router.patch("/workflow/layout", status_code=204)
+async def save_workflow_layout(
+    body: WorkflowLayoutWrite,
+    designer: WorkflowDesigner = Depends(get_workflow_designer),
+) -> None:
+    try:
+        await DesignWorkflow(designer).save_positions(
+            body.version, tuple(NodePosition(str(p.node_id), p.x, p.y) for p in body.positions)
+        )
+    except WorkflowVersionConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/workflow/activity", response_model=list[WorkflowActivityRead])
+async def workflow_activity(
+    designer: WorkflowDesigner = Depends(get_workflow_designer),
+) -> list[WorkflowActivityRead]:
+    return [
+        WorkflowActivityRead.model_validate(item, from_attributes=True)
+        for item in await DesignWorkflow(designer).activity()
+    ]
 
 
 @router.put("/workflow", response_model=WorkflowGraphRead)

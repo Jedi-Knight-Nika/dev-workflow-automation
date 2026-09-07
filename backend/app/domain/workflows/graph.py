@@ -1,8 +1,8 @@
 from dataclasses import dataclass
 from datetime import datetime
 
-SYSTEM_ROLES = frozenset({"ORCHESTRATOR", "DELIVERER"})
-AGENT_ROLES = frozenset({"INTAKE", "THINKER", "EXECUTOR", "REVIEWER", "TESTER"})
+SYSTEM_ROLES = frozenset({"ORCHESTRATOR"})
+AGENT_ROLES = frozenset({"DELIVERER", "THINKER", "EXECUTOR", "REVIEWER", "TESTER"})
 ALLOWED_ROLES = SYSTEM_ROLES | AGENT_ROLES
 ALLOWED_OUTCOMES = frozenset({"success", "failure", "changes_requested", "always"})
 ALLOWED_NODE_TYPES = frozenset(
@@ -86,6 +86,34 @@ class WorkflowGraphData:
     edges: tuple[WorkflowEdgeData, ...]
 
 
+def connection_kind(edge: WorkflowEdgeData) -> str:
+    return str((edge.configuration or {}).get("kind", "handoff"))
+
+
+def consultation_targets(graph: WorkflowGraphData, source: str) -> set[str]:
+    """A controller may relay an allowed question; ordinary agents do not forward it."""
+    nodes = {node.id: node for node in graph.nodes if node.enabled}
+    pending = [source]
+    visited: set[str] = set()
+    targets: set[str] = set()
+    while pending:
+        current = pending.pop()
+        if current in visited:
+            continue
+        visited.add(current)
+        for edge in graph.edges:
+            if edge.source_node_id != current or connection_kind(edge) != "consultation":
+                continue
+            target = nodes.get(edge.target_node_id)
+            if target is None or target.id == source:
+                continue
+            if target.role == "ORCHESTRATOR":
+                pending.append(target.id)
+            elif target.node_type == "AGENT":
+                targets.add(target.id)
+    return targets
+
+
 def validate_workflow_graph(graph: WorkflowGraphData) -> None:
     if not graph.nodes:
         raise ValueError("Workflow must contain nodes")
@@ -106,6 +134,8 @@ def validate_workflow_graph(graph: WorkflowGraphData) -> None:
     for protected in SYSTEM_ROLES:
         if roles.count(protected) != 1:
             raise ValueError(f"Workflow requires exactly one {protected} node")
+    if roles.count("DELIVERER") != 1:
+        raise ValueError("Workflow requires exactly one combined DELIVERER node")
     for node in graph.nodes:
         if node.node_type not in ALLOWED_NODE_TYPES:
             raise ValueError(f"Unsupported workflow node type: {node.node_type}")
@@ -159,6 +189,11 @@ def validate_workflow_graph(graph: WorkflowGraphData) -> None:
             raise ValueError("Workflow edge references a missing node")
         if edge.source_node_id == edge.target_node_id:
             raise ValueError("Workflow nodes cannot connect to themselves")
+        kind = connection_kind(edge)
+        if kind not in {"handoff", "consultation"}:
+            raise ValueError("Unsupported connection kind")
+        if kind == "consultation":
+            continue
         if edge.outcome not in ALLOWED_OUTCOMES and not _valid_result_type(edge.outcome):
             raise ValueError(f"Unsupported edge outcome: {edge.outcome}")
         if edge.priority_override is not None and not 0 <= edge.priority_override <= 5:

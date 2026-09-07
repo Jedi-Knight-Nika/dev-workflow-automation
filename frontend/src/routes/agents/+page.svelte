@@ -3,6 +3,7 @@
   import { resolve } from '$app/paths';
   import { onMount } from 'svelte';
   import { API_URL } from '$lib/api';
+  import { createLiveRefresh } from '$lib/live-refresh';
   import PageHeader from '$lib/components/PageHeader.svelte';
   import Button from '$lib/components/Button.svelte';
   import ErrorBanner from '$lib/components/ErrorBanner.svelte';
@@ -18,6 +19,8 @@
     getAgentRuntime,
     getModelCapabilities,
     getWorkflow,
+    getWorkflowActivity,
+    type WorkflowActivity,
     listAgentKnowledge,
     listAgents,
     saveAgent,
@@ -28,6 +31,7 @@
   import { listIntegrations } from '$lib/services/integrations';
   import { listRepositories } from '$lib/services/repositories';
   import { listTeams } from '$lib/services/teams';
+  import { getTask } from '$lib/services/tasks';
   import { t } from '$lib/i18n/index.svelte';
   import PixelAgentAvatar from '$lib/components/agents/PixelAgentAvatar.svelte';
   import BrandIcon from '$lib/components/resources/BrandIcon.svelte';
@@ -42,9 +46,11 @@
     WorkflowGraph
   } from '$lib/types';
   let agents: AgentConfig[] = [];
+  let activity: WorkflowActivity[] = [];
+  let activityError = '';
   let error = '';
   let saved = '';
-  let selectedRole = 'INTAKE';
+  let selectedRole = 'DELIVERER';
   let knowledge: Record<string, AgentKnowledge[]> = {};
   let knowledgeTitle = '';
   let knowledgeContent = '';
@@ -102,6 +108,7 @@
       })
     ]);
     workflow = loadedWorkflow;
+    await refreshActivity();
     [agents, integrations, repositories, teams] = await Promise.all([
       listAgents(),
       listIntegrations(),
@@ -141,6 +148,8 @@
         : resolve('/agents')
     );
     workflow = await getWorkflow(nextTeamId || undefined);
+    activity = [];
+    await refreshActivity();
   }
 
   function requestTeamSwitch(event: Event) {
@@ -238,16 +247,32 @@
       error = String(cause);
     }
   }
+  async function refreshActivity() {
+    const requestedTeam = teamId;
+    try {
+      const result = await getWorkflowActivity(requestedTeam);
+      if (requestedTeam !== teamId) return;
+      activity = result;
+      activityError = '';
+    } catch {
+      if (requestedTeam === teamId)
+        activityError = 'Live workflow activity unavailable; reconnecting.';
+    }
+  }
   onMount(() => {
     load().catch((cause) => {
       error = String(cause);
     });
     const events = new EventSource(`${API_URL}/api/v1/events/stream`);
-    events.addEventListener('update', () => {
-      listAgents()
-        .then((items) => (agents = items))
-        .catch(() => undefined);
-    });
+    const refresh = createLiveRefresh(refreshActivity);
+    events.addEventListener('update', refresh.request);
+    events.onopen = refresh.request;
+    events.onerror = () => {
+      activityError = 'Live connection interrupted; polling for activity.';
+    };
+    const timer = setInterval(() => {
+      if (!document.hidden) refresh.request();
+    }, 10000);
     const warnBeforeUnload = (event: BeforeUnloadEvent) => {
       if (!workflowDirty) return;
       event.preventDefault();
@@ -255,6 +280,8 @@
     window.addEventListener('beforeunload', warnBeforeUnload);
     return () => {
       events.close();
+      refresh.stop();
+      clearInterval(timer);
       window.removeEventListener('beforeunload', warnBeforeUnload);
     };
   });
@@ -290,11 +317,15 @@
     {/if}
   </div>
   {#if workflow && WorkflowCanvas}
+    {#if activityError}<p class="px-4 py-2 text-xs text-warning" role="status">
+        {activityError}
+      </p>{/if}
     {#key currentTeamId}
       <svelte:component
         this={WorkflowCanvas}
         {workflow}
         {agents}
+        {activity}
         {integrations}
         {repositories}
         {selectedRole}
@@ -302,9 +333,25 @@
         onSelect={(role, nodeId) => {
           void selectAgent(role, nodeId);
         }}
-        onConsole={(role, nodeId) => {
+        onConsole={async (role, nodeId) => {
           selectedNodeId = nodeId;
-          consoleAgent = agents.find((agent) => agent.role === role) || null;
+          const agent = agents.find((agent) => agent.role === role);
+          const current = activity.find((item) => item.node_id === nodeId);
+          if (!agent || !current?.task_id) return;
+          try {
+            const task = await getTask(current.task_id);
+            consoleAgent = {
+              ...agent,
+              active_task_id: task.id,
+              active_task_has_workspace: Boolean(task.workspace_path),
+              active_task_manual_takeover: task.manual_takeover,
+              active_jobs: current.active_jobs,
+              queued_jobs: current.queued_jobs,
+              current_job_action: current.current_job_action
+            };
+          } catch (cause) {
+            error = String(cause);
+          }
         }}
         onSave={persistWorkflow}
         onDirtyChange={(dirty) => (workflowDirty = dirty)}

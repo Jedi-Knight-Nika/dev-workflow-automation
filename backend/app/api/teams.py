@@ -13,7 +13,11 @@ from app.application.ports.team_management import (
     TeamManagementWorkflow,
     TeamNotFound,
 )
-from app.application.ports.workflow_designer import WorkflowDesigner, WorkflowVersionConflict
+from app.application.ports.workflow_designer import (
+    NodePosition,
+    WorkflowDesigner,
+    WorkflowVersionConflict,
+)
 from app.application.validate_node_model import ValidateNodeModel
 from app.bootstrap.dependencies import (
     get_provider_catalog_workflow,
@@ -30,6 +34,7 @@ from app.schemas import (
     WorkflowGraphRead,
     WorkflowNodeModelValidationRead,
 )
+from app.schemas.workflows import WorkflowActivityRead, WorkflowLayoutWrite
 
 router = APIRouter(prefix="/teams", tags=["teams"])
 
@@ -174,6 +179,31 @@ async def get_team_workflow(
     designer: WorkflowDesigner = Depends(get_team_workflow_designer),
 ) -> WorkflowGraphRead:
     return _graph_response(await DesignWorkflow(designer).get())
+
+
+@router.patch("/{team_id}/workflow/layout", status_code=204)
+async def save_team_layout(
+    body: WorkflowLayoutWrite,
+    designer: WorkflowDesigner = Depends(get_team_workflow_designer),
+) -> None:
+    try:
+        await DesignWorkflow(designer).save_positions(
+            body.version, tuple(NodePosition(str(p.node_id), p.x, p.y) for p in body.positions)
+        )
+    except WorkflowVersionConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/{team_id}/workflow/activity", response_model=list[WorkflowActivityRead])
+async def team_workflow_activity(
+    designer: WorkflowDesigner = Depends(get_team_workflow_designer),
+) -> list[WorkflowActivityRead]:
+    return [
+        WorkflowActivityRead.model_validate(item, from_attributes=True)
+        for item in await DesignWorkflow(designer).activity()
+    ]
 
 
 @router.put("/{team_id}/workflow", response_model=WorkflowGraphRead)

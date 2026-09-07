@@ -173,14 +173,20 @@ async def test_review_cycle_limit_routes_task_to_human_attention(
         await _delete_test_team(postgres_session_factory, team_id)
 
 
+@pytest.mark.parametrize(
+    "edge_outcome,via_controller", [("PLAN_READY", False), ("success", False), ("PLAN_READY", True)]
+)
 async def test_pinned_workflow_edge_creates_configured_next_job(
     postgres_session_factory: async_sessionmaker[AsyncSession],
+    edge_outcome: str,
+    via_controller: bool,
 ) -> None:
     team_id = uuid.uuid4()
     workflow_id = uuid.uuid4()
     source_id = uuid.uuid4()
     target_id = uuid.uuid4()
     edge_id = uuid.uuid4()
+    controller_id = uuid.uuid4()
     task_id = uuid.uuid4()
     job_id = uuid.uuid4()
     try:
@@ -216,13 +222,35 @@ async def test_pinned_workflow_edge_creates_configured_next_job(
                 ]
             )
             await session.flush()
+            if via_controller:
+                session.add(
+                    WorkflowNode(
+                        id=controller_id,
+                        workflow_id=workflow_id,
+                        role="ORCHESTRATOR",
+                        label="Controller",
+                        position_x=50,
+                        position_y=0,
+                    )
+                )
+                await session.flush()
+                session.add(
+                    WorkflowEdge(
+                        id=uuid.uuid4(),
+                        workflow_id=workflow_id,
+                        source_node_id=controller_id,
+                        target_node_id=target_id,
+                        outcome="PLAN_READY",
+                        job_type="CUSTOM_IMPLEMENTATION",
+                    )
+                )
             session.add(
                 WorkflowEdge(
                     id=edge_id,
                     workflow_id=workflow_id,
                     source_node_id=source_id,
-                    target_node_id=target_id,
-                    outcome="PLAN_READY",
+                    target_node_id=controller_id if via_controller else target_id,
+                    outcome=edge_outcome,
                     job_type="CUSTOM_IMPLEMENTATION",
                 )
             )
@@ -270,5 +298,7 @@ async def test_pinned_workflow_edge_creates_configured_next_job(
             assert next_job.action == "CUSTOM_IMPLEMENTATION"
             assert next_job.workflow_node_id == target_id
             assert transition is not None and transition.matched_edge_id == edge_id
+            if via_controller:
+                assert next_job.role != JobRole.ORCHESTRATOR
     finally:
         await _delete_test_team(postgres_session_factory, team_id)

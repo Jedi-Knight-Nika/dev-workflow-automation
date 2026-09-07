@@ -120,7 +120,11 @@ def fit_context(context: dict[str, Any], limit: int) -> dict[str, Any]:
             task["description"] = description[:4_000] + "\n[TRUNCATED]"
     job = context.get("job")
     if isinstance(job, dict) and _context_size(context) > limit:
-        job["payload"] = {"trimmed": True}
+        payload = job.get("payload") or {}
+        job["payload"] = {
+            "trimmed": True,
+            **{key: payload[key] for key in ("question", "consultation_reply") if key in payload},
+        }
     previous = context.get("previous_role_checkpoint")
     if isinstance(previous, dict) and _context_size(context) > limit:
         previous["structured_data"] = {"trimmed": True}
@@ -292,7 +296,12 @@ class ContextCompiler:
         return fitted
 
     async def _knowledge(
-        self, task: Task, repository: Repository | None, role: JobRole
+        self,
+        task: Task,
+        repository: Repository | None,
+        role: JobRole,
+        *,
+        include_manual: bool = True,
     ) -> list[dict[str, Any]]:
         query = f"{task.title}\n{task.description}"
         rows: list[dict[str, Any]] = []
@@ -306,7 +315,11 @@ class ContextCompiler:
                 await semantic_search(self.session, repository.id, query, limit=repository_limit)
             )
         manual_limit = {"low": 3, "normal": 6, "deep": 12}.get(self.retrieval_depth, 6)
-        manual = await search_agent_knowledge(self.session, role, query, limit=manual_limit)
+        manual = (
+            (await search_agent_knowledge(self.session, role, query, limit=manual_limit))
+            if include_manual
+            else []
+        )
         rows.extend(
             {
                 "file_path": f"manual://{row['source_id']}",
@@ -328,6 +341,8 @@ class ContextCompiler:
             .where(
                 Job.task_id == task.id,
                 Job.role == JobRole.THINKER,
+                Job.action != "CONSULT_AGENT",
+                Job.result["result"].as_string() == "PLAN_READY",
                 Job.result.is_not(None),
             )
             .order_by(Job.finished_at.desc())
@@ -356,13 +371,29 @@ class ContextCompiler:
             for finding in findings
         ]
 
-    async def compile_for_intake(self, task: Task, job: Job) -> dict[str, Any]:
+    async def compile_for_deliverer(self, task: Task, job: Job) -> dict[str, Any]:
         started = time.monotonic()
         context = self._base(task, job)
         manually_reopened = job.payload.get("reason") == "manual_status_change"
         await self._include_conversation(
             task, context, omit_resolved_agent_blockers=manually_reopened
         )
+        if job.action == "RESPOND_TO_MESSAGE":
+            # A conversation reply does not select repositories or restart implementation.
+            # Keep durable task/plan/failure evidence, without repeating global repository RAG.
+            context["task_memory"] = await self._persistent_memory(task, JobRole.DELIVERER)
+            context["technical_plan"] = await self._plan(task)
+            latest_job = await self.session.scalar(
+                select(Job)
+                .where(Job.task_id == task.id, Job.id != job.id, Job.result.is_not(None))
+                .order_by(Job.finished_at.desc())
+                .limit(1)
+            )
+            context["latest_execution_result"] = latest_job.result if latest_job else None
+            context["response_scope"] = (
+                "Answer from task evidence. Do not claim fresh repository inspection or make changes."
+            )
+            return await self._finish(task, job, context, started)
         repositories = await self._team_repositories(task)
         context["repository_candidates"] = [
             {
@@ -383,7 +414,7 @@ class ContextCompiler:
             for repository in repositories
         ]
         context["task_memory"] = (
-            {} if manually_reopened else await self._persistent_memory(task, JobRole.INTAKE)
+            {} if manually_reopened else await self._persistent_memory(task, JobRole.DELIVERER)
         )
         context["retrieved_knowledge"] = await self._intake_knowledge(task, repositories)
         return await self._finish(task, job, context, started)
@@ -408,7 +439,7 @@ class ContextCompiler:
             if repository.index_status == IndexStatus.READY
         ]
         if not self.include_repository_knowledge or not ready:
-            return await self._knowledge(task, None, JobRole.INTAKE)
+            return await self._knowledge(task, None, JobRole.DELIVERER)
         query = f"{task.title}\n{task.description}"
         limit = {"low": 12, "normal": 24, "deep": 40}.get(self.retrieval_depth, 24)
         rows = await semantic_search_repositories(
@@ -423,7 +454,7 @@ class ContextCompiler:
             }
             for row in rows
         ]
-        repository_rows.extend(await self._knowledge(task, None, JobRole.INTAKE))
+        repository_rows.extend(await self._knowledge(task, None, JobRole.DELIVERER))
         return repository_rows
 
     async def compile_for_thinker(
@@ -445,6 +476,7 @@ class ContextCompiler:
         await self._include_conversation(task, context)
         context["task_memory"] = await self._persistent_memory(task, JobRole.THINKER)
         context["previous_role_checkpoint"] = await self._previous_checkpoint(task, JobRole.THINKER)
+        context["retrieved_knowledge"] = await self._knowledge(task, None, JobRole.THINKER)
         repositories: list[dict[str, Any]] = []
         manifest_budget = max(4_000, min(20_000, self.max_chars // max(len(workspaces), 1) // 4))
         for item in workspaces:
@@ -460,7 +492,7 @@ class ContextCompiler:
                     "indexed_sha": item.repository.indexed_sha,
                     "tracked_files": tracked_files,
                     "retrieved_knowledge": await self._knowledge(
-                        task, item.repository, JobRole.THINKER
+                        task, item.repository, JobRole.THINKER, include_manual=False
                     ),
                 }
             )
@@ -524,6 +556,7 @@ class ContextCompiler:
         )
         context["technical_plan"] = await self._plan(task)
         context["open_findings"] = await self._findings(task)
+        context["retrieved_knowledge"] = await self._knowledge(task, None, JobRole.EXECUTOR)
         context["repository_path_rule"] = (
             "All file paths must start with the repository directory shown in repositories[].path_prefix."
         )
@@ -541,7 +574,7 @@ class ContextCompiler:
                     + f" {item.repository.owner}/{item.repository.name}",
                 ),
                 "retrieved_knowledge": await self._knowledge(
-                    task, item.repository, JobRole.EXECUTOR
+                    task, item.repository, JobRole.EXECUTOR, include_manual=False
                 ),
             }
             for item in workspaces

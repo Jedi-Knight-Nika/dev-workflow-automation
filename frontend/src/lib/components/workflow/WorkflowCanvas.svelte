@@ -7,7 +7,6 @@
     Controls,
     MarkerType,
     SvelteFlow,
-    addEdge,
     type Connection,
     type Edge,
     type Node
@@ -17,19 +16,26 @@
   import Button from '$lib/components/Button.svelte';
   import Spinner from '$lib/components/Spinner.svelte';
   import AgentNode from './AgentNode.svelte';
-  import { discoverProviderModels, validateWorkflowNodeModel } from '$lib/services/agents';
+  import {
+    discoverProviderModels,
+    validateWorkflowNodeModel,
+    saveWorkflowLayout,
+    type WorkflowActivity
+  } from '$lib/services/agents';
+  import { createLayoutWriter } from '$lib/workflow-layout';
   import type { ProviderCatalog } from '$lib/types';
   import type { LinearMember, LinearWorkflowState } from '$lib/types';
   import { listLinearMembers, listLinearWorkflowStates } from '$lib/services/integrations';
   import { t } from '$lib/i18n/index.svelte';
   import { getTheme } from '$lib/theme.svelte';
   import { providerModelOptions } from '$lib/ai-model-catalog';
-  import BrandIcon from '$lib/components/resources/BrandIcon.svelte';
+  import AiProviderSelect from '$lib/components/ai/AiProviderSelect.svelte';
   import PixelAgentAvatar from '$lib/components/agents/PixelAgentAvatar.svelte';
 
   let {
     workflow,
     agents,
+    activity = [],
     integrations,
     repositories,
     teamId,
@@ -41,6 +47,7 @@
   }: {
     workflow: WorkflowGraph;
     agents: AgentConfig[];
+    activity?: WorkflowActivity[];
     integrations: Integration[];
     repositories: Repository[];
     teamId?: string;
@@ -92,6 +99,8 @@
     fallbackProvider: string;
     fallbackModel: string;
     agentId: string | null;
+    nodeType: WorkflowGraph['nodes'][number]['node_type'];
+    systemNodeType: string | null;
   };
   type CanvasNode = Node<CanvasData>;
   function openNodeMenu(nodeId: string, event: MouseEvent) {
@@ -107,12 +116,11 @@
     addMenuOpen = false;
   }
 
-  function edgeClass(sourceRole?: string) {
-    const agent = agents.find((item) => item.role === sourceRole);
-    if (agent && (agent.status === 'RUNNING' || agent.active_jobs > 0)) return 'route-running';
+  function edgeClass(nodeId: string) {
+    const agent = activity.find((item) => item.node_id === nodeId);
+    if (agent && agent.active_jobs > 0) return 'route-running';
     if (agent?.queued_jobs) return 'route-queued';
-    if (agent?.status === 'CONFIGURATION_ERROR') return 'route-blocked';
-    if (agent?.status === 'READY') return 'route-ready';
+    if (agent?.waiting_jobs) return 'route-blocked';
     return 'route-neutral';
   }
 
@@ -129,7 +137,7 @@
         queuedJobs: 0,
         activeJobs: 0,
         currentJobAction: null,
-        system: node.role === 'ORCHESTRATOR' || node.role === 'DELIVERER',
+        system: node.role === 'ORCHESTRATOR',
         activationPolicy: node.activation_policy,
         batchWindowSeconds: node.batch_window_seconds,
         integrationIds: node.integration_ids || [],
@@ -161,6 +169,8 @@
         fallbackProvider: node.fallback_provider || '',
         fallbackModel: node.fallback_model || '',
         agentId: node.agent_id,
+        nodeType: node.node_type,
+        systemNodeType: node.system_node_type,
         onMenu: (event: MouseEvent) => openNodeMenu(node.id, event)
       },
       deletable: node.role !== 'ORCHESTRATOR' && node.role !== 'DELIVERER',
@@ -174,17 +184,46 @@
       source: edge.source_node_id,
       target: edge.target_node_id,
       type: 'smoothstep',
-      animated: true,
+      animated: false,
+      label: edge.outcome.replaceAll('_', ' '),
       markerEnd: MarkerType.ArrowClosed,
       data: { ...edge },
-      class: edgeClass(initialWorkflow.nodes.find((node) => node.id === edge.source_node_id)?.role)
+      class: 'route-neutral'
     }))
   );
   let saving = $state(false);
+  let connectionKind = $state<'handoff' | 'consultation'>('handoff');
+  function isConsultation(edge: Edge): boolean {
+    const configuration = edge.data?.configuration as Record<string, unknown> | undefined;
+    return configuration?.kind === 'consultation';
+  }
   let dirty = $state(false);
-  let runningAgent = $derived(
-    agents.find((agent) => agent.status === 'RUNNING' || agent.active_jobs > 0)
-  );
+  let layoutSaving = $state(false);
+  let layoutError = $state('');
+  const layoutTeamId = untrack(() => teamId);
+  const layoutWriter = createLayoutWriter((layout) => saveWorkflowLayout(layout, layoutTeamId));
+  async function savePositions() {
+    const savedIds = new Set(workflow.nodes.map((node) => node.id));
+    layoutSaving = true;
+    layoutError = '';
+    try {
+      await layoutWriter.write({
+        version: workflow.version,
+        positions: nodes
+          .filter((node) => savedIds.has(node.id))
+          .map((node) => ({
+            node_id: node.id,
+            x: node.position.x,
+            y: node.position.y
+          }))
+      });
+    } catch (cause) {
+      layoutError = `Positions not saved: ${String(cause)}`;
+    } finally {
+      layoutSaving = false;
+    }
+  }
+  let runningNode = $derived(nodes.find((node) => node.data.activeJobs > 0));
   let canvasViewport: HTMLDivElement;
 
   onMount(() => {
@@ -229,7 +268,7 @@
   let linearStates = $state<LinearWorkflowState[]>([]);
   let loadingLinearFilters = $state(false);
   const nodeTypes = { agent: AgentNode };
-  const availableRoles = ['INTAKE', 'THINKER', 'EXECUTOR', 'REVIEWER', 'TESTER'];
+  const availableRoles = ['THINKER', 'EXECUTOR', 'REVIEWER', 'TESTER'];
   const reasoningLevels = ['default', 'low', 'medium', 'high', 'max'];
   const depthLevels = ['low', 'normal', 'deep'];
   const timeoutLevels = [30, 60, 120, 240];
@@ -237,8 +276,9 @@
   const percent = (value: number, min: number, max: number) => ((value - min) / (max - min)) * 100;
 
   function nodeStatus(node: CanvasNode, liveStatus?: string, activeJobs = 0) {
-    if (!node.data.enabled) return 'DISABLED';
     if (liveStatus === 'RUNNING' || activeJobs > 0) return 'RUNNING';
+    if (!node.data.enabled) return 'DISABLED';
+    if (liveStatus === 'WAITING' || liveStatus === 'QUEUED') return liveStatus;
     if (node.data.role === 'ORCHESTRATOR') return 'SYSTEM_READY';
     if (!node.data.provider || !node.data.model) return 'NEEDS_CONFIGURATION';
     if (node.data.modelValidationStatus === 'AVAILABLE') return 'READY';
@@ -253,17 +293,18 @@
   }
 
   function openRunningConsole() {
-    const running = agents.find((agent) => agent.status === 'RUNNING');
-    if (!running) return;
-    const node = nodes.find((item) => item.data.role === running.role);
-    if (node) onConsole(running.role, node.id);
+    if (runningNode) onConsole(runningNode.data.role, runningNode.id);
   }
 
   $effect(() => {
-    const statuses = new Map(agents.map((agent) => [agent.role, agent]));
+    const statuses = new Map(activity.map((agent) => [agent.node_id, agent]));
     nodes = untrack(() => nodes).map((node) => {
-      const liveAgent = statuses.get(node.data.role);
-      const status = nodeStatus(node, liveAgent?.status, liveAgent?.active_jobs ?? 0);
+      const liveAgent = statuses.get(node.id);
+      const status = nodeStatus(
+        node,
+        liveAgent?.queued_jobs ? 'QUEUED' : liveAgent?.waiting_jobs ? 'WAITING' : undefined,
+        liveAgent?.active_jobs ?? 0
+      );
       const integrationNames = node.data.integrationIds.flatMap((id) => {
         const integration = integrations.find((item) => item.id === id);
         return integration ? [integration.provider_name] : [];
@@ -282,10 +323,17 @@
         class: `workflow-node ${status === 'RUNNING' ? 'running' : ''} ${!node.data.enabled ? 'disabled' : ''} ${node.data.role === selectedRole ? 'selected' : ''}`
       };
     });
-    const roles = new Map(untrack(() => nodes).map((node) => [node.id, node.data.role]));
     edges = untrack(() => edges).map((edge) => ({
       ...edge,
-      class: edgeClass(roles.get(edge.source))
+      animated: (statuses.get(edge.source)?.active_jobs ?? 0) > 0,
+      type: isConsultation(edge) ? 'default' : 'smoothstep',
+      label: isConsultation(edge)
+        ? ''
+        : String(edge.data?.outcome || 'success').replaceAll('_', ' '),
+      style: isConsultation(edge)
+        ? 'stroke-dasharray: 5 5; stroke: var(--color-info, #60a5fa)'
+        : undefined,
+      class: edgeClass(edge.source)
     }));
   });
 
@@ -311,7 +359,7 @@
 
   function removeNode(nodeId: string) {
     const node = nodes.find((item) => item.id === nodeId);
-    if (!node || node.data.system) return;
+    if (!node || node.data.system || node.data.role === 'DELIVERER') return;
     nodes = nodes.filter((item) => item.id !== nodeId);
     const roleName = node.data.role[0] + node.data.role.slice(1).toLowerCase();
     const remaining = nodes.filter((item) => item.data.role === node.data.role);
@@ -399,8 +447,8 @@
     return !/^(o[134]|gpt-5)/i.test(node.data.model);
   }
 
-  function changeNodeProvider(nodeId: string, event: Event) {
-    const provider = (event.currentTarget as HTMLSelectElement).value;
+  function changeNodeProvider(nodeId: string, selectedProvider: string | null) {
+    const provider = selectedProvider || '';
     manualModelNodes.delete(nodeId);
     nodes = nodes.map((node) =>
       node.id === nodeId
@@ -540,7 +588,8 @@
       edge.id === selectedEdgeId
         ? {
             ...edge,
-            class: edgeClass(nodes.find((node) => node.id === edge.source)?.data.role),
+            class: edgeClass(edge.source),
+            label: value.replaceAll('_', ' '),
             data: { ...edge.data, outcome: value }
           }
         : edge
@@ -555,26 +604,37 @@
   }
 
   function connect(connection: Connection) {
-    edges = addEdge(
+    if (connection.source === connection.target) return;
+    if (
+      edges.some(
+        (edge) =>
+          edge.source === connection.source &&
+          edge.target === connection.target &&
+          isConsultation(edge) === (connectionKind === 'consultation')
+      )
+    )
+      return;
+    edges = [
+      ...edges,
       {
         ...connection,
         id: crypto.randomUUID(),
         type: 'smoothstep',
-        animated: true,
+        animated: false,
+        label: connectionKind === 'consultation' ? 'Ask / reply' : 'success',
         markerEnd: MarkerType.ArrowClosed,
         data: {
-          outcome: 'success',
+          outcome: connectionKind === 'consultation' ? 'consultation' : 'success',
           required: true,
           job_type: null,
           internal_task_state: null,
           external_status_key: null,
           priority_override: null,
-          configuration: {}
+          configuration: { kind: connectionKind }
         },
         class: 'route-neutral'
-      },
-      edges
-    );
+      }
+    ];
     dirty = true;
   }
 
@@ -630,9 +690,9 @@
           displayName: roleCount ? `${roleName} ${nextNumber}` : roleName,
           role,
           status: agents.find((agent) => agent.role === role)?.status || 'UNCONFIGURED',
-          queuedJobs: agents.find((agent) => agent.role === role)?.queued_jobs ?? 0,
-          activeJobs: agents.find((agent) => agent.role === role)?.active_jobs ?? 0,
-          currentJobAction: agents.find((agent) => agent.role === role)?.current_job_action ?? null,
+          queuedJobs: 0,
+          activeJobs: 0,
+          currentJobAction: null,
           system: false,
           activationPolicy: 'any',
           batchWindowSeconds: 0,
@@ -665,6 +725,8 @@
           fallbackProvider: '',
           fallbackModel: '',
           agentId: null,
+          nodeType: 'AGENT',
+          systemNodeType: null,
           onMenu: (event: MouseEvent) => openNodeMenu(nodeId, event)
         },
         deletable: true,
@@ -723,8 +785,8 @@
         fallback_provider: node.data.fallbackProvider || null,
         fallback_model: node.data.fallbackModel || null,
         agent_id: node.data.agentId,
-        node_type: 'AGENT',
-        system_node_type: null
+        node_type: node.data.nodeType,
+        system_node_type: node.data.systemNodeType
       })),
       edges: edges
         .filter((edge) => nodeIds.has(edge.source) && nodeIds.has(edge.target))
@@ -750,10 +812,11 @@
         }))
     };
     try {
+      await layoutWriter.flush();
       await onSave(graph);
       dirty = false;
-    } catch {
-      // onSave already records the error for display; nothing further to do here.
+    } catch (cause) {
+      layoutError = `Workflow not saved: ${String(cause)}`;
     } finally {
       saving = false;
     }
@@ -769,6 +832,13 @@
 
 <section class="border-line bg-panel mb-6 overflow-hidden rounded-xl border">
   <div class="border-line flex min-h-16 flex-wrap items-center gap-3 border-b px-4 py-3">
+    <label class="text-muted flex items-center gap-2 text-xs">
+      New connection
+      <select class="border-line rounded border bg-input px-2 py-1" bind:value={connectionKind}>
+        <option value="handoff">Start next work</option>
+        <option value="consultation">Ask / reply</option>
+      </select>
+    </label>
     <div class="relative">
       <button
         class="add-button"
@@ -831,13 +901,8 @@
         >
       {/if}
     </div>
-    <Button
-      size="sm"
-      variant="ghost"
-      disabled={!runningAgent?.active_task_has_workspace}
-      onclick={openRunningConsole}
-    >
-      {runningAgent?.active_task_has_workspace ? '⌘ Open live console' : '⌘ No active console'}
+    <Button size="sm" variant="ghost" disabled={!runningNode} onclick={openRunningConsole}>
+      {runningNode ? '⌘ Open live console' : '⌘ No active console'}
     </Button>
     <Button size="sm" variant="primary" disabled={saving || !dirty} onclick={persist}>
       <span class="flex items-center gap-1.5">
@@ -868,16 +933,23 @@
       <span class="direction-summary">
         <b>{sourceNode?.data.displayName}</b><span>→</span><b>{targetNode?.data.displayName}</b>
       </span>
-      <span class="text-muted">{t('workflow.activateOnOutcome')}</span>
-      <select class="border-line rounded border bg-input px-2 py-1" onchange={setEdgeOutcome}>
-        {#each ['success', 'failure', 'changes_requested', 'always'] as outcome (outcome)}
-          <option
-            value={outcome}
-            selected={String(edges.find((edge) => edge.id === selectedEdgeId)?.data?.outcome) ===
-              outcome}>{outcome.replaceAll('_', ' ')}</option
-          >
-        {/each}
-      </select>
+      {#if selectedEdge && isConsultation(selectedEdge)}
+        <p class="text-muted text-xs">
+          Allows a focused question. Replies return automatically; task status stays unchanged.
+          Question initiation currently requires an OpenAI agent.
+        </p>
+      {:else}
+        <span class="text-muted">{t('workflow.activateOnOutcome')}</span>
+        <select class="border-line rounded border bg-input px-2 py-1" onchange={setEdgeOutcome}>
+          {#each [...new Set( [String(selectedEdge?.data?.outcome || 'success'), 'success', 'failure', 'changes_requested', 'always', 'EVENT_INTERPRETED', 'PLAN_READY', 'IMPLEMENTED', 'TEST_PASS', 'TEST_FAILED', 'PASS', 'FAIL_ACTIONABLE', 'FAIL_ARCHITECTURAL', 'NEEDS_HUMAN', 'NEEDS_CONTEXT'] )] as outcome (outcome)}
+            <option
+              value={outcome}
+              selected={String(edges.find((edge) => edge.id === selectedEdgeId)?.data?.outcome) ===
+                outcome}>{outcome.replaceAll('_', ' ')}</option
+            >
+          {/each}
+        </select>
+      {/if}
       <Button size="sm" variant="ghost" onclick={removeSelectedEdge}
         >{t('workflow.deleteConnection')}</Button
       >
@@ -887,6 +959,7 @@
     <SvelteFlow
       bind:nodes
       bind:edges
+      nodesDraggable={!saving}
       fitView
       minZoom={0.25}
       maxZoom={1.8}
@@ -898,9 +971,9 @@
         selectedEdgeId = edge.id;
         selectedNodeId = '';
       }}
-      onnodedragstop={() => (dirty = true)}
+      onnodedragstop={() => void savePositions()}
       ondelete={() => (dirty = true)}
-      defaultEdgeOptions={{ type: 'smoothstep', animated: true }}
+      defaultEdgeOptions={{ type: 'smoothstep', animated: false }}
       colorMode={getTheme()}
     >
       <Background
@@ -915,9 +988,23 @@
       <span><i></i>{t('workflow.configuredRoute')}</span><span
         ><i class="processing"></i>{t('workflow.processingNow')}</span
       >
+      <span><i style="background: none; border-top: 2px dashed #60a5fa;"></i>Ask / reply</span>
     </div>
-    <div class="resize-hint">Drag corner to resize · Node positions save with workflow</div>
+    <div class="resize-hint" role="status">
+      Drag corner to resize · {layoutSaving ? 'Saving positions…' : 'Positions saved automatically'} ·
+      Wiring requires Save
+    </div>
   </div>
+  {#if layoutError}<div class="p-3 text-sm text-danger" role="alert">
+      {layoutError}
+      <button type="button" class="underline" onclick={() => void savePositions()}>Retry</button>
+    </div>{/if}
+  <p class="px-4 py-2 text-xs text-muted">
+    Connections are directed handoffs: the source result activates one destination. Exact results
+    take priority over general outcomes. Use an explicit return connection for rework; permissions
+    and review gates still apply. For an Orchestrator relay, connect both legs with the same exact
+    result, such as PLAN_READY.
+  </p>
 </section>
 
 {#if nodeMenu}
@@ -980,7 +1067,7 @@
             onclick={() => (detailsNodeId = '')}>×</button
           >
         </header>
-        <div class="p-5">
+        <div class="details-scroll">
           <label class="nickname-label">
             {t('workflow.nickname')} <span>{t('workflow.nicknameHint')}</span>
             <input
@@ -1005,7 +1092,7 @@
             </div>
             <div><span>{t('workflow.runsLabel')}</span><b>{detailsAgent?.total_runs ?? 0}</b></div>
             <div>
-              <span>{t('workflow.activeJobsLabel')}</span><b>{detailsAgent?.active_jobs ?? 0}</b>
+              <span>{t('workflow.activeJobsLabel')}</span><b>{detailsNode.data.activeJobs}</b>
             </div>
             <div>
               <span>{t('workflow.modelLabel')}</span><b
@@ -1039,17 +1126,11 @@
                 >
               </div>
               <div class="model-controls">
-                <span class="provider-select">
-                  <BrandIcon brand={detailsNode.data.provider} size={17} />
-                  <select
-                    value={detailsNode.data.provider}
-                    onchange={(event) => changeNodeProvider(detailsNode.id, event)}
-                  >
-                    <option value="openai">OpenAI</option><option value="anthropic"
-                      >Anthropic / Claude</option
-                    ><option value="google">Google / Gemini</option>
-                  </select>
-                </span>
+                <AiProviderSelect
+                  value={detailsNode.data.provider}
+                  compact
+                  onChange={(provider) => changeNodeProvider(detailsNode.id, provider)}
+                />
                 <select
                   value={usesManualNodeModel(detailsNode) ? '__manual__' : detailsNode.data.model}
                   onchange={(event) => chooseModel(detailsNode.id, event)}
@@ -1297,19 +1378,18 @@
                     })}
                 /><small>Low · Normal · Deep</small></label
               >
-              <label
-                ><span>Fallback provider <small>optional</small></span><select
-                  value={detailsNode.data.fallbackProvider}
-                  onchange={(event) =>
-                    updateExecutionSetting(detailsNode.id, {
-                      fallbackProvider: event.currentTarget.value,
-                      fallbackModel: ''
-                    })}
-                  ><option value="">None</option><option value="openai">OpenAI</option><option
-                    value="anthropic">Anthropic</option
-                  ><option value="google">Google</option></select
-                ></label
-              >
+              <AiProviderSelect
+                label="Fallback provider"
+                hint="optional"
+                value={detailsNode.data.fallbackProvider}
+                noneLabel="None"
+                compact
+                onChange={(provider) =>
+                  updateExecutionSetting(detailsNode.id, {
+                    fallbackProvider: provider || '',
+                    fallbackModel: ''
+                  })}
+              />
               {#if detailsNode.data.fallbackProvider}<label
                   ><span>Fallback model</span><input
                     value={detailsNode.data.fallbackModel}
@@ -1322,7 +1402,7 @@
                 >{/if}
             </div>
           </details>
-          {#if detailsNode.data.role === 'INTAKE' || detailsNode.data.role === 'DELIVERER'}
+          {#if detailsNode.data.role === 'DELIVERER'}
             <div class="access-section">
               <div>
                 <h3>{t('workflow.connectedIntegrations')}</h3>
@@ -1349,7 +1429,7 @@
                   >
                 {:else}<p>{t('workflow.noIntegrationsConfigured')}</p>{/each}
               </div>
-              {#if detailsNode.data.role === 'INTAKE'}
+              {#if detailsNode.data.role === 'DELIVERER'}
                 <div class="integration-schedule">
                   <div class="flex items-center justify-between gap-3">
                     <div>
@@ -1636,6 +1716,11 @@
       stroke-dashoffset: -14;
     }
   }
+  @media (prefers-reduced-motion: reduce) {
+    :global(.route-running .svelte-flow__edge-path) {
+      animation: none;
+    }
+  }
   :global(.svelte-flow__handle) {
     width: 11px;
     height: 11px;
@@ -1675,8 +1760,7 @@
     font-size: 0.66rem;
     font-weight: 700;
   }
-  .advanced-grid input,
-  .advanced-grid select {
+  .advanced-grid input {
     width: 100%;
     border: 1px solid var(--color-line);
     border-radius: 0.5rem;
@@ -1938,6 +2022,10 @@
     position: relative;
     z-index: 1;
     width: min(560px, 100%);
+    max-height: min(860px, calc(100vh - 2rem));
+    max-height: min(860px, calc(100dvh - 2rem));
+    display: flex;
+    flex-direction: column;
     overflow: hidden;
     border: 1px solid var(--color-line);
     border-radius: 1rem;
@@ -1945,11 +2033,19 @@
     box-shadow: 0 30px 90px rgb(0 0 0 / 65%);
   }
   .details-modal > header {
+    flex: none;
     display: flex;
     align-items: center;
     gap: 0.75rem;
     border-bottom: 1px solid var(--color-line);
     padding: 1rem 1.2rem;
+  }
+  .details-scroll {
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+    padding: 1.25rem;
   }
   .details-modal > header > button {
     margin-left: auto;
@@ -2127,23 +2223,6 @@
     grid-template-columns: 0.7fr 1.3fr;
     gap: 0.5rem;
     margin-top: 0.65rem;
-  }
-  .provider-select {
-    position: relative;
-    display: block;
-  }
-  .provider-select :global(.brand-icon) {
-    position: absolute;
-    z-index: 1;
-    top: 50%;
-    left: 0.9rem;
-    transform: translateY(-50%);
-    pointer-events: none;
-  }
-  .provider-select select {
-    width: 100%;
-    min-height: 2.75rem;
-    padding-left: 3.25rem;
   }
   .agent-health-summary {
     display: flex;

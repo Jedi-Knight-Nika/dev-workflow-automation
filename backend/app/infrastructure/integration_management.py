@@ -213,7 +213,7 @@ class EncryptedIntegrationManagementWorkflow:
             nodes = list(
                 (
                     await self._session.scalars(
-                        select(WorkflowNode).where(WorkflowNode.role == "INTAKE")
+                        select(WorkflowNode).where(WorkflowNode.role == "DELIVERER")
                     )
                 ).all()
             )

@@ -22,7 +22,7 @@ class SqlAlchemyLinearTaskReconciliation:
             node = await session.scalar(
                 select(WorkflowNode)
                 .where(
-                    WorkflowNode.role == "INTAKE",
+                    WorkflowNode.role == "DELIVERER",
                     WorkflowNode.enabled.is_(True),
                     WorkflowNode.integration_mode.in_(["poll", "hybrid"]),
                     WorkflowNode.filter_assignee_id != "",
@@ -111,7 +111,7 @@ class SqlAlchemyLinearTaskReconciliation:
             await enqueue_job(
                 session,
                 task,
-                JobRole.INTAKE,
+                JobRole.DELIVERER,
                 "INTERPRET_TASK",
                 payload={"source": "linear", "linear_issue_id": issue["id"], "raw": issue["raw"]},
             )

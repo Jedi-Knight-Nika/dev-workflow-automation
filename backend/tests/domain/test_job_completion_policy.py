@@ -7,25 +7,25 @@ from app.domain.jobs import CompletionDirective, success_directive
     ("role", "action", "outcome", "data", "expected"),
     [
         (
-            "INTAKE",
+            "DELIVERER",
             "INTERPRET_TASK",
             "EVENT_INTERPRETED",
             {"actionability": "ACTION_REQUIRED"},
-            CompletionDirective.INTAKE_PLAN,
+            CompletionDirective.DELIVERER_PLAN,
         ),
         (
-            "INTAKE",
+            "DELIVERER",
             "INTERPRET_EXTERNAL_COMMENT",
             "EVENT_INTERPRETED",
             {"actionability": "INFORMATIONAL"},
-            CompletionDirective.INTAKE_INFORMATIONAL,
+            CompletionDirective.DELIVERER_INFORMATIONAL,
         ),
         (
-            "INTAKE",
+            "DELIVERER",
             "INTERPRET_EXTERNAL_COMMENT",
             "EVENT_INTERPRETED",
             {"actionability": "ACTION_REQUIRED", "event_type": "REVIEW_FIX"},
-            CompletionDirective.INTAKE_REPAIR,
+            CompletionDirective.DELIVERER_REPAIR,
         ),
         ("THINKER", "CREATE_PLAN", "PLAN_READY", {}, CompletionDirective.THINKER_EXECUTE),
         (

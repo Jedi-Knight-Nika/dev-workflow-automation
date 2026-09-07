@@ -3,6 +3,7 @@
   import PageHeader from '$lib/components/PageHeader.svelte';
   import Skeleton from '$lib/components/Skeleton.svelte';
   import Spinner from '$lib/components/Spinner.svelte';
+  import AiProviderSelect from '$lib/components/ai/AiProviderSelect.svelte';
   import type { AccountSettings, TelegramStatus } from '$lib/types';
   import {
     configureTelegram,
@@ -198,12 +199,10 @@
           </div>
         {:else if selected === 'ai'}
           <div class="grid gap-5 p-5 sm:grid-cols-2">
-            <label class="setting-field"
-              >Default provider<input
-                bind:value={settings.ai.default_provider_id}
-                placeholder="openai"
-              /></label
-            >
+            <AiProviderSelect
+              label="Default provider"
+              bind:value={settings.ai.default_provider_id}
+            />
             <label class="setting-field"
               >Default model<input
                 bind:value={settings.ai.default_model}

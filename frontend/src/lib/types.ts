@@ -355,6 +355,8 @@ export type DashboardTimeBucket = {
 };
 
 export type DashboardSnapshot = {
+  active_workers?: NonNullable<DashboardSnapshot['active_worker']>[];
+  running_jobs?: number;
   period: 'today' | '7d' | '30d';
   generated_at: string;
   system_status: string;
@@ -369,6 +371,7 @@ export type DashboardSnapshot = {
   estimated_cost: number | null;
   autonomy_rate: number | null;
   active_worker: null | {
+    action?: string;
     job_id: string;
     task_id: string;
     task_label: string;

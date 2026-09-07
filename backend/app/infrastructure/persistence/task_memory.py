@@ -25,6 +25,7 @@ class TaskMemoryService:
         checkpoint: AgentCheckpoint | None = await self._session.scalar(
             select(AgentCheckpoint)
             .where(AgentCheckpoint.task_id == task_id, AgentCheckpoint.role == role)
+            .where(AgentCheckpoint.checkpoint_type != "CONSULTATION")
             .order_by(AgentCheckpoint.created_at.desc())
         )
         return checkpoint
@@ -49,7 +50,8 @@ class TaskMemoryService:
         if existing is not None:
             await self._session.commit()
             return
-        structured = checkpoint_payload(job.role, result)
+        consultation = result.get("result") in {"CONSULTATION_REQUESTED", "CONSULTATION_REPLIED"}
+        structured = result if consultation else checkpoint_payload(job.role, result)
         self._session.add(
             AgentCheckpoint(
                 task_id=task.id,
@@ -57,13 +59,17 @@ class TaskMemoryService:
                 agent_id=agent_id,
                 role_id=role_id,
                 role=job.role,
-                checkpoint_type=f"{job.role.value}_RESULT",
+                checkpoint_type="CONSULTATION" if consultation else f"{job.role.value}_RESULT",
                 repository_sha=task.current_revision,
                 summary=summary[:4000],
                 structured_data=structured,
                 token_estimate=max(1, len(json.dumps(structured)) // 4),
             )
         )
+        if consultation:
+            # Preserve durable replay without replacing a plan or engineering memory.
+            await self._session.commit()
+            return
         memory = await self._record(task)
         memory.goal = str(result.get("goal") or memory.goal or task.title)[:4000]
         memory.current_sha = (

@@ -27,8 +27,6 @@ from app.db.models import (
     Team,
     WorkerNode,
     WorkerRun,
-    WorkflowDefinition,
-    WorkflowNode,
 )
 
 ACTIVE_TASK_STATES = (
@@ -49,17 +47,16 @@ class SqlAlchemyDashboardQueries:
     async def snapshot(self, period: str) -> DashboardSnapshot:
         now = datetime.now(UTC)
         start, days = self._period_start(period, now)
-        active_job = await self._session.scalar(
-            select(Job).where(Job.state.in_(ACTIVE_JOB_STATES)).order_by(Job.started_at).limit(1)
-        )
-        active_worker = await self._active_worker(active_job)
+        active_workers = await self._active_workers()
         queue = await self._queue()
-        queued_jobs = int(
-            await self._session.scalar(
-                select(func.count(Job.id)).where(Job.state.in_(QUEUED_JOB_STATES))
+        queued_jobs, running_jobs = (
+            await self._session.execute(
+                select(
+                    func.count(Job.id).filter(Job.state.in_(QUEUED_JOB_STATES)),
+                    func.count(Job.id).filter(Job.state.in_(ACTIVE_JOB_STATES)),
+                ).where(Job.state.in_((*QUEUED_JOB_STATES, *ACTIVE_JOB_STATES)))
             )
-            or 0
-        )
+        ).one()
         teams = await self._teams(start)
         events = await self._events()
         role_usage = await self._usage(start, "role")
@@ -98,7 +95,9 @@ class SqlAlchemyDashboardQueries:
             autonomy_rate=round((completed - human_completed) / completed * 100, 1)
             if completed
             else None,
-            active_worker=active_worker,
+            active_worker=active_workers[0] if active_workers else None,
+            active_workers=tuple(active_workers),
+            running_jobs=int(running_jobs),
             queue=tuple(queue),
             teams=tuple(teams),
             recent_events=tuple(events),
@@ -125,46 +124,46 @@ class SqlAlchemyDashboardQueries:
             statement = statement.where(Task.updated_at >= start)
         return int(await self._session.scalar(statement) or 0)
 
-    async def _active_worker(self, job: Job | None) -> ActiveWorkerView | None:
-        if job is None:
-            return None
-        task = await self._session.get(Task, job.task_id)
-        if task is None:
-            return None
-        team = await self._session.get(Team, task.team_id) if task.team_id else None
-        agent = None
-        if task.team_id:
-            agent = await self._session.scalar(
-                select(AIAgent)
-                .join(WorkflowNode, WorkflowNode.agent_id == AIAgent.id)
-                .join(WorkflowDefinition, WorkflowDefinition.id == WorkflowNode.workflow_id)
-                .where(
-                    WorkflowDefinition.team_id == task.team_id, WorkflowNode.role == job.role.value
-                )
-                .limit(1)
-            )
+    async def _active_workers(self) -> list[ActiveWorkerView]:
+        active_ids = select(Job.id).where(Job.state.in_(ACTIVE_JOB_STATES))
         usage = (
-            await self._session.execute(
-                select(
-                    func.coalesce(func.sum(WorkerRun.input_tokens), 0),
-                    func.coalesce(func.sum(WorkerRun.output_tokens), 0),
-                ).where(WorkerRun.job_id == job.id)
+            select(
+                WorkerRun.job_id,
+                func.sum(WorkerRun.input_tokens).label("input_tokens"),
+                func.sum(WorkerRun.output_tokens).label("output_tokens"),
             )
-        ).one()
-        return ActiveWorkerView(
-            str(job.id),
-            str(task.id),
-            task.external_key or task.title,
-            str(team.id) if team else None,
-            team.name if team else None,
-            agent.name if agent else None,
-            job.role.value,
-            agent.provider if agent else None,
-            agent.model if agent else None,
-            job.started_at,
-            int(usage[0]),
-            int(usage[1]),
+            .where(WorkerRun.job_id.in_(active_ids))
+            .group_by(WorkerRun.job_id)
+            .subquery()
         )
+        rows = await self._session.execute(
+            select(Job, Task, Team, AIAgent, usage.c.input_tokens, usage.c.output_tokens)
+            .join(Task, Task.id == Job.task_id)
+            .outerjoin(Team, Team.id == Task.team_id)
+            .outerjoin(AIAgent, AIAgent.id == Job.agent_id)
+            .outerjoin(usage, usage.c.job_id == Job.id)
+            .where(Job.state.in_(ACTIVE_JOB_STATES))
+            .order_by(Job.started_at, Job.id)
+            .limit(20)
+        )
+        return [
+            ActiveWorkerView(
+                str(job.id),
+                str(task.id),
+                task.external_key or task.title,
+                str(team.id) if team else None,
+                team.name if team else None,
+                agent.name if agent else None,
+                job.role.value,
+                agent.provider if agent else None,
+                agent.model if agent else None,
+                job.started_at,
+                int(input_tokens or 0),
+                int(output_tokens or 0),
+                job.action,
+            )
+            for job, task, team, agent, input_tokens, output_tokens in rows
+        ]
 
     async def _queue(self) -> list[QueueItemView]:
         rows = (

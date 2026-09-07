@@ -8,7 +8,7 @@ from app.domain.jobs import CompletionDirective
 
 
 @dataclass(frozen=True, slots=True)
-class IntakeCompletionCommand:
+class DelivererCompletionCommand:
     job_id: uuid.UUID
     lease_token: uuid.UUID
     result: dict[str, Any]
@@ -16,7 +16,7 @@ class IntakeCompletionCommand:
 
 
 @dataclass(frozen=True, slots=True)
-class IntakeCompletionContext:
+class DelivererCompletionContext:
     job_id: uuid.UUID
     task_id: uuid.UUID
     action: str
@@ -26,7 +26,7 @@ class IntakeCompletionContext:
     manual_takeover: bool
 
 
-class IntakeCompletionUnitOfWork(Protocol):
+class DelivererCompletionUnitOfWork(Protocol):
     async def __aenter__(self) -> Self: ...
 
     async def __aexit__(
@@ -36,22 +36,26 @@ class IntakeCompletionUnitOfWork(Protocol):
         traceback: types.TracebackType | None,
     ) -> None: ...
 
-    async def begin(self, command: IntakeCompletionCommand) -> IntakeCompletionContext | None: ...
+    async def begin(
+        self, command: DelivererCompletionCommand
+    ) -> DelivererCompletionContext | None: ...
 
-    async def finish_during_takeover(self, context: IntakeCompletionContext) -> None: ...
+    async def finish_during_takeover(self, context: DelivererCompletionContext) -> None: ...
 
-    async def finish_conversation(self, context: IntakeCompletionContext) -> None: ...
+    async def finish_conversation(self, context: DelivererCompletionContext) -> None: ...
 
     async def apply(
-        self, context: IntakeCompletionContext, directive: CompletionDirective
+        self, context: DelivererCompletionContext, directive: CompletionDirective
     ) -> None: ...
 
     async def commit(self) -> None: ...
 
-    async def execute_external_delivery_actions(self, context: IntakeCompletionContext) -> None: ...
+    async def execute_external_delivery_actions(
+        self, context: DelivererCompletionContext
+    ) -> None: ...
 
     async def synchronize_tracker(self, task_id: uuid.UUID) -> None: ...
 
 
-class IntakeCompletionUnitOfWorkFactory(Protocol):
-    def __call__(self) -> IntakeCompletionUnitOfWork: ...
+class DelivererCompletionUnitOfWorkFactory(Protocol):
+    def __call__(self) -> DelivererCompletionUnitOfWork: ...

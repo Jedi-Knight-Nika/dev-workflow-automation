@@ -1,14 +1,15 @@
 from __future__ import annotations
 
+import uuid
 from pathlib import Path
 from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.application.ports.intake_completion import IntakeCompletionContext
+from app.application.ports.deliverer_completion import DelivererCompletionContext
 from app.application.pull_requests import MergeConflict, MergeTask, MergeUnavailable
-from app.db.models import Integration, Repository, Task, TaskState
+from app.db.models import Integration, Repository, Task, TaskRepositoryScope, TaskState
 from app.infrastructure.git.workspaces import GitCommandError, github_token, run_git
 from app.infrastructure.integration_access import role_allows_integration
 from app.infrastructure.persistence.job_operations import record_event
@@ -26,22 +27,44 @@ class GitHubCommentActionExecutor:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
-    async def execute(self, context: IntakeCompletionContext) -> None:
+    async def execute(self, context: DelivererCompletionContext) -> None:
         actions = self._actions(context)
         if not actions:
             return
         task = await self._session.get(Task, context.task_id)
-        if task is None or task.repository_id is None or task.pull_request_number is None:
+        if task is None:
             await self._reject(context.task_id, "Task has no active pull request")
             return
-        repository = await self._session.get(Repository, task.repository_id)
+        try:
+            repository_id = uuid.UUID(
+                str(context.job_payload.get("repository_id") or task.repository_id)
+            )
+        except ValueError:
+            await self._reject(task.id, "Comment repository is unavailable")
+            return
+        scope = await self._session.scalar(
+            select(TaskRepositoryScope).where(
+                TaskRepositoryScope.task_id == task.id,
+                TaskRepositoryScope.repository_id == repository_id,
+            )
+        )
+        if scope is None and repository_id != task.repository_id:
+            await self._reject(task.id, "Comment is outside this task's repository scope")
+            return
+        number = scope.pull_request_number if scope else task.pull_request_number
+        if number is None or context.job_payload.get("pull_request_number", number) != number:
+            await self._reject(task.id, "Comment does not refer to the current pull request")
+            return
+        repository = await self._session.get(Repository, repository_id)
         integration = await self._session.scalar(
             select(Integration).where(Integration.provider_name == "github")
         )
         if repository is None or integration is None or integration.encrypted_credentials is None:
             await self._reject(task.id, "GitHub integration is unavailable")
             return
-        if not await role_allows_integration(self._session, "DELIVERER", integration.id):
+        if not await role_allows_integration(
+            self._session, "DELIVERER", integration.id, task.team_id
+        ):
             await self._reject(task.id, "GitHub is not enabled for delivery")
             return
 
@@ -55,7 +78,7 @@ class GitHubCommentActionExecutor:
         body = self._value(actions, "UPDATE_PR_BODY")
         commit_message = self._value(actions, "UPDATE_COMMIT_MESSAGE")
         if commit_message is not None and not await self._rewrite_commit(
-            task, commit_message, actor
+            task, commit_message, actor, scope
         ):
             return
         if title is not None or body is not None:
@@ -63,7 +86,7 @@ class GitHubCommentActionExecutor:
                 await client.update_pull_request(
                     repository.owner,
                     repository.name,
-                    task.pull_request_number,
+                    number,
                     title=title,
                     body=body,
                 )
@@ -91,13 +114,18 @@ class GitHubCommentActionExecutor:
                 self._session,
                 task.id,
                 "PULL_REQUEST_MERGE_REQUESTED",
-                {"actor": actor, "source_url": context.job_payload.get("url")},
+                {
+                    "actor": actor,
+                    "source_url": context.job_payload.get("url"),
+                    "revision": scope.current_revision if scope else task.current_revision,
+                    "repository_id": str(repository_id),
+                },
             )
             await self._session.commit()
-            await self._merge(task.id, actor, context.job_payload.get("url"))
+            await self._merge(task.id, actor, context.job_payload.get("url"), repository_id)
 
     @staticmethod
-    def _actions(context: IntakeCompletionContext) -> list[dict[str, Any]]:
+    def _actions(context: DelivererCompletionContext) -> list[dict[str, Any]]:
         if (
             context.action != "INTERPRET_EXTERNAL_COMMENT"
             or context.job_payload.get("source") != "github"
@@ -131,9 +159,13 @@ class GitHubCommentActionExecutor:
             return None
         return value.strip()
 
-    async def _merge(self, task_id: Any, actor: str, source_url: object) -> None:
+    async def _merge(
+        self, task_id: Any, actor: str, source_url: object, repository_id: uuid.UUID | None = None
+    ) -> None:
         try:
-            await MergeTask(SqlAlchemyGitHubMergeWorkflow(self._session)).execute(task_id)
+            await MergeTask(SqlAlchemyGitHubMergeWorkflow(self._session, repository_id)).execute(
+                task_id
+            )
         except (MergeConflict, MergeUnavailable, ValueError) as exc:
             await record_event(
                 self._session,
@@ -147,14 +179,17 @@ class GitHubCommentActionExecutor:
             )
             await self._session.commit()
 
-    async def _rewrite_commit(self, task: Task, message: str, actor: str) -> bool:
-        if not task.workspace_path or not task.branch_name or not task.current_revision:
+    async def _rewrite_commit(
+        self, task: Task, message: str, actor: str, scope: TaskRepositoryScope | None = None
+    ) -> bool:
+        target = scope or task
+        if not target.workspace_path or not target.branch_name or not target.current_revision:
             await self._reject(task.id, "Task branch is unavailable for commit-message update")
             return False
-        workspace = Path(task.workspace_path)
+        workspace = Path(target.workspace_path)
         try:
             old_revision = await run_git("rev-parse", "HEAD", cwd=workspace)
-            if old_revision != task.current_revision:
+            if old_revision != target.current_revision:
                 await self._reject(task.id, "Task branch revision changed before commit update")
                 return False
             await run_git(
@@ -174,20 +209,22 @@ class GitHubCommentActionExecutor:
                 raise GitCommandError("GitHub credentials are unavailable")
             await run_git(
                 "push",
-                f"--force-with-lease=refs/heads/{task.branch_name}:{old_revision}",
+                f"--force-with-lease=refs/heads/{target.branch_name}:{old_revision}",
                 "origin",
-                f"HEAD:refs/heads/{task.branch_name}",
+                f"HEAD:refs/heads/{target.branch_name}",
                 cwd=workspace,
                 token=token,
             )
         except (GitCommandError, OSError):
             try:
-                await run_git("reset", "--soft", task.current_revision, cwd=workspace)
+                await run_git("reset", "--soft", target.current_revision, cwd=workspace)
             except (GitCommandError, OSError):
                 pass
             await self._reject(task.id, "Commit-message update could not be pushed safely")
             return False
-        task.current_revision = new_revision
+        target.current_revision = new_revision
+        if scope is None or scope.is_primary:
+            task.current_revision = new_revision
         task.state = TaskState.WAITING_GITHUB
         await record_event(
             self._session,

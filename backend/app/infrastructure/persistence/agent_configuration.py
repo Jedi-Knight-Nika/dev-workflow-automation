@@ -14,9 +14,17 @@ class SqlAlchemyAgentConfigurationWorkflow:
         self._session = session
 
     async def list(self) -> list[AgentView]:
-        configs = list((await self._session.scalars(select(AgentConfig))).all())
+        configs = list(
+            (
+                await self._session.scalars(
+                    select(AgentConfig).where(AgentConfig.role != JobRole.INTAKE)
+                )
+            ).all()
+        )
         existing = {config.role for config in configs}
         for role in JobRole:
+            if role == JobRole.INTAKE:
+                continue
             if role not in existing:
                 configs.append(
                     AgentConfig(
@@ -32,6 +40,8 @@ class SqlAlchemyAgentConfigurationWorkflow:
 
     async def update(self, command: AgentConfigCommand) -> AgentView:
         role = JobRole(command.role)
+        if role == JobRole.INTAKE:
+            raise ValueError("Intake was combined into Deliverer; configure Deliverer instead")
         config = await self._session.get(AgentConfig, role)
         if config is None:
             config = AgentConfig(role=role)

@@ -1,5 +1,11 @@
 export type ProviderModel = { id: string; display_name: string };
 
+export const AI_PROVIDERS = [
+  { id: 'openai', label: 'OpenAI' },
+  { id: 'anthropic', label: 'Anthropic / Claude' },
+  { id: 'google', label: 'Google / Gemini' }
+] as const;
+
 /**
  * Conservative defaults keep model selection usable before provider discovery.
  * Live provider discovery is merged into these options whenever credentials are available.

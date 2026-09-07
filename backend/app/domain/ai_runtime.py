@@ -65,7 +65,7 @@ DEFAULT_RUNTIME_PROFILE: dict[str, Any] = {
     "max_tool_calls": 40,
     "job_timeout_seconds": 1800,
     "max_job_attempts": 2,
-    "max_model_turns": 3,
+    "max_model_turns": 20,
     "structured_output_mode": "REQUIRED",
 }
 

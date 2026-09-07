@@ -4,6 +4,7 @@ import json
 import os
 import re
 import signal
+from collections.abc import Callable
 from contextlib import suppress
 from pathlib import Path, PurePosixPath
 from typing import Literal
@@ -64,10 +65,15 @@ async def requested_file_context(
     requested_files: list[str],
     *,
     max_context_bytes: int = MAX_CONTEXT_BYTES,
+    existing_context: list[dict[str, str]] | None = None,
+    path_filter: Callable[[str], bool] | None = None,
 ) -> list[dict[str, str]]:
     """Load bounded, tracked source files explicitly requested by an Executor."""
     results: list[dict[str, str]] = []
     used = 0
+    already_loaded = {
+        item["path"]: item for item in existing_context or [] if item.get("status") == "LOADED"
+    }
     tracked_by_workspace = {
         workspace: (await run_git("ls-files", cwd=workspace)).splitlines()
         for _, workspace in workspaces
@@ -102,23 +108,39 @@ async def requested_file_context(
                 ]
                 if len(basename_matches) == 1:
                     relative = basename_matches[0]
+        if (workspace / relative).is_symlink() or (path_filter and not path_filter(relative)):
+            results.append({"path": requested, "status": "NOT_READABLE"})
+            continue
         path = _safe_path(workspace, relative)
+        if path_filter and not path_filter(path.relative_to(workspace.resolve()).as_posix()):
+            results.append({"path": requested, "status": "NOT_READABLE"})
+            continue
         if relative not in tracked:
             results.append(
                 {"path": requested, "requested_path": requested, "status": "NOT_TRACKED_OR_NEW"}
             )
             continue
+        display_path = relative if len(workspaces) == 1 else f"{prefix}/{relative}"
+        if display_path in already_loaded:
+            results.append({**already_loaded[display_path], "requested_path": requested})
+            continue
         if not path.is_file() or path.is_symlink():
             results.append({"path": requested, "status": "NOT_READABLE"})
             continue
-        content = path.read_text(encoding="utf-8")
+        if path.stat().st_size > MAX_FILE_BYTES:
+            results.append({"path": requested, "status": "CONTEXT_LIMIT"})
+            continue
+        try:
+            content = path.read_text(encoding="utf-8")
+        except (UnicodeError, OSError):
+            results.append({"path": requested, "status": "NOT_READABLE"})
+            continue
         size = len(content.encode())
         if size > MAX_FILE_BYTES or used + size > max_context_bytes:
             results.append(
                 {"path": requested, "requested_path": requested, "status": "CONTEXT_LIMIT"}
             )
             continue
-        display_path = relative if len(workspaces) == 1 else f"{prefix}/{relative}"
         results.append(
             {
                 "path": display_path,
@@ -135,7 +157,14 @@ def merge_requested_file_context(
     accumulated: list[dict[str, str]], current: list[dict[str, str]]
 ) -> list[dict[str, str]]:
     """Retain loaded source across bounded context-expansion rounds."""
-    merged = list(accumulated)
+    # Replace obsolete diagnostics when a previously missing source is resolved.
+    current_requests = {item.get("requested_path", item["path"]) for item in current}
+    merged = [
+        item
+        for item in accumulated
+        if item.get("status") == "LOADED"
+        or item.get("requested_path", item["path"]) not in current_requests
+    ]
     loaded_paths = {item["path"] for item in merged if item.get("status") == "LOADED"}
     for item in current:
         if item.get("status") == "LOADED" and item["path"] in loaded_paths:

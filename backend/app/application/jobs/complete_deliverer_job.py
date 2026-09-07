@@ -1,15 +1,15 @@
-from app.application.ports.intake_completion import (
-    IntakeCompletionCommand,
-    IntakeCompletionUnitOfWorkFactory,
+from app.application.ports.deliverer_completion import (
+    DelivererCompletionCommand,
+    DelivererCompletionUnitOfWorkFactory,
 )
 from app.domain.jobs import success_directive
 
 
-class CompleteIntakeJob:
-    def __init__(self, unit_of_work_factory: IntakeCompletionUnitOfWorkFactory) -> None:
+class CompleteDelivererJob:
+    def __init__(self, unit_of_work_factory: DelivererCompletionUnitOfWorkFactory) -> None:
         self._unit_of_work_factory = unit_of_work_factory
 
-    async def execute(self, command: IntakeCompletionCommand) -> bool:
+    async def execute(self, command: DelivererCompletionCommand) -> bool:
         async with self._unit_of_work_factory() as unit_of_work:
             context = await unit_of_work.begin(command)
             if context is None:
@@ -20,7 +20,7 @@ class CompleteIntakeJob:
                 await unit_of_work.finish_conversation(context)
             else:
                 directive = success_directive(
-                    role="INTAKE",
+                    role="DELIVERER",
                     action=context.action,
                     outcome=context.outcome,
                     data=context.data,

@@ -2,6 +2,7 @@
   import { resolve } from '$app/paths';
   import { onMount } from 'svelte';
   import { API_URL } from '$lib/api';
+  import { createLiveRefresh } from '$lib/live-refresh';
   import ErrorBanner from '$lib/components/ErrorBanner.svelte';
   import PageHeader from '$lib/components/PageHeader.svelte';
   import Skeleton from '$lib/components/Skeleton.svelte';
@@ -23,7 +24,10 @@
     loading = $state(true);
   let telemetry = $state<HostTelemetry | null>(null);
   let approvals = $state<ApprovalRequest[]>([]);
-  let refreshTimer: ReturnType<typeof setTimeout> | undefined;
+  let now = $state(Date.now());
+  let telemetryError = $state('');
+  let telemetryLoading = false;
+  const refresh = createLiveRefresh(load);
   let requestId = 0;
   const compact = new Intl.NumberFormat(undefined, {
     notation: 'compact',
@@ -35,19 +39,25 @@
     second: '2-digit'
   });
   const total = (item: DashboardUsageBucket) => item.input_tokens + item.output_tokens;
+  function bytes(value: number) {
+    const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
+    const index = Math.min(
+      4,
+      Math.max(0, Math.floor(Math.log(Math.max(value, 1)) / Math.log(1024)))
+    );
+    return `${(value / 1024 ** index).toFixed(index ? 1 : 0)} ${units[index]}`;
+  }
   const maxUsage = (items: DashboardUsageBucket[]) => Math.max(1, ...items.map(total));
 
   async function load() {
     const thisRequest = ++requestId;
     try {
-      const [nextDashboard, nextTelemetry, nextApprovals] = await Promise.all([
+      const [nextDashboard, nextApprovals] = await Promise.all([
         getDashboardSummary(period),
-        getDashboardTelemetry(),
         listApprovals()
       ]);
       if (thisRequest !== requestId) return;
       dashboard = nextDashboard;
-      telemetry = nextTelemetry;
       approvals = nextApprovals;
       error = '';
     } catch (cause) {
@@ -68,33 +78,53 @@
   async function selectPeriod(value: typeof period) {
     period = value;
     loading = true;
-    await load();
+    refresh.request();
   }
   function scheduleRefresh() {
-    clearTimeout(refreshTimer);
-    refreshTimer = setTimeout(() => void load(), 250);
+    if (!document.hidden) refresh.request();
   }
   function elapsed(startedAt: string | null) {
     if (!startedAt) return 'STARTING';
-    const seconds = Math.max(0, Math.floor((Date.now() - Date.parse(startedAt)) / 1000));
+    const seconds = Math.max(0, Math.floor((now - Date.parse(startedAt)) / 1000));
     return `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
   }
   onMount(() => {
-    void load();
+    refresh.request();
+    const updateTelemetry = async () => {
+      if (telemetryLoading || document.hidden) return;
+      telemetryLoading = true;
+      try {
+        telemetry = await getDashboardTelemetry();
+        telemetryError = '';
+      } catch {
+        telemetryError = 'Telemetry temporarily unavailable';
+      } finally {
+        telemetryLoading = false;
+      }
+    };
+    void updateTelemetry();
     const stream = new EventSource(`${API_URL}/api/v1/events/stream`);
-    const telemetryTimer = setInterval(() => {
-      void getDashboardTelemetry().then((value) => (telemetry = value));
-    }, 5000);
-    stream.onopen = () => (live = true);
+    const telemetryTimer = setInterval(() => void updateTelemetry(), 5000);
+    const clockTimer = setInterval(() => {
+      if (!document.hidden) now = Date.now();
+    }, 1000);
+    const fallbackTimer = setInterval(scheduleRefresh, 15000);
+    document.addEventListener('visibilitychange', scheduleRefresh);
+    stream.onopen = () => {
+      live = true;
+      scheduleRefresh();
+    };
     stream.addEventListener('update', scheduleRefresh);
     stream.onerror = () => {
       live = false;
-      error = 'Live connection interrupted; reconnecting.';
     };
     return () => {
       stream.close();
-      clearTimeout(refreshTimer);
+      refresh.stop();
       clearInterval(telemetryTimer);
+      clearInterval(clockTimer);
+      clearInterval(fallbackTimer);
+      document.removeEventListener('visibilitychange', scheduleRefresh);
     };
   });
 </script>
@@ -108,6 +138,15 @@
 <main class="cockpit">
   <div class="toolbar">
     <span class="live"><i class:connected={live}></i>{live ? 'LIVE' : 'RECONNECTING'}</span>
+    <span class="text-xs text-muted" role="status"
+      >{dashboard
+        ? `Updated ${Math.max(0, Math.floor((now - Date.parse(dashboard.generated_at)) / 1000))}s ago`
+        : 'Loading live state…'}{!live ? ' · polling every 15s' : ''}</span
+    >
+    <button
+      class="rounded border border-line px-2 py-1 text-xs hover:bg-panel-alt"
+      onclick={scheduleRefresh}>Refresh</button
+    >
     <div class="periods">
       {#each [['today', 'Today'], ['7d', '7 days'], ['30d', '30 days']] as item (item[0])}<button
           class:active={period === item[0]}
@@ -116,6 +155,7 @@
     </div>
   </div>
   <ErrorBanner message={error} />
+  {#if telemetryError}<p class="text-xs text-warning" role="status">{telemetryError}</p>{/if}
   {#if loading && !dashboard}
     <section class="metrics" aria-busy="true">
       <article class="health"><Skeleton class="h-[88px] w-[88px] rounded-full" /></article>
@@ -168,14 +208,18 @@
               ? dashboard.estimated_cost === null
                 ? 'Cost unavailable'
                 : `$${dashboard.estimated_cost.toFixed(2)} estimated`
-              : period}</small
+              : 'now'}</small
           >
         </article>{/each}
     </section>
 
     <section class="split">
       <article class="worker panel">
-        <header><span>ACTIVE WORKER</span><i class:running={dashboard.active_worker}></i></header>
+        <header>
+          <span
+            >ACTIVE WORKER · {dashboard.running_jobs ?? (dashboard.active_worker ? 1 : 0)} RUNNING</span
+          ><i class:running={dashboard.active_worker}></i>
+        </header>
         {#if dashboard.active_worker}<div class="worker-core">
             <PixelAgentAvatar
               seed={`${dashboard.active_worker.agent_name}:${dashboard.active_worker.role}`}
@@ -198,13 +242,19 @@
           <footer>
             <div><span>ELAPSED</span><b>{elapsed(dashboard.active_worker.started_at)}</b></div>
             <div>
-              <span>TOKENS</span><b
+              <span title="Recorded usage; in-flight usage arrives after the provider response"
+                >RECORDED TOKENS</span
+              ><b
                 >{compact.format(
                   dashboard.active_worker.input_tokens + dashboard.active_worker.output_tokens
                 )}</b
               >
             </div>
-            <div><span>STATE</span><b class="cyan-text">RUNNING</b></div>
+            <div>
+              <span>ACTIVITY</span><b class="cyan-text"
+                >{dashboard.active_worker.action?.replaceAll('_', ' ') || 'RUNNING'}</b
+              >
+            </div>
           </footer>{:else}<div class="worker-core idle">
             <div class="orb">—</div>
             <h2>Execution lane idle</h2>
@@ -235,6 +285,30 @@
         </div>
       </article>
     </section>
+
+    {#if (dashboard.active_workers?.length ?? 0) > 1}
+      <section class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3" aria-label="Running workers">
+        {#each dashboard.active_workers || [] as worker (worker.job_id)}
+          <a
+            href={resolve('/tasks/[id]', { id: worker.task_id })}
+            class="flex min-w-0 items-center gap-3 rounded-xl border border-brand/30 bg-panel p-4 hover:bg-panel-alt"
+          >
+            <PixelAgentAvatar
+              seed={`${worker.agent_name}:${worker.role}`}
+              label={worker.agent_name || worker.role}
+              size={36}
+            />
+            <div class="min-w-0 flex-1">
+              <strong class="block truncate text-sm">{worker.agent_name || worker.role}</strong
+              ><span class="block truncate text-xs text-muted"
+                >{worker.team_name} · {worker.task_label}</span
+              >
+            </div>
+            <span class="font-mono text-xs text-brand">{elapsed(worker.started_at)}</span>
+          </a>
+        {/each}
+      </section>
+    {/if}
 
     <div class="section-title">
       <div>
@@ -334,7 +408,7 @@
             <span>SCHEDULER</span>
             <h2>Execution queue</h2>
           </div>
-          <b>{dashboard.queue.length}</b>
+          <b>{dashboard.queued_jobs}</b>
         </header>
         {#each dashboard.queue.slice(0, 8) as job, index (job.job_id)}<a
             href={resolve('/tasks/[id]', { id: job.task_id })}
@@ -414,13 +488,11 @@
                 <b>{Number(meter[1]).toFixed(0)}%</b>
               </div>
               <span>{meter[0]}</span>{#if meter[0] === 'MEMORY'}<small
-                  >{compact.format(telemetry.memory_used_bytes)} / {compact.format(
+                  >{bytes(telemetry.memory_used_bytes)} / {bytes(
                     telemetry.memory_total_bytes
                   )}</small
                 >{:else if meter[0] === 'DISK'}<small
-                  >{compact.format(telemetry.disk_used_bytes)} / {compact.format(
-                    telemetry.disk_total_bytes
-                  )}</small
+                  >{bytes(telemetry.disk_used_bytes)} / {bytes(telemetry.disk_total_bytes)}</small
                 >{:else}<small>Load {telemetry.load_average?.[0].toFixed(2) ?? '—'}</small>{/if}
             </article>
           {/each}
@@ -484,6 +556,14 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
+  }
+  .toolbar {
+    flex-wrap: wrap;
+    gap: 0.75rem;
+  }
+  .metric strong,
+  .worker footer b {
+    font-variant-numeric: tabular-nums;
   }
   .live {
     font: 700 0.65rem var(--font-mono);

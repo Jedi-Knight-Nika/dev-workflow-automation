@@ -80,3 +80,25 @@ class WorkflowGraphRead(BaseModel):
     version: int = Field(ge=0)
     nodes: list[WorkflowNodeRead]
     edges: list[WorkflowEdgeRead]
+
+
+class NodePositionWrite(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    node_id: uuid.UUID
+    x: float = Field(allow_inf_nan=False, ge=-10_000_000, le=10_000_000)
+    y: float = Field(allow_inf_nan=False, ge=-10_000_000, le=10_000_000)
+
+
+class WorkflowLayoutWrite(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    version: int = Field(ge=0)
+    positions: list[NodePositionWrite] = Field(max_length=500)
+
+
+class WorkflowActivityRead(BaseModel):
+    node_id: uuid.UUID
+    active_jobs: int
+    queued_jobs: int
+    waiting_jobs: int
+    current_job_action: str | None
+    task_id: uuid.UUID | None

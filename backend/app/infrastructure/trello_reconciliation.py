@@ -96,7 +96,7 @@ class SqlAlchemyTrelloTaskReconciliation:
             await enqueue_job(
                 session,
                 task,
-                JobRole.INTAKE,
+                JobRole.DELIVERER,
                 "INTERPRET_TASK",
                 payload={"source": "trello", "trello_card_id": card["id"]},
             )

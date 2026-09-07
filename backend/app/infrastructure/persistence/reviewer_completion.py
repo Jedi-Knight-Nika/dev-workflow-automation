@@ -14,9 +14,7 @@ from app.db.models import (
     Job,
     JobRole,
     JobState,
-    Repository,
     Task,
-    TaskRepositoryScope,
     TaskState,
     ValidationRecord,
     WorkflowNode,
@@ -30,7 +28,7 @@ from app.infrastructure.persistence.job_operations import (
 )
 from app.infrastructure.persistence.reviews import persist_review_result
 from app.infrastructure.persistence.workflow_routing import route_completed_job
-from app.infrastructure.pull_requests.operations import publish_pull_request
+from app.infrastructure.pull_requests.delivery import publish_task_repositories
 
 log = structlog.get_logger()
 
@@ -270,42 +268,7 @@ class SqlAlchemyReviewerCompletionUnitOfWork:
         await self._active().commit()
 
     async def publish(self, task_id: uuid.UUID) -> None:
-        session = self._active()
-        try:
-            task = await session.get(Task, task_id, with_for_update=True)
-            if task is None or task.state != TaskState.WAITING_GITHUB or task.manual_takeover:
-                return
-            rows = (
-                await session.execute(
-                    select(TaskRepositoryScope, Repository)
-                    .join(Repository, Repository.id == TaskRepositoryScope.repository_id)
-                    .where(
-                        TaskRepositoryScope.task_id == task.id,
-                        TaskRepositoryScope.changed.is_(True),
-                    )
-                    .order_by(TaskRepositoryScope.is_primary.desc())
-                )
-            ).all()
-            if not rows and task.repository_id is not None:
-                repository = await session.get(Repository, task.repository_id)
-                if repository is not None:
-                    await publish_pull_request(session, task, repository)
-                return
-            for scope, repository in rows:
-                if not repository.enabled:
-                    raise RuntimeError("Reviewed task repository is unavailable")
-                await publish_pull_request(session, task, repository, scope)
-        except Exception as exc:
-            log.exception("automatic_pull_request_publish_failed", task_id=str(task_id))
-            await session.rollback()
-            task = await session.get(Task, task_id, with_for_update=True)
-            if task is None:
-                return
-            task.state = TaskState.NEEDS_HUMAN
-            await record_event(
-                session, task.id, "AUTOMATIC_PR_PUBLISH_FAILED", {"error": str(exc)[:1000]}
-            )
-            await session.commit()
+        await publish_task_repositories(self._active(), task_id)
 
     async def synchronize_tracker(self, task_id: uuid.UUID) -> None:
         task = await self._active().get(Task, task_id)

@@ -21,6 +21,8 @@ class ProviderRequest:
     timeout_seconds: int = 120
     cacheable_prompt_prefix: str | None = None
     response_schema: dict[str, Any] | None = None
+    tools: tuple[dict[str, Any], ...] = ()
+    tool_history: tuple[dict[str, Any], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -29,6 +31,8 @@ class ProviderResponse:
     request_id: str | None = None
     input_tokens: int | None = None
     output_tokens: int | None = None
+    tool_calls: tuple[dict[str, Any], ...] = ()
+    continuation: tuple[dict[str, Any], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -47,6 +51,8 @@ class ProviderRequestError(RuntimeError):
 
 
 class AIProvider(ABC):
+    supports_repository_tools = False
+
     def __init__(self, api_key: str) -> None:
         self.api_key = api_key
         self._client: httpx.AsyncClient | None = None

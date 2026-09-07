@@ -13,9 +13,9 @@
 <section
   class="border-line flex flex-wrap items-center justify-between gap-3 rounded-xl border p-5 xl:col-span-2"
 >
-  <div>
+  <div class="min-w-0 flex-1">
     <strong>{t('taskDetail.gitWorkspace')}</strong>
-    <p class="text-muted text-xs">
+    <p class="break-all text-muted text-xs">
       {task.workspace_path ||
         (task.repository_id
           ? t('taskDetail.repoSelectedNotPrepared')

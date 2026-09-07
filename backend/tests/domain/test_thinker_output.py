@@ -7,7 +7,7 @@ from app.infrastructure.workers.structured_output import validate_role_output
 
 def test_intake_requires_the_versioned_terminal_result() -> None:
     result = validate_role_output(
-        JobRole.INTAKE,
+        JobRole.DELIVERER,
         '{"result":"EVENT_INTERPRETED","event_type":"NEW_TASK","actionability":"ACTION_REQUIRED","blocking":false,"summary":"Implement the request","confidence":0.95,"external_delivery_actions":[]}',
     )
     assert result["result"] == "EVENT_INTERPRETED"
@@ -16,14 +16,14 @@ def test_intake_requires_the_versioned_terminal_result() -> None:
 def test_intake_rejects_unknown_actionability() -> None:
     with pytest.raises(ValidationError):
         validate_role_output(
-            JobRole.INTAKE,
+            JobRole.DELIVERER,
             '{"result":"EVENT_INTERPRETED","event_type":"NEW_TASK","actionability":"MAYBE","blocking":false,"summary":"Unknown","confidence":0.5}',
         )
 
 
 def test_intake_accepts_typed_github_delivery_actions() -> None:
     result = validate_role_output(
-        JobRole.INTAKE,
+        JobRole.DELIVERER,
         '{"result":"EVENT_INTERPRETED","event_type":"INFORMATIONAL",'
         '"actionability":"INFORMATIONAL","blocking":false,"summary":"Rename and merge",'
         '"confidence":1,"external_delivery_actions":['
@@ -39,7 +39,7 @@ def test_intake_accepts_typed_github_delivery_actions() -> None:
 
 def test_intake_accepts_commit_message_update_action() -> None:
     result = validate_role_output(
-        JobRole.INTAKE,
+        JobRole.DELIVERER,
         '{"result":"EVENT_INTERPRETED","event_type":"INFORMATIONAL",'
         '"actionability":"INFORMATIONAL","blocking":false,"summary":"Rename commit",'
         '"confidence":1,"external_delivery_actions":['
@@ -52,7 +52,7 @@ def test_intake_accepts_commit_message_update_action() -> None:
 def test_intake_rejects_merge_action_with_an_arbitrary_value() -> None:
     with pytest.raises(ValidationError, match="does not accept a value"):
         validate_role_output(
-            JobRole.INTAKE,
+            JobRole.DELIVERER,
             '{"result":"EVENT_INTERPRETED","event_type":"INFORMATIONAL",'
             '"actionability":"INFORMATIONAL","blocking":false,"summary":"Merge",'
             '"confidence":1,"external_delivery_actions":['

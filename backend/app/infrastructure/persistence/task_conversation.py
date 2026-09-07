@@ -94,7 +94,7 @@ class SqlAlchemyTaskConversationStore:
             await enqueue_job(
                 self._session,
                 task,
-                JobRole.INTAKE,
+                JobRole.DELIVERER,
                 "RESPOND_TO_MESSAGE",
                 payload={
                     "message_id": message.id,

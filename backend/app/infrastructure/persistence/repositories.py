@@ -70,7 +70,7 @@ class SqlAlchemyJobRepository:
     async def enqueue_intake(self, task: Task, payload: dict[str, Any]) -> uuid.UUID:
         job = Job(
             task_id=task.id,
-            role=JobRole.INTAKE,
+            role=JobRole.DELIVERER,
             action="INTERPRET_TASK",
             priority=task.priority,
             payload=payload,
@@ -80,7 +80,7 @@ class SqlAlchemyJobRepository:
         await SqlAlchemyEventRepository(self._session).add(
             task.id,
             "JOB_QUEUED",
-            {"job_id": str(job.id), "role": JobRole.INTAKE.value, "action": job.action},
+            {"job_id": str(job.id), "role": JobRole.DELIVERER.value, "action": job.action},
             source="system",
         )
         return job.id

@@ -1,7 +1,12 @@
 import json
+from types import SimpleNamespace
+from typing import cast
+from unittest.mock import AsyncMock
 
 import pytest
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db.models import Job, JobRole, Task
 from app.infrastructure.workers.context_compiler import (
     MIN_CONTEXT_CHARS,
     ContextCompiler,
@@ -77,7 +82,7 @@ def test_non_ascii_context_is_measured_without_escape_inflation() -> None:
 
 
 def test_context_compiler_exposes_role_specific_entrypoints() -> None:
-    for role in ("intake", "thinker", "executor", "reviewer"):
+    for role in ("deliverer", "thinker", "executor", "reviewer"):
         assert hasattr(ContextCompiler, f"compile_for_{role}")
 
 
@@ -109,3 +114,51 @@ def test_repository_relevance_uses_goal_and_targets_not_full_plan_noise() -> Non
 
     assert "frontend sidebar" in hint
     assert "unrelated noisy" not in hint
+
+
+@pytest.mark.asyncio
+async def test_conversation_reply_keeps_task_evidence_without_repository_discovery(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = AsyncMock(spec=AsyncSession)
+    session.scalar.return_value = SimpleNamespace(result={"reason": "Missing dependency"})
+    compiler = ContextCompiler(session)
+    monkeypatch.setattr(compiler, "_base", lambda *args: {"task": {"title": "Fix it"}})
+    conversation = AsyncMock()
+    repositories = AsyncMock()
+    monkeypatch.setattr(compiler, "_include_conversation", conversation)
+    monkeypatch.setattr(
+        compiler, "_persistent_memory", AsyncMock(return_value={"summary": "Context"})
+    )
+    monkeypatch.setattr(compiler, "_plan", AsyncMock(return_value={"goal": "Implement"}))
+    monkeypatch.setattr(compiler, "_team_repositories", repositories)
+
+    async def finish(task, job, context, started):
+        return context
+
+    monkeypatch.setattr(compiler, "_finish", finish)
+    import uuid
+
+    result = await compiler.compile_for_deliverer(
+        Task(id=uuid.uuid4()), Job(id=uuid.uuid4(), payload={}, action="RESPOND_TO_MESSAGE")
+    )
+    repositories.assert_not_awaited()
+    conversation.assert_awaited_once()
+    assert result["latest_execution_result"] == {"reason": "Missing dependency"}
+    assert result["technical_plan"] == {"goal": "Implement"}
+    assert result["task_memory"] == {"summary": "Context"}
+
+
+@pytest.mark.asyncio
+async def test_repository_retrieval_can_omit_already_supplied_role_knowledge(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    search = AsyncMock(return_value=[])
+    monkeypatch.setattr(
+        "app.infrastructure.workers.context_compiler.search_agent_knowledge", search
+    )
+    compiler = ContextCompiler(cast(AsyncSession, object()))
+    task = Task(title="Task", description="Context")
+    await compiler._knowledge(task, None, JobRole.EXECUTOR)
+    await compiler._knowledge(task, None, JobRole.EXECUTOR, include_manual=False)
+    search.assert_awaited_once()

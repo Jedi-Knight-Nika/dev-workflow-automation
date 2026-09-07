@@ -165,7 +165,7 @@ class SqlAlchemyTeamManagementWorkflow:
             self._session.add(
                 Job(
                     task_id=task.id,
-                    role=JobRole.INTAKE,
+                    role=JobRole.DELIVERER,
                     action="INTERPRET_TASK",
                     priority=task.priority,
                     payload={"source": "manual_team_assignment"},
@@ -328,7 +328,7 @@ class SqlAlchemyTeamManagementWorkflow:
             self._session.add(
                 Job(
                     task_id=task.id,
-                    role=JobRole.INTAKE,
+                    role=JobRole.DELIVERER,
                     action="INTERPRET_TASK",
                     priority=task.priority,
                     payload={"source": "team_wake"},

@@ -18,6 +18,7 @@ class JobState(StrEnum):
 
 class JobRole(StrEnum):
     ORCHESTRATOR = "ORCHESTRATOR"
+    # Read compatibility for historical jobs only; never scheduled or offered as a role.
     INTAKE = "INTAKE"
     THINKER = "THINKER"
     EXECUTOR = "EXECUTOR"

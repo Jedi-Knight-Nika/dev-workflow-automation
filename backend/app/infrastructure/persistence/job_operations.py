@@ -29,12 +29,11 @@ from app.domain.orchestration import TaskProfiler, resolve_execution_strategy
 
 ROLE_TASK_STATE = {
     JobRole.ORCHESTRATOR: TaskState.NEW,
-    JobRole.INTAKE: TaskState.NEW,
+    JobRole.DELIVERER: TaskState.NEW,
     JobRole.THINKER: TaskState.PLANNING,
     JobRole.EXECUTOR: TaskState.IMPLEMENTING,
     JobRole.REVIEWER: TaskState.INTERNAL_REVIEW,
     JobRole.TESTER: TaskState.LOCAL_VALIDATION,
-    JobRole.DELIVERER: TaskState.WAITING_GITHUB,
 }
 
 

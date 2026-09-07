@@ -2,6 +2,9 @@
   import { page } from '$app/state';
   import { onMount } from 'svelte';
   import PageHeader from '$lib/components/PageHeader.svelte';
+  import Button from '$lib/components/Button.svelte';
+  import TaskDescription from '$lib/components/task-detail/TaskDescription.svelte';
+  import { safeExternalUrl } from '$lib/task-links';
   import ErrorBanner from '$lib/components/ErrorBanner.svelte';
   import TaskControls from '$lib/components/task-detail/TaskControls.svelte';
   import TaskWorkspacePanel from '$lib/components/task-detail/TaskWorkspacePanel.svelte';
@@ -227,10 +230,6 @@
     try {
       const message = await addTaskMessage(task.id, body, replyToId);
       messages = [...messages, message];
-      if (task.state === 'NEEDS_HUMAN' || task.state === 'CONTEXT_PENDING') {
-        task = await runTaskCommand(task.id, 'resume');
-        await refresh();
-      }
     } catch (cause) {
       error = String(cause);
       throw cause;
@@ -258,10 +257,11 @@
   }
 </script>
 
+<svelte:head><title>{task?.title || 'Task'} · Engineering Worker</title></svelte:head>
 <PageHeader
   eyebrow={t('taskDetail.eyebrow')}
   title={task?.title || t('taskDetail.loadingTask')}
-  description={task?.description || t('taskDetail.defaultDescription')}
+  description="Conversation, progress, and evidence for this task."
 />
 <main class="grid gap-6 p-4 sm:p-6 md:p-10 xl:grid-cols-2">
   <ErrorBanner message={error} class="xl:col-span-2" />
@@ -273,35 +273,82 @@
     <div class="skeleton h-40 rounded-sm"></div>
     <div class="skeleton h-40 rounded-sm"></div>
   {:else}
-    <TaskControls
-      {task}
-      {commanding}
-      onEnqueue={enqueue}
-      onTaskCommand={taskCommand}
-      onPublishPullRequest={publishPullRequest}
-      onMergePullRequest={mergePullRequest}
-      onRetryLinearSync={retryLinearSync}
-    />
+    <section class="flex flex-wrap items-center gap-3 xl:col-span-2" aria-label="Task summary">
+      <span
+        class="rounded-full border border-brand/30 bg-brand/10 px-3 py-1.5 text-xs font-semibold text-brand"
+        >{task.state.replaceAll('_', ' ')}</span
+      >
+      <span class="text-xs text-muted"
+        >{task.team_name || 'Unassigned team'} · P{task.priority}</span
+      >
+      {#if safeExternalUrl(task.source?.url)}
+        <!-- eslint-disable svelte/no-navigation-without-resolve -->
+        <a
+          class="max-w-full truncate text-sm text-brand underline underline-offset-4"
+          href={safeExternalUrl(task.source?.url) || ''}
+          target="_blank"
+          rel="noopener noreferrer"
+          >{task.source?.provider} · {task.source?.identifier || task.external_key} ↗</a
+        >
+        <!-- eslint-enable svelte/no-navigation-without-resolve -->
+      {/if}
+      <span class="ml-auto flex gap-2">
+        {#if ['PAUSED', 'NEEDS_HUMAN', 'CONTEXT_PENDING'].includes(task.state) || task.manual_takeover}
+          <Button disabled={commanding} onclick={() => taskCommand('resume')}>Resume work</Button>
+        {:else if !['MERGED', 'CANCELLED', 'FAILED'].includes(task.state)}
+          <Button disabled={commanding} onclick={() => taskCommand('pause')}>Pause work</Button>
+        {/if}
+      </span>
+    </section>
+    <details class="rounded-xl border border-line bg-panel p-4 xl:col-span-2">
+      <summary class="cursor-pointer text-sm font-semibold">Automation controls</summary>
+      <TaskControls
+        {task}
+        {commanding}
+        onEnqueue={enqueue}
+        onTaskCommand={taskCommand}
+        onPublishPullRequest={publishPullRequest}
+        onMergePullRequest={mergePullRequest}
+        onRetryLinearSync={retryLinearSync}
+      />
+    </details>
     <GenerationProgress progress={generationProgress} connected={eventStreamConnected} />
-    <TaskConversation
-      {messages}
-      taskState={task.state}
-      resumeOnSend={task.state === 'NEEDS_HUMAN' || task.state === 'CONTEXT_PENDING'}
-      hasOlder={nextMessageCursor !== null}
-      loadingOlder={loadingOlderMessages}
-      sending={sendingMessage}
-      onLoadOlder={loadOlderMessages}
-      onSend={sendMessage}
-      onReact={reactMessage}
-      onEdit={editMessage}
-      onDelete={deleteMessage}
-    />
+    <div class="min-w-0 xl:col-span-2">
+      <TaskConversation
+        {messages}
+        taskState={task.state}
+        resumeOnSend={false}
+        hasOlder={nextMessageCursor !== null}
+        loadingOlder={loadingOlderMessages}
+        sending={sendingMessage}
+        onLoadOlder={loadOlderMessages}
+        onSend={sendMessage}
+        onReact={reactMessage}
+        onEdit={editMessage}
+        onDelete={deleteMessage}
+      />
+    </div>
+    <details open class="min-w-0 rounded-xl border border-line bg-panel p-5 xl:col-span-2">
+      <summary class="mb-3 cursor-pointer text-sm font-semibold">Task description</summary>
+      <TaskDescription description={task.description} sourceUrl={task.source?.url} />
+    </details>
     <TaskWorkspacePanel {task} {preparing} onPrepareWorkspace={prepareWorkspace} />
-    <TaskPlanPanel {latestPlan} {latestThinker} />
-    <TaskMemoryPanel {memory} {checkpoints} />
-    <JobList {jobs} />
-    <TimelineList {events} />
-    <ValidationList {validations} />
+    <div class="min-w-0 xl:col-span-2">
+      <TaskPlanPanel {latestPlan} {latestThinker} />
+    </div>
     <FindingList {findings} />
+    <ValidationList {validations} />
+    <details class="min-w-0 rounded-xl border border-line bg-panel p-5 xl:col-span-2">
+      <summary class="cursor-pointer text-sm font-semibold"
+        >Execution history &amp; context <span class="font-normal text-muted"
+          >· {jobs.length} jobs · {events.length} events</span
+        ></summary
+      >
+      <div class="mt-4 grid min-w-0 gap-5 xl:grid-cols-2">
+        <TaskMemoryPanel {memory} {checkpoints} />
+        <JobList {jobs} />
+        <TimelineList {events} />
+      </div>
+    </details>
   {/if}
 </main>

@@ -13,6 +13,7 @@ from app.db.models import Job, JobRole, JobState, Task, TaskState, ValidationRec
 from app.infrastructure.external_task_sync import sync_external_task_state
 from app.infrastructure.persistence.job_operations import enqueue_job, record_event
 from app.infrastructure.persistence.workflow_routing import route_completed_job
+from app.infrastructure.pull_requests.delivery import publish_task_repositories
 
 
 class SqlAlchemyTesterCompletionUnitOfWork:
@@ -69,7 +70,7 @@ class SqlAlchemyTesterCompletionUnitOfWork:
             {"job_id": str(context.job_id), "state": JobState.SUCCEEDED.value},
         )
 
-    async def apply(self, context: TesterCompletionContext) -> None:
+    async def apply(self, context: TesterCompletionContext) -> bool:
         session = self._active()
         task = await session.get(Task, context.task_id)
         if task is None:
@@ -113,7 +114,7 @@ class SqlAlchemyTesterCompletionUnitOfWork:
                         "limit": strategy_limit,
                     },
                 )
-                return
+                return False
         route = await route_completed_job(
             session, task, context.job_id, context.outcome, {"tester_result": context.result}
         )
@@ -140,6 +141,10 @@ class SqlAlchemyTesterCompletionUnitOfWork:
             "JOB_SUCCEEDED",
             {"job_id": str(context.job_id), "result": context.outcome},
         )
+        return bool(route and route.publish)
+
+    async def publish(self, task_id: uuid.UUID) -> None:
+        await publish_task_repositories(self._active(), task_id)
 
     async def commit(self) -> None:
         await self._active().commit()

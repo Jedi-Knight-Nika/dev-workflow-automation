@@ -14,6 +14,7 @@ class MergeContext:
     pull_request_number: int
     expected_revision: str
     evidence: list[ValidationEvidence]
+    scope_id: uuid.UUID | None = None
 
 
 @dataclass(frozen=True, slots=True)

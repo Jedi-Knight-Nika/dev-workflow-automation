@@ -1,7 +1,8 @@
+from app.application.complete_consultation import CompleteConsultation
 from app.application.jobs import (
+    CompleteDelivererJob,
     CompleteExecutorJob,
     CompleteFailedJob,
-    CompleteIntakeJob,
     CompleteReviewerJob,
     CompleteTesterJob,
     CompleteThinkerJob,
@@ -19,11 +20,12 @@ from app.infrastructure.delivery_processing import SqlAlchemyDeliveryProcessor
 from app.infrastructure.index_processing import SqlAlchemyIndexProcessor
 from app.infrastructure.job_dispatch import SqlAlchemyJobDispatch
 from app.infrastructure.linear_reconciliation import SqlAlchemyLinearTaskReconciliation
+from app.infrastructure.persistence.consultations import SqlAlchemyConsultationStore
+from app.infrastructure.persistence.deliverer_completion import (
+    SqlAlchemyDelivererCompletionUnitOfWorkFactory,
+)
 from app.infrastructure.persistence.executor_completion import (
     SqlAlchemyExecutorCompletionUnitOfWorkFactory,
-)
-from app.infrastructure.persistence.intake_completion import (
-    SqlAlchemyIntakeCompletionUnitOfWorkFactory,
 )
 from app.infrastructure.persistence.job_completion import (
     SqlAlchemyFailedCompletionUnitOfWorkFactory,
@@ -52,8 +54,8 @@ def create_scheduler(settings: Settings) -> Scheduler:
         SqlAlchemyFailedCompletionUnitOfWorkFactory(SessionLocal),
         RetryPolicy(settings.max_job_attempts, settings.job_retry_base_seconds),
     )
-    intake_completer = CompleteIntakeJob(
-        SqlAlchemyIntakeCompletionUnitOfWorkFactory(
+    deliverer_completer = CompleteDelivererJob(
+        SqlAlchemyDelivererCompletionUnitOfWorkFactory(
             SessionLocal,
             settings.max_executor_jobs_per_task,
             settings.max_thinker_jobs_per_task,
@@ -98,7 +100,7 @@ def create_scheduler(settings: Settings) -> Scheduler:
         job_dispatch,
         ConfiguredWorkerRunner(settings),
         failed_completer,
-        intake_completer,
+        deliverer_completer,
         thinker_completer,
         executor_completer,
         tester_completer,
@@ -114,6 +116,7 @@ def create_scheduler(settings: Settings) -> Scheduler:
             )
         ),
         RecoveryManager(SqlAlchemyResilienceStore(SessionLocal)),
+        CompleteConsultation(SqlAlchemyConsultationStore(SessionLocal)),
     )
 
 

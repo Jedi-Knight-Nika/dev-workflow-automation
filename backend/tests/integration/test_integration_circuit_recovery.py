@@ -64,7 +64,7 @@ async def test_open_integration_circuit_blocks_only_dependent_workflow_job(
                     WorkflowNode(
                         id=blocked_node_id,
                         workflow_id=workflow_id,
-                        role=JobRole.INTAKE.value,
+                        role=JobRole.DELIVERER.value,
                         label="Blocked intake",
                         position_x=0,
                         position_y=0,
@@ -99,7 +99,7 @@ async def test_open_integration_circuit_blocks_only_dependent_workflow_job(
                     Job(
                         task_id=task.id,
                         workflow_node_id=node_id,
-                        role=JobRole.INTAKE if index == 0 else JobRole.THINKER,
+                        role=JobRole.DELIVERER if index == 0 else JobRole.THINKER,
                         action="WORK",
                         state=JobState.QUEUED,
                         priority=index,

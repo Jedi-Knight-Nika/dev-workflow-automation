@@ -3,19 +3,26 @@ import uuid
 from dataclasses import asdict, replace
 from datetime import datetime
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.application.ports.model_validation import ModelValidationResult
-from app.application.ports.workflow_designer import WorkflowVersionConflict
+from app.application.ports.workflow_designer import (
+    NodeActivity,
+    NodePosition,
+    WorkflowVersionConflict,
+)
 from app.db.models import (
     AIAgent,
+    Job,
     Role,
+    Task,
     WorkflowDefinition,
     WorkflowEdge,
     WorkflowNode,
     WorkflowRevision,
 )
+from app.domain.operational_states import JobState
 from app.domain.workflows import WorkflowEdgeData, WorkflowGraphData, WorkflowNodeData
 from app.infrastructure.persistence.agent_runtime import resolve_agent_runtime_config
 
@@ -90,14 +97,13 @@ def default_graph(team_id: uuid.UUID = WORKFLOW_ID) -> WorkflowGraphData:
         WorkflowNodeData(
             "10000000-0000-0000-0000-000000000001", "ORCHESTRATOR", "Orchestrator", 40, 200
         ),
-        WorkflowNodeData("10000000-0000-0000-0000-000000000002", "INTAKE", "Intake", 300, 200),
+        WorkflowNodeData(
+            "10000000-0000-0000-0000-000000000002", "DELIVERER", "Deliverer", 300, 200
+        ),
         WorkflowNodeData("10000000-0000-0000-0000-000000000003", "THINKER", "Thinker", 560, 120),
         WorkflowNodeData("10000000-0000-0000-0000-000000000004", "EXECUTOR", "Executor", 820, 200),
         WorkflowNodeData("10000000-0000-0000-0000-000000000007", "TESTER", "Tester", 1080, 280),
         WorkflowNodeData("10000000-0000-0000-0000-000000000005", "REVIEWER", "Reviewer", 1300, 120),
-        WorkflowNodeData(
-            "10000000-0000-0000-0000-000000000006", "DELIVERER", "Deliverer", 1540, 200
-        ),
     )
     if team_id != WORKFLOW_ID:
         nodes = tuple(
@@ -106,8 +112,8 @@ def default_graph(team_id: uuid.UUID = WORKFLOW_ID) -> WorkflowGraphData:
         )
     by_role = {node.role: node for node in nodes}
     routes = (
-        ("ORCHESTRATOR", "always", "INTAKE", "CLASSIFY_EVENT", None),
-        ("INTAKE", "EVENT_INTERPRETED", "THINKER", "CREATE_PLAN", None),
+        ("ORCHESTRATOR", "always", "DELIVERER", "CLASSIFY_EVENT", None),
+        ("DELIVERER", "EVENT_INTERPRETED", "THINKER", "CREATE_PLAN", None),
         ("THINKER", "PLAN_READY", "EXECUTOR", "IMPLEMENT_PLAN", "PLAN_READY"),
         ("THINKER", "REPLAN_READY", "EXECUTOR", "IMPLEMENT_PLAN", "PLAN_READY"),
         ("EXECUTOR", "IMPLEMENTED", "TESTER", "RUN_VALIDATION", "LOCAL_VALIDATION"),
@@ -132,7 +138,20 @@ def default_graph(team_id: uuid.UUID = WORKFLOW_ID) -> WorkflowGraphData:
         )
         for index, (source, outcome, target, job_type, internal_state) in enumerate(routes)
     )
-    return WorkflowGraphData(1, nodes, edges)
+    controller = by_role["ORCHESTRATOR"]
+    consultations = tuple(
+        WorkflowEdgeData(
+            str(uuid.uuid5(team_id, f"consult:{source.id}:{target.id}")),
+            source.id,
+            target.id,
+            "consultation",
+            configuration={"kind": "consultation"},
+        )
+        for node in nodes
+        if node.role != "ORCHESTRATOR"
+        for source, target in ((node, controller), (controller, node))
+    )
+    return WorkflowGraphData(1, nodes, edges + consultations)
 
 
 class SqlAlchemyWorkflowDesigner:
@@ -196,6 +215,87 @@ class SqlAlchemyWorkflowDesigner:
         self._add_revision(definition.id, definition.version, graph)
         await self._session.commit()
         return WorkflowGraphData(definition.version, graph.nodes, graph.edges)
+
+    async def save_positions(self, version: int, positions: tuple[NodePosition, ...]) -> None:
+        # Share the definition lock with graph edits, but never change runtime versions.
+        definition = await self._definition(lock=True)
+        if definition is None or definition.version != version:
+            raise WorkflowVersionConflict("Workflow changed; reload before moving nodes")
+        nodes = {
+            str(node.id): node
+            for node in await self._session.scalars(
+                select(WorkflowNode).where(WorkflowNode.workflow_id == definition.id)
+            )
+        }
+        if any(position.node_id not in nodes for position in positions):
+            raise ValueError("Layout contains a node outside this workflow")
+        for position in positions:
+            node = nodes[position.node_id]
+            node.position_x, node.position_y = position.x, position.y
+        await self._session.commit()
+
+    async def activity(self) -> tuple[NodeActivity, ...]:
+        definition = await self._definition()
+        if definition is None:
+            return ()
+        active = (JobState.CLAIMED, JobState.RUNNING)
+        queued = (JobState.QUEUED,)
+        waiting = (
+            JobState.RETRY_WAIT,
+            JobState.WAITING_PROVIDER,
+            JobState.WAITING_INTEGRATION,
+            JobState.WAITING_CONFIGURATION,
+            JobState.WAITING_HUMAN,
+        )
+        counts = (
+            select(
+                Job.workflow_node_id.label("node_id"),
+                func.count().filter(Job.state.in_(active)).label("active"),
+                func.count().filter(Job.state.in_(queued)).label("queued"),
+                func.count().filter(Job.state.in_(waiting)).label("waiting"),
+            )
+            .join(Task, Task.id == Job.task_id)
+            .where(Task.team_id == self._team_id, Job.state.in_((*active, *queued, *waiting)))
+            .group_by(Job.workflow_node_id)
+            .subquery()
+        )
+        running = (
+            select(
+                Job.workflow_node_id.label("node_id"),
+                Job.action,
+                Job.task_id,
+                func.row_number()
+                .over(partition_by=Job.workflow_node_id, order_by=(Job.created_at, Job.id))
+                .label("rank"),
+            )
+            .join(Task, Task.id == Job.task_id)
+            .where(Task.team_id == self._team_id, Job.state.in_(active))
+            .subquery()
+        )
+        rows = await self._session.execute(
+            select(
+                WorkflowNode.id,
+                counts.c.active,
+                counts.c.queued,
+                counts.c.waiting,
+                running.c.action,
+                running.c.task_id,
+            )
+            .outerjoin(counts, counts.c.node_id == WorkflowNode.id)
+            .outerjoin(running, (running.c.node_id == WorkflowNode.id) & (running.c.rank == 1))
+            .where(WorkflowNode.workflow_id == definition.id)
+        )
+        return tuple(
+            NodeActivity(
+                str(node),
+                int(a or 0),
+                int(q or 0),
+                int(w or 0),
+                action,
+                str(task) if task else None,
+            )
+            for node, a, q, w, action, task in rows
+        )
 
     async def node_model(self, node_id: str) -> tuple[str, str] | None:
         node = await self._session.get(WorkflowNode, uuid.UUID(node_id))

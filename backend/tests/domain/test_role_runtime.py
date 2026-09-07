@@ -27,7 +27,7 @@ def test_agent_inherits_role_runtime_and_strategy_stays_inside_ceiling() -> None
 
     assert runtime.reasoning_level == ReasoningLevel.HIGH
     assert runtime.max_tool_calls == 40
-    assert runtime.max_model_turns == 3
+    assert runtime.max_model_turns == 20
 
 
 def test_sparse_agent_override_changes_only_allowed_value() -> None:

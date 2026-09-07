@@ -5,9 +5,9 @@ from typing import Self
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.application.ports.intake_completion import (
-    IntakeCompletionCommand,
-    IntakeCompletionContext,
+from app.application.ports.deliverer_completion import (
+    DelivererCompletionCommand,
+    DelivererCompletionContext,
 )
 from app.db.models import (
     Job,
@@ -30,7 +30,7 @@ from app.infrastructure.persistence.workflow_routing import route_completed_job
 from app.infrastructure.pull_requests.comment_actions import GitHubCommentActionExecutor
 
 
-class SqlAlchemyIntakeCompletionUnitOfWork:
+class SqlAlchemyDelivererCompletionUnitOfWork:
     def __init__(
         self,
         session_factory: async_sessionmaker[AsyncSession],
@@ -62,10 +62,10 @@ class SqlAlchemyIntakeCompletionUnitOfWork:
             raise RuntimeError("Intake completion unit of work is not active")
         return self._session
 
-    async def begin(self, command: IntakeCompletionCommand) -> IntakeCompletionContext | None:
+    async def begin(self, command: DelivererCompletionCommand) -> DelivererCompletionContext | None:
         session = self._active()
         job = await session.get(Job, command.job_id, with_for_update=True)
-        if job is None or job.lease_token != command.lease_token or job.role != JobRole.INTAKE:
+        if job is None or job.lease_token != command.lease_token or job.role != JobRole.DELIVERER:
             return None
         task = await session.get(Task, job.task_id, with_for_update=True)
         if task is None:
@@ -77,7 +77,7 @@ class SqlAlchemyIntakeCompletionUnitOfWork:
         job.lease_expires_at = None
         await release_workspace_lease(session, job)
         data = command.result.get("data", {})
-        return IntakeCompletionContext(
+        return DelivererCompletionContext(
             job.id,
             task.id,
             job.action,
@@ -87,7 +87,7 @@ class SqlAlchemyIntakeCompletionUnitOfWork:
             task.manual_takeover,
         )
 
-    async def finish_during_takeover(self, context: IntakeCompletionContext) -> None:
+    async def finish_during_takeover(self, context: DelivererCompletionContext) -> None:
         await record_event(
             self._active(),
             context.task_id,
@@ -95,7 +95,7 @@ class SqlAlchemyIntakeCompletionUnitOfWork:
             {"job_id": str(context.job_id), "state": JobState.SUCCEEDED.value},
         )
 
-    async def finish_conversation(self, context: IntakeCompletionContext) -> None:
+    async def finish_conversation(self, context: DelivererCompletionContext) -> None:
         await record_event(
             self._active(),
             context.task_id,
@@ -103,7 +103,9 @@ class SqlAlchemyIntakeCompletionUnitOfWork:
             {"job_id": str(context.job_id), "result": context.outcome},
         )
 
-    async def apply(self, context: IntakeCompletionContext, directive: CompletionDirective) -> None:
+    async def apply(
+        self, context: DelivererCompletionContext, directive: CompletionDirective
+    ) -> None:
         session = self._active()
         task = await session.get(Task, context.task_id)
         if task is None:
@@ -111,7 +113,7 @@ class SqlAlchemyIntakeCompletionUnitOfWork:
         await self._apply_repository_scope(task, context.data)
         delivery_actions = context.data.get("external_delivery_actions")
         if isinstance(delivery_actions, list) and delivery_actions:
-            directive = CompletionDirective.INTAKE_INFORMATIONAL
+            directive = CompletionDirective.DELIVERER_INFORMATIONAL
         route = await route_completed_job(
             session, task, context.job_id, context.outcome, {"intake": context.data}
         )
@@ -123,31 +125,31 @@ class SqlAlchemyIntakeCompletionUnitOfWork:
                 {"job_id": str(context.job_id), "result": context.outcome},
             )
             return
-        if directive == CompletionDirective.INTAKE_NEEDS_HUMAN:
+        if directive == CompletionDirective.DELIVERER_NEEDS_HUMAN:
             task.state = TaskState.NEEDS_HUMAN
             await record_event(
                 session,
                 task.id,
-                "INTAKE_NEEDS_HUMAN",
+                "DELIVERER_NEEDS_HUMAN",
                 {"job_id": str(context.job_id), "interpretation": context.data},
             )
         else:
             await record_event(
                 session,
                 task.id,
-                "INTAKE_INTERPRETED",
+                "DELIVERER_INTERPRETED",
                 {"job_id": str(context.job_id), "interpretation": context.data},
             )
-            if directive == CompletionDirective.INTAKE_INFORMATIONAL:
+            if directive == CompletionDirective.DELIVERER_INFORMATIONAL:
                 previous_state = context.job_payload.get("previous_state")
                 task.state = (
                     TaskState(previous_state)
                     if isinstance(previous_state, str)
                     else TaskState.WAITING_GITHUB
                 )
-            elif directive == CompletionDirective.INTAKE_REPAIR:
+            elif directive == CompletionDirective.DELIVERER_REPAIR:
                 await self._enqueue_repair(task, context)
-            elif directive == CompletionDirective.INTAKE_REPLAN:
+            elif directive == CompletionDirective.DELIVERER_REPLAN:
                 await self._enqueue_replan(task, context)
             else:
                 await enqueue_job(
@@ -214,7 +216,7 @@ class SqlAlchemyIntakeCompletionUnitOfWork:
                 scope = TaskRepositoryScope(
                     task_id=task.id,
                     repository_id=repository_id,
-                    selected_by="INTAKE",
+                    selected_by="DELIVERER",
                 )
                 session.add(scope)
             scope.reason = reason
@@ -241,7 +243,7 @@ class SqlAlchemyIntakeCompletionUnitOfWork:
             },
         )
 
-    async def _enqueue_repair(self, task: Task, context: IntakeCompletionContext) -> None:
+    async def _enqueue_repair(self, task: Task, context: DelivererCompletionContext) -> None:
         session = self._active()
         total = await session.scalar(
             select(func.count(Job.id)).where(Job.task_id == task.id, Job.role == JobRole.EXECUTOR)
@@ -260,7 +262,7 @@ class SqlAlchemyIntakeCompletionUnitOfWork:
             payload={"intake": context.data, "external_comment": context.job_payload},
         )
 
-    async def _enqueue_replan(self, task: Task, context: IntakeCompletionContext) -> None:
+    async def _enqueue_replan(self, task: Task, context: DelivererCompletionContext) -> None:
         session = self._active()
         total = await session.scalar(
             select(func.count(Job.id)).where(Job.task_id == task.id, Job.role == JobRole.THINKER)
@@ -289,7 +291,7 @@ class SqlAlchemyIntakeCompletionUnitOfWork:
     async def commit(self) -> None:
         await self._active().commit()
 
-    async def execute_external_delivery_actions(self, context: IntakeCompletionContext) -> None:
+    async def execute_external_delivery_actions(self, context: DelivererCompletionContext) -> None:
         await GitHubCommentActionExecutor(self._active()).execute(context)
 
     async def synchronize_tracker(self, task_id: uuid.UUID) -> None:
@@ -298,7 +300,7 @@ class SqlAlchemyIntakeCompletionUnitOfWork:
             await sync_external_task_state(self._active(), task)
 
 
-class SqlAlchemyIntakeCompletionUnitOfWorkFactory:
+class SqlAlchemyDelivererCompletionUnitOfWorkFactory:
     def __init__(
         self,
         session_factory: async_sessionmaker[AsyncSession],
@@ -309,7 +311,7 @@ class SqlAlchemyIntakeCompletionUnitOfWorkFactory:
         self._max_executor_jobs = max_executor_jobs
         self._max_thinker_jobs = max_thinker_jobs
 
-    def __call__(self) -> SqlAlchemyIntakeCompletionUnitOfWork:
-        return SqlAlchemyIntakeCompletionUnitOfWork(
+    def __call__(self) -> SqlAlchemyDelivererCompletionUnitOfWork:
+        return SqlAlchemyDelivererCompletionUnitOfWork(
             self._session_factory, self._max_executor_jobs, self._max_thinker_jobs
         )

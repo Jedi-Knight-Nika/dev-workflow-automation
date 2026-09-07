@@ -6,18 +6,19 @@ from typing import Any
 import structlog
 from pydantic import ValidationError
 
+from app.application.complete_consultation import CompleteConsultation
 from app.application.dispatch_jobs import DispatchJobs
 from app.application.jobs import (
+    CompleteDelivererJob,
     CompleteExecutorJob,
     CompleteFailedJob,
-    CompleteIntakeJob,
     CompleteReviewerJob,
     CompleteTesterJob,
     CompleteThinkerJob,
 )
 from app.application.manage_worker_presence import ManageWorkerPresence
+from app.application.ports.deliverer_completion import DelivererCompletionCommand
 from app.application.ports.executor_completion import ExecutorCompletionCommand
-from app.application.ports.intake_completion import IntakeCompletionCommand
 from app.application.ports.job_completion import FailedJobCommand
 from app.application.ports.job_dispatch import ClaimedJob
 from app.application.ports.reviewer_completion import ReviewerCompletionCommand
@@ -52,7 +53,7 @@ class Scheduler:
         job_dispatch: DispatchJobs,
         worker_runner: WorkerRunner,
         failed_job_completer: CompleteFailedJob,
-        intake_job_completer: CompleteIntakeJob,
+        deliverer_job_completer: CompleteDelivererJob,
         thinker_job_completer: CompleteThinkerJob,
         executor_job_completer: CompleteExecutorJob,
         tester_job_completer: CompleteTesterJob,
@@ -63,12 +64,13 @@ class Scheduler:
         worker_presence: ManageWorkerPresence,
         task_reconciler: ReconcileExternalTasks,
         recovery_manager: RecoveryManager | None = None,
+        consultation_completer: CompleteConsultation | None = None,
     ) -> None:
         self.settings = settings
         self._job_dispatch = job_dispatch
         self._worker_runner = worker_runner
         self._failed_job_completer = failed_job_completer
-        self._intake_job_completer = intake_job_completer
+        self._deliverer_job_completer = deliverer_job_completer
         self._thinker_job_completer = thinker_job_completer
         self._executor_job_completer = executor_job_completer
         self._tester_job_completer = tester_job_completer
@@ -79,6 +81,7 @@ class Scheduler:
         self._worker_presence = worker_presence
         self._task_reconciler = task_reconciler
         self._recovery_manager = recovery_manager
+        self._consultation_completer = consultation_completer
         self.worker_id = worker_id
         self._stop = asyncio.Event()
         self._loop_task: asyncio.Task[None] | None = None
@@ -283,9 +286,14 @@ class Scheduler:
             if not completed:
                 log.warning("stale_worker_result_rejected", job_id=str(job_id))
             return
-        if result and result.get("role") == AgentRole.INTAKE.value:
-            completed = await self._intake_job_completer.execute(
-                IntakeCompletionCommand(job_id, lease_token, result, datetime.now(UTC))
+        if result and result.get("result") in {"CONSULTATION_REQUESTED", "CONSULTATION_REPLIED"}:
+            if self._consultation_completer is None:
+                raise RuntimeError("Consultation completion is not configured")
+            await self._consultation_completer.execute(job_id, lease_token, result)
+            return
+        if result and result.get("role") == AgentRole.DELIVERER.value:
+            completed = await self._deliverer_job_completer.execute(
+                DelivererCompletionCommand(job_id, lease_token, result, datetime.now(UTC))
             )
             if not completed:
                 log.warning("stale_worker_result_rejected", job_id=str(job_id))

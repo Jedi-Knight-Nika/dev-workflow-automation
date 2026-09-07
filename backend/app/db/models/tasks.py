@@ -89,7 +89,7 @@ class TaskRepositoryScope(Base):
     repository_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("repositories.id", ondelete="RESTRICT")
     )
-    selected_by: Mapped[str] = mapped_column(String(30), default="INTAKE")
+    selected_by: Mapped[str] = mapped_column(String(30), default="DELIVERER")
     reason: Mapped[str] = mapped_column(Text, default="")
     confidence: Mapped[float | None] = mapped_column(Numeric(4, 3))
     is_primary: Mapped[bool] = mapped_column(default=False)
@@ -100,6 +100,8 @@ class TaskRepositoryScope(Base):
     changed: Mapped[bool] = mapped_column(default=False)
     pull_request_number: Mapped[int | None] = mapped_column(Integer)
     pull_request_url: Mapped[str | None] = mapped_column(Text)
+    merged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    merge_commit_sha: Mapped[str | None] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     task: Mapped[Task] = relationship(back_populates="repository_scopes")
 

@@ -3,7 +3,7 @@ from dataclasses import dataclass
 
 ROLE_CATEGORIES = frozenset(
     {
-        "INTAKE",
+        "INTAKE",  # Historical role categories remain readable after consolidation.
         "PLANNING",
         "EXECUTION",
         "VALIDATION",

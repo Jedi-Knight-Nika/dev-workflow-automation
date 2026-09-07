@@ -98,6 +98,35 @@ def test_executor_accumulates_loaded_context_between_rounds() -> None:
     ]
 
 
+@pytest.mark.asyncio
+async def test_duplicate_source_requests_do_not_consume_remaining_budget(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "a.py").write_text("a" * 50)
+    (tmp_path / "b.py").write_text("b" * 10)
+
+    async def tracked(*args: str, **kwargs: object) -> str:
+        return "a.py\nb.py"
+
+    monkeypatch.setattr("app.infrastructure.workers.executor.run_git", tracked)
+    existing = [{"path": "a.py", "status": "LOADED", "content": "a" * 50}]
+    result = await requested_file_context(
+        [(".", tmp_path)], ["a.py", "b.py"], max_context_bytes=10, existing_context=existing
+    )
+    assert [item["status"] for item in result] == ["LOADED", "LOADED"]
+    merged = merge_requested_file_context(existing, result)
+    assert sum(len(item["content"]) for item in merged) == 60
+
+
+def test_resolved_context_request_removes_obsolete_failure() -> None:
+    result = merge_requested_file_context(
+        [{"path": "a.py", "status": "CONTEXT_LIMIT"}],
+        [{"path": "a.py", "status": "LOADED", "content": "a"}],
+    )
+    assert len(result) == 1
+    assert result[0]["status"] == "LOADED"
+
+
 def test_checks_are_derived_from_manifests_not_model_commands(tmp_path: Path) -> None:
     (tmp_path / "package.json").write_text(
         '{"scripts":{"check":"svelte-check","deploy":"dangerous"}}'

@@ -3,6 +3,7 @@
   import ErrorBanner from '$lib/components/ErrorBanner.svelte';
   import PageHeader from '$lib/components/PageHeader.svelte';
   import Skeleton from '$lib/components/Skeleton.svelte';
+  import AiProviderSelect from '$lib/components/ai/AiProviderSelect.svelte';
   import {
     cloneRole,
     createRole,
@@ -16,7 +17,6 @@
   import type { Role } from '$lib/types';
 
   const categories = [
-    'INTAKE',
     'PLANNING',
     'EXECUTION',
     'VALIDATION',
@@ -514,14 +514,12 @@
       >
       {#if advanced}<section class="advanced-panel">
           <div class="two">
+            <AiProviderSelect
+              label="Provider"
+              bind:value={form.default_provider}
+              noneLabel="Agent decides"
+            />
             <label
-              ><span>Provider</span><select bind:value={form.default_provider}
-                ><option value={null}>Agent decides</option><option value="openai">OpenAI</option
-                ><option value="anthropic">Anthropic</option><option value="google"
-                  >Google Gemini</option
-                ></select
-              ></label
-            ><label
               ><span>Model</span><input
                 bind:value={form.default_model}
                 placeholder="Provider default"

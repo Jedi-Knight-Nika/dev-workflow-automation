@@ -33,6 +33,7 @@ from app.db.session import SessionLocal
 from app.domain.ai_runtime import ReasoningLevel, resolve_runtime_config
 from app.domain.security import Decision, ExecutionMode, TeamExecutionPolicy
 from app.infrastructure.git.workspaces import prepare_task_workspaces, run_git
+from app.infrastructure.persistence.consultations import available_consultants
 from app.infrastructure.persistence.task_memory import TaskMemoryService
 from app.infrastructure.security.crypto import cipher
 from app.infrastructure.tools import GatewayContext, ToolGateway, ToolNeedsApproval
@@ -48,8 +49,15 @@ from app.infrastructure.workers.executor import (
     run_checks,
     workspace_fingerprint,
 )
+from app.infrastructure.workers.repository_tools import (
+    CONSULTATION_TOOL,
+    REPOSITORY_TOOLS,
+    RepositoryTools,
+)
 from app.infrastructure.workers.structured_output import (
+    ConsultationReply,
     ProviderAttempt,
+    ProviderRunInterrupted,
     StructuredOutputError,
     role_output_schema,
     run_with_structured_repair,
@@ -67,7 +75,7 @@ class BudgetExceeded(RuntimeError):
 
 
 ROLE_INSTRUCTIONS = {
-    "INTAKE": "Normalize the supplied event and select every relevant repository from repository_candidates. Return concise JSON with result EVENT_INTERPRETED; event_type (NEW_TASK, INFORMATIONAL, REVIEW_FIX, ARCHITECTURAL_FINDING, REQUIREMENT_CHANGE, or NEEDS_HUMAN); actionability (ACTION_REQUIRED, INFORMATIONAL, or NEEDS_HUMAN); blocking; summary; confidence; repository_ids; repository_selection_reason; and external_delivery_actions (always include this list, empty when none). Select multiple repository IDs when the work genuinely crosses repositories. Never invent an ID. For GitHub PR comments only, translate explicit delivery requests into typed external_delivery_actions: UPDATE_PR_TITLE, UPDATE_PR_BODY, or UPDATE_COMMIT_MESSAGE with the desired value, and MERGE_PULL_REQUEST only when the human explicitly requests merging. When the human requests a clear naming convention but does not provide exact replacement text, derive a concise, accurate value from the task and verified implementation context; do not ask the human to write routine PR or commit metadata. Imperative feedback such as 'merge it', 'after this merge', or 'then ready to merge' is explicit merge authorization and MUST produce MERGE_PULL_REQUEST; a descriptive statement that a PR is ready does not. A comment containing only delivery actions is INFORMATIONAL and must not create a code-repair Job. Do not use delivery actions for source-code changes or inferred wishes. Classify ordinary concrete review fixes as REVIEW_FIX, architecture/design changes as ARCHITECTURAL_FINDING, changed requirements as REQUIREMENT_CHANGE, and harmless messages as INFORMATIONAL. Product or implementation work that delegates design decisions to the engineering team is ACTION_REQUIRED and non-blocking; the Thinker owns safe, reversible technical decisions. Use NEEDS_HUMAN only when essential external information or authority is genuinely absent. Historical Agent blockers in the conversation are not current blockers after a task is reopened. Never propagate an old complaint about unavailable repository, shell, or file-editing tools; assess current task input and current platform context independently.",
+    "DELIVERER": "Normalize the supplied event and select every relevant repository from repository_candidates. Return concise JSON with result EVENT_INTERPRETED; event_type (NEW_TASK, INFORMATIONAL, REVIEW_FIX, ARCHITECTURAL_FINDING, REQUIREMENT_CHANGE, or NEEDS_HUMAN); actionability (ACTION_REQUIRED, INFORMATIONAL, or NEEDS_HUMAN); blocking; summary; confidence; repository_ids; repository_selection_reason; and external_delivery_actions (always include this list, empty when none). Select multiple repository IDs when the work genuinely crosses repositories. Never invent an ID. For GitHub PR comments only, translate explicit delivery requests into typed external_delivery_actions: UPDATE_PR_TITLE, UPDATE_PR_BODY, or UPDATE_COMMIT_MESSAGE with the desired value, and MERGE_PULL_REQUEST only when the human explicitly requests merging. When the human requests a clear naming convention but does not provide exact replacement text, derive a concise, accurate value from the task and verified implementation context; do not ask the human to write routine PR or commit metadata. Imperative feedback such as 'merge it', 'after this merge', or 'then ready to merge' is explicit merge authorization and MUST produce MERGE_PULL_REQUEST; a descriptive statement that a PR is ready does not. A comment containing only delivery actions is INFORMATIONAL and must not create a code-repair Job. Do not use delivery actions for source-code changes or inferred wishes. Classify ordinary concrete review fixes as REVIEW_FIX, architecture/design changes as ARCHITECTURAL_FINDING, changed requirements as REQUIREMENT_CHANGE, and harmless messages as INFORMATIONAL. Product or implementation work that delegates design decisions to the engineering team is ACTION_REQUIRED and non-blocking; the Thinker owns safe, reversible technical decisions. Use NEEDS_HUMAN only when essential external information or authority is genuinely absent. Historical Agent blockers in the conversation are not current blockers after a task is reopened. Never propagate an old complaint about unavailable repository, shell, or file-editing tools; assess current task input and current platform context independently.",
     "THINKER": "Act as the technical planning agent. Return concise JSON with result (PLAN_READY, NEEDS_CONTEXT, or NEEDS_HUMAN), goal, targets, ordered_steps, constraints, required_tests, risks, acceptance_criteria, reason, and questions. PLAN_READY requires a concrete goal, steps, and acceptance criteria. NEEDS_CONTEXT requires a reason and precise questions. NEEDS_HUMAN requires a reason. Use repositories[].tracked_files and retrieved knowledge to identify concrete existing file paths; include those paths in targets and ordered steps so Executor can load the correct complete sources. Distinguish existing files from new files that must be created. Make reasonable, safe, reversible implementation decisions when the task delegates design to you; record those decisions as constraints and proceed. Ordinary defaults, naming, fallback behavior, compatibility choices, and distinctions discoverable from the repository are not human blockers. Use NEEDS_CONTEXT or NEEDS_HUMAN only when essential information or authority is missing and materially different answers would cause an irreversible, unsafe, or externally consequential result. Never ask the human to decide routine engineering details that can be implemented with a backward-compatible default. Do not modify code.",
     "EXECUTOR": "Act as the implementation agent. The repository context supplied in this prompt is your file-reading interface; you do not need or receive interactive filesystem or shell tools. Return JSON matching: {result, summary, files: [{path, content}], patches: [{path, patch}], delete_files: [], requested_files: [], plan_mismatch, reason}. Prefer patches for existing large files; each must be a standard unified diff with headers exactly --- a/<path> and +++ b/<path>. Use files with complete content for new files and small replacements. result must be IMPLEMENTED, REQUEST_CONTEXT, PLAN_MISMATCH, BLOCKED, NEEDS_REPLAN, or NEEDS_HUMAN. When an existing source file required for implementation is absent, return REQUEST_CONTEXT with its exact tracked path in requested_files; do not classify missing supplied source as BLOCKED. The runtime will validate and accumulate requested files, then continue this same Job. Only IMPLEMENTED may contain file changes. PLAN_MISMATCH and NEEDS_REPLAN require plan_mismatch details; BLOCKED and NEEDS_HUMAN require a concrete task-level reason. Never claim you are blocked merely because interactive tools are unavailable. Modify only files needed for the task; never include secrets, generated dependencies, lockfiles unless necessary, or paths outside the repository.",
     "REVIEWER": "Act as an independent code reviewer. Inspect the supplied task, plan, and actual Git diff. Return only JSON matching {result, summary, findings: [{severity, path, line, message}], reason}. result must be PASS, FAIL_ACTIONABLE, FAIL_ARCHITECTURAL, UNCERTAIN, or NEEDS_HUMAN. PASS has no findings. Failure outcomes require concrete findings. UNCERTAIN and NEEDS_HUMAN require a reason. Report only evidenced correctness, security, architectural, regression, or missing-test problems; do not invent evidence.",
@@ -140,7 +148,7 @@ class RuntimeAuditSnapshot:
 
 
 REQUIRED_CAPABILITY = {
-    JobRole.INTAKE: "CAN_CLASSIFY_EXTERNAL_EVENT",
+    JobRole.DELIVERER: "CAN_CLASSIFY_EXTERNAL_EVENT",
     JobRole.THINKER: "CAN_PLAN",
     JobRole.EXECUTOR: "CAN_IMPLEMENT",
     JobRole.REVIEWER: "CAN_REVIEW",
@@ -171,13 +179,13 @@ def expanded_permissions(permissions: tuple[str, ...]) -> frozenset[str]:
 
 
 async def resolve_agent_config(
-    session: AsyncSession, task: Task, role: JobRole
+    session: AsyncSession, task: Task, role: JobRole, node_id: uuid.UUID | None = None
 ) -> ResolvedAgentConfig | None:
     fallback = await session.get(AgentConfig, role)
     account = await session.get(AccountSettings, "default")
     node = None
     if task.team_id:
-        node = await session.scalar(
+        statement = (
             select(WorkflowNode)
             .join(WorkflowDefinition, WorkflowDefinition.id == WorkflowNode.workflow_id)
             .where(
@@ -187,6 +195,11 @@ async def resolve_agent_config(
             )
             .order_by(WorkflowNode.id)
         )
+        if node_id is not None:
+            statement = statement.where(WorkflowNode.id == node_id)
+        node = await session.scalar(statement)
+    if node_id is not None and node is None:
+        return None
     if node:
         agent = await session.get(AIAgent, node.agent_id) if node.agent_id else None
         role_record = await session.get(Role, agent.role_id) if agent else None
@@ -267,7 +280,7 @@ async def resolve_agent_config(
             max_output_tokens=runtime.max_output_tokens,
             temperature=runtime.temperature,
             timeout_minutes=max(runtime.job_timeout_seconds // 60, 1),
-            structured_output_retries=max(runtime.max_model_turns - 1, 0),
+            max_model_turns=runtime.max_model_turns,
             context_depth=runtime.context_strategy.casefold(),
             max_tool_calls=runtime.max_tool_calls,
         )
@@ -595,7 +608,11 @@ async def run(job_id: uuid.UUID) -> WorkerResult:
     async with SessionLocal() as session:
         job = (await session.execute(select(Job).where(Job.id == job_id))).scalar_one()
         task = await session.get(Task, job.task_id)
-        config = await resolve_agent_config(session, task, job.role) if task else None
+        config = (
+            await resolve_agent_config(session, task, job.role, job.workflow_node_id)
+            if task
+            else None
+        )
         if task is None:
             raise RuntimeError(f"Task {job.task_id} not found")
         if config is None or not config.model:
@@ -643,10 +660,11 @@ async def run(job_id: uuid.UUID) -> WorkerResult:
         )
         tester_checks = []
         execution_strategy = task.execution_strategy or {}
-        strategy_tool_limit = int(
-            config.configuration.get("max_tool_calls", execution_strategy.get("max_tool_calls", 50))
+        strategy_tool_limit = min(
+            int(config.configuration.get("max_tool_calls", 50)),
+            int(execution_strategy.get("max_tool_calls", 50)),
         )
-        if job.role == JobRole.TESTER and scoped_workspaces:
+        if job.role == JobRole.TESTER and scoped_workspaces and job.action != "CONSULT_AGENT":
             require_permission(config, "RUN_TESTS")
             if task.team_id is None:
                 raise RuntimeError("Tester task must belong to a Team")
@@ -742,8 +760,8 @@ async def run(job_id: uuid.UUID) -> WorkerResult:
                 )
                 await provider.aclose()
                 return worker_result
-        if job.role == JobRole.INTAKE:
-            prompt_data = await compiler.compile_for_intake(task, job)
+        if job.role == JobRole.DELIVERER:
+            prompt_data = await compiler.compile_for_deliverer(task, job)
         elif job.role == JobRole.THINKER:
             prompt_data = await compiler.compile_for_scoped_thinker(task, job, scoped_workspaces)
         elif job.role == JobRole.EXECUTOR and scoped_workspaces:
@@ -762,8 +780,41 @@ async def run(job_id: uuid.UUID) -> WorkerResult:
             )
         else:
             raise RuntimeError(f"Unsupported worker role {job.role.value}")
-        prompt = json.dumps(prompt_data, ensure_ascii=False)
+        prompt = json.dumps(prompt_data, ensure_ascii=False, separators=(",", ":"))
         system_prompt = config.system_prompt
+        repository_tools = None
+        consultants = (
+            await available_consultants(session, task, job)
+            if int(job.payload.get("consultation_depth", 0)) < 3
+            else []
+        )
+        tool_definitions: tuple[dict[str, Any], ...] = ()
+        if (scoped_workspaces or consultants) and provider.supports_repository_tools:
+            repository_tools = RepositoryTools(
+                [
+                    ("." if len(scoped_workspaces) == 1 else item.path.name, item.path)
+                    for item in scoped_workspaces
+                ],
+                strategy_tool_limit,
+                consultants={item["node_id"] for item in consultants},
+            )
+            tool_definitions = (REPOSITORY_TOOLS if scoped_workspaces else ()) + (
+                (CONSULTATION_TOOL,) if consultants else ()
+            )
+            prompt_data["allowed_consultants"] = consultants
+            for item in prompt_data.get("repositories", []):
+                item.pop("files", None)
+            prompt = json.dumps(prompt_data, ensure_ascii=False, separators=(",", ":"))
+            system_prompt = system_prompt.replace(
+                "The repository context supplied in this prompt is your file-reading interface; you do not need or receive interactive filesystem or shell tools.",
+                "Use the available repository tools to inspect live tracked files before editing. Search and batch-read related files on demand. Return file changes in the structured proposal; the runtime applies them through the Tool Gateway.",
+            )
+            if scoped_workspaces:
+                system_prompt += "\nRepository inspection tools are available. Missing prompt snippets are not a blocker: list, search, and read current files. Never treat stale RAG as current source."
+            if consultants:
+                system_prompt += "\nYou may ask a focused question of allowed_consultants using ask_agent. Prefer direct repository evidence; ask only when another specialist's input is necessary. The orchestrator will persist the reply and resume this job."
+        if job.action == "CONSULT_AGENT":
+            system_prompt += "\nThis is a read-only consultation, not an engineering phase. Answer job.payload.question using current evidence. Do not edit files, run delivery actions, or request another consultation. Return only {result: CONSULTATION_REPLIED, summary: your useful answer}."
         if job.action == "RESPOND_TO_MESSAGE":
             system_prompt += (
                 "\n\nThis is a conversation-only response. Answer the user's latest internal task "
@@ -797,7 +848,10 @@ async def run(job_id: uuid.UUID) -> WorkerResult:
                             ),
                             timeout_seconds=int(config.configuration.get("timeout_minutes", 60))
                             * 60,
-                            response_schema=role_output_schema(job.role),
+                            response_schema=ConsultationReply.model_json_schema()
+                            if job.action == "CONSULT_AGENT"
+                            else role_output_schema(job.role),
+                            tools=tool_definitions,
                         ),
                         job.role,
                         max_repairs,
@@ -811,8 +865,16 @@ async def run(job_id: uuid.UUID) -> WorkerResult:
                         ),
                         on_text_delta=stream_progress_reporter(task.id, job.id),
                         is_cancelled=stream_cancellation_checker(job.id, job.lease_token),
+                        repository_tools=repository_tools,
+                        response_model=ConsultationReply if job.action == "CONSULT_AGENT" else None,
+                        max_model_calls=min(
+                            max_job_turns, int(config.configuration.get("max_model_turns", 20))
+                        )
+                        - len(attempts),
                     )
                     attempts.extend(current_attempts)
+                    if data.get("result") in {"CONSULTATION_REQUESTED", "CONSULTATION_REPLIED"}:
+                        break
                     if job.role != JobRole.EXECUTOR:
                         break
                     proposal = ExecutorProposal.model_validate(data)
@@ -849,6 +911,7 @@ async def run(job_id: uuid.UUID) -> WorkerResult:
                     requested = await requested_file_context(
                         workspace_paths,
                         proposal.requested_files,
+                        existing_context=accumulated_requested_context,
                         max_context_bytes=max(
                             0,
                             300_000
@@ -871,15 +934,8 @@ async def run(job_id: uuid.UUID) -> WorkerResult:
                     accumulated_requested_context = merge_requested_file_context(
                         accumulated_requested_context, requested
                     )
-                    for key in ("repository",):
-                        repository_context_data = prompt_data.get(key)
-                        if isinstance(repository_context_data, dict):
-                            repository_context_data.pop("files", None)
-                    repository_contexts = prompt_data.get("repositories")
-                    if isinstance(repository_contexts, list):
-                        for repository_context_data in repository_contexts:
-                            if isinstance(repository_context_data, dict):
-                                repository_context_data.pop("files", None)
+                    # Keep initial source material; expanding one missing file must not
+                    # remove other files the model already needs for implementation.
                     prompt_data["requested_file_context"] = accumulated_requested_context
                     prompt_data["context_request_history"] = context_request_history
                     prompt_data["context_request"] = {
@@ -887,8 +943,8 @@ async def run(job_id: uuid.UUID) -> WorkerResult:
                         "previous_summary": proposal.summary,
                         "instruction": "Continue implementation using the loaded files. Request another bounded set only if essential existing sources remain absent.",
                     }
-                    prompt = json.dumps(prompt_data, ensure_ascii=False)
-            except StructuredOutputError as exc:
+                    prompt = json.dumps(prompt_data, ensure_ascii=False, separators=(",", ":"))
+            except (StructuredOutputError, ProviderRunInterrupted) as exc:
                 await persist_attempts(
                     session,
                     job,
@@ -898,6 +954,8 @@ async def run(job_id: uuid.UUID) -> WorkerResult:
                     config.configuration,
                     audit_snapshot,
                 )
+                if isinstance(exc, ProviderRunInterrupted):
+                    raise exc.cause from exc
                 raise
             except BudgetExceeded as exc:
                 attempts = exc.attempts
@@ -940,7 +998,14 @@ async def run(job_id: uuid.UUID) -> WorkerResult:
             return worker_result
         result = "MODEL_COMPLETED"
         summary = str(data.get("summary") or data.get("goal") or "Model completed")[:500]
-        if job.role == JobRole.INTAKE:
+        consultation_result = data.get("result") in {
+            "CONSULTATION_REQUESTED",
+            "CONSULTATION_REPLIED",
+        }
+        if consultation_result:
+            result = str(data["result"])
+            summary = str(data.get("summary") or data.get("question"))[:8000]
+        elif job.role == JobRole.DELIVERER:
             result = str(data["result"])
             summary = str(data["summary"])[:500]
         elif job.role == JobRole.THINKER:
@@ -1126,7 +1191,11 @@ async def run(job_id: uuid.UUID) -> WorkerResult:
                     ).encode()
                 ).hexdigest()
                 data["deterministic"] = False
-        if config.allowed_results and result not in config.allowed_results:
+        if (
+            not consultation_result
+            and config.allowed_results
+            and result not in config.allowed_results
+        ):
             raise RuntimeError(f"Agent role does not allow structured result {result}")
         checkpoint_data = dict(data)
         checkpoint_data["result"] = result

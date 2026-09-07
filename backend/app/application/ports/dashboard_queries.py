@@ -17,6 +17,7 @@ class ActiveWorkerView:
     started_at: datetime | None
     input_tokens: int
     output_tokens: int
+    action: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -116,6 +117,8 @@ class DashboardSnapshot:
     throughput: tuple[TimeBucketView, ...]
     token_history: tuple[TimeBucketView, ...]
     health: tuple[HealthCheckView, ...]
+    active_workers: tuple[ActiveWorkerView, ...] = ()
+    running_jobs: int = 0
 
 
 class DashboardQueries(Protocol):
