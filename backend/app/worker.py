@@ -921,6 +921,15 @@ async def run(job_id: uuid.UUID) -> WorkerResult:
                             ),
                         ),
                     )
+                    loaded_before = {
+                        item.get("path")
+                        for item in accumulated_requested_context
+                        if item.get("status") == "LOADED"
+                    }
+                    newly_loaded = any(
+                        item.get("status") == "LOADED" and item.get("path") not in loaded_before
+                        for item in requested
+                    )
                     context_request_history.append(
                         {
                             "round": context_round + 1,
@@ -934,6 +943,32 @@ async def run(job_id: uuid.UUID) -> WorkerResult:
                     accumulated_requested_context = merge_requested_file_context(
                         accumulated_requested_context, requested
                     )
+                    if not newly_loaded:
+                        unresolved = [
+                            str(item.get("requested_path", item.get("path", "unknown")))
+                            for item in requested
+                            if item.get("status") != "LOADED"
+                        ]
+                        data = {
+                            "result": "NEEDS_HUMAN",
+                            "summary": "Required repository files could not be loaded.",
+                            "files": [],
+                            "patches": [],
+                            "delete_files": [],
+                            "requested_files": [],
+                            "plan_mismatch": None,
+                            "reason": (
+                                "The requested source context made no progress in this bounded "
+                                "attempt. Verify the current repository workspace and requested "
+                                "paths before resuming."
+                                + (
+                                    f" Unresolved: {', '.join(unresolved[:12])}."
+                                    if unresolved
+                                    else ""
+                                )
+                            ),
+                        }
+                        break
                     # Keep initial source material; expanding one missing file must not
                     # remove other files the model already needs for implementation.
                     prompt_data["requested_file_context"] = accumulated_requested_context

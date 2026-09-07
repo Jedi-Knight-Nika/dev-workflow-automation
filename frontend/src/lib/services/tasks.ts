@@ -6,6 +6,7 @@ import type {
   Task,
   TaskEvent,
   TaskMemory,
+  TaskMetrics,
   TaskMessage,
   TaskMessagePage,
   ValidationRecord
@@ -75,6 +76,10 @@ export function createTask(input: CreateTaskInput): Promise<Task> {
 
 export function listTaskJobs(taskId: string): Promise<Job[]> {
   return api<Job[]>(`/tasks/${taskId}/jobs`);
+}
+
+export function getTaskMetrics(taskId: string): Promise<TaskMetrics> {
+  return api<TaskMetrics>(`/tasks/${taskId}/metrics`);
 }
 
 export function createTaskJob(taskId: string, input: CreateJobInput): Promise<Job> {

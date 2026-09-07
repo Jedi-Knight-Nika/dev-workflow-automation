@@ -1,11 +1,18 @@
 import uuid
+from collections import defaultdict
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.application.ports.job_enqueueing import EnqueuedJob
-from app.application.ports.task_history import ReviewFindingView, TaskEventView, ValidationView
-from app.db.models import Job, ReviewFinding, TaskEvent, ValidationRecord
+from app.application.ports.task_history import (
+    ReviewFindingView,
+    TaskEventView,
+    TaskMetricsView,
+    TaskRoleMetricsView,
+    ValidationView,
+)
+from app.db.models import Job, ReviewFinding, TaskEvent, ValidationRecord, WorkerRun
 from app.infrastructure.persistence.job_enqueueing import job_to_view
 
 
@@ -87,3 +94,54 @@ class SqlAlchemyTaskHistoryQueries:
             )
             for record in records
         ]
+
+    async def metrics(self, task_id: uuid.UUID) -> TaskMetricsView:
+        runs = (
+            await self._session.scalars(
+                select(WorkerRun)
+                .join(Job, Job.id == WorkerRun.job_id)
+                .where(Job.task_id == task_id)
+                .order_by(WorkerRun.created_at)
+            )
+        ).all()
+        by_role: dict[tuple[str, str, str], list[int]] = defaultdict(lambda: [0, 0, 0, 0])
+        known_input = 0
+        known_output = 0
+        missing = 0
+        duration = 0
+        priced: float | None = 0.0
+        for run in runs:
+            input_tokens = run.input_tokens
+            output_tokens = run.output_tokens
+            if input_tokens is None or output_tokens is None:
+                missing += 1
+            known_input += input_tokens or 0
+            known_output += output_tokens or 0
+            duration += run.duration_ms or 0
+            if run.estimated_cost_usd is None:
+                priced = None
+            elif priced is not None:
+                priced += float(run.estimated_cost_usd)
+            key = (
+                run.role.value if hasattr(run.role, "value") else str(run.role),
+                run.provider,
+                run.model,
+            )
+            bucket = by_role[key]
+            bucket[0] += 1
+            bucket[1] += input_tokens or 0
+            bucket[2] += output_tokens or 0
+            bucket[3] += run.duration_ms or 0
+        roles = tuple(
+            TaskRoleMetricsView(role, provider, model, *values)
+            for (role, provider, model), values in by_role.items()
+        )
+        return TaskMetricsView(
+            attempts=len(runs),
+            input_tokens=known_input,
+            output_tokens=known_output,
+            missing_usage_attempts=missing,
+            duration_ms=duration,
+            estimated_cost_usd=priced if runs else None,
+            roles=roles,
+        )

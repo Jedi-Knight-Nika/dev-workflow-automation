@@ -333,6 +333,25 @@ export type Job = {
   retry_not_before: string | null;
 };
 
+export type TaskRoleMetrics = {
+  role: string;
+  provider: string;
+  model: string;
+  attempts: number;
+  input_tokens: number;
+  output_tokens: number;
+  duration_ms: number;
+};
+export type TaskMetrics = {
+  attempts: number;
+  input_tokens: number;
+  output_tokens: number;
+  missing_usage_attempts: number;
+  duration_ms: number;
+  estimated_cost_usd: number | null;
+  roles: TaskRoleMetrics[];
+};
+
 export type DashboardActivity = {
   active_job: Job | null;
   queued_jobs: Job[];

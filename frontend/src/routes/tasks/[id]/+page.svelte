@@ -14,6 +14,7 @@
   import ValidationList from '$lib/components/task-detail/ValidationList.svelte';
   import FindingList from '$lib/components/task-detail/FindingList.svelte';
   import TaskMemoryPanel from '$lib/components/task-detail/TaskMemoryPanel.svelte';
+  import TaskMetricsPanel from '$lib/components/task-detail/TaskMetricsPanel.svelte';
   import GenerationProgress from '$lib/components/task-detail/GenerationProgress.svelte';
   import TaskConversation from '$lib/components/task-detail/TaskConversation.svelte';
   import { API_URL } from '$lib/api';
@@ -34,6 +35,7 @@
     retryTaskLinearSync,
     getTaskMemory,
     listTaskCheckpoints,
+    getTaskMetrics,
     listTaskMessages,
     addTaskMessage,
     reactToTaskMessage,
@@ -58,6 +60,7 @@
   let findings = $state<ReviewFinding[]>([]);
   let memory = $state<TaskMemory | null>(null);
   let checkpoints = $state<AgentCheckpoint[]>([]);
+  let metrics = $state<import('$lib/types').TaskMetrics | null>(null);
   let messages = $state<TaskMessage[]>([]);
   let nextMessageCursor = $state<number | null>(null);
   let loadingOlderMessages = $state(false);
@@ -79,6 +82,7 @@
       nextFindings,
       nextMemory,
       nextCheckpoints,
+      nextMetrics,
       messagePage
     ] = await Promise.all([
       getTask(taskId),
@@ -88,6 +92,7 @@
       listTaskFindings(taskId),
       getTaskMemory(taskId),
       listTaskCheckpoints(taskId),
+      getTaskMetrics(taskId),
       listTaskMessages(taskId)
     ]);
     task = nextTask;
@@ -97,6 +102,7 @@
     findings = nextFindings;
     memory = nextMemory;
     checkpoints = nextCheckpoints;
+    metrics = nextMetrics;
     messages = messagePage.items;
     nextMessageCursor = messagePage.next_before_id;
   }
@@ -313,6 +319,7 @@
       />
     </details>
     <GenerationProgress progress={generationProgress} connected={eventStreamConnected} />
+    <TaskMetricsPanel {metrics} />
     <div class="min-w-0 xl:col-span-2">
       <TaskConversation
         {messages}

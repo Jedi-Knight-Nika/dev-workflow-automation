@@ -53,7 +53,9 @@ from .tasks import (
     TaskMessagePageRead,
     TaskMessageReaction,
     TaskMessageRead,
+    TaskMetricsRead,
     TaskRead,
+    TaskRoleMetricsRead,
 )
 from .teams import (
     RoleClone,
@@ -127,7 +129,9 @@ __all__ = [
     "TaskMessagePageRead",
     "TaskMessageReaction",
     "TaskMessageRead",
+    "TaskMetricsRead",
     "TaskRead",
+    "TaskRoleMetricsRead",
     "TeamRead",
     "TeamWrite",
     "TelegramConfigure",

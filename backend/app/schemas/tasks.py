@@ -118,6 +118,26 @@ class JobRead(BaseModel):
     finished_at: datetime | None
 
 
+class TaskRoleMetricsRead(BaseModel):
+    role: str
+    provider: str
+    model: str
+    attempts: int
+    input_tokens: int
+    output_tokens: int
+    duration_ms: int
+
+
+class TaskMetricsRead(BaseModel):
+    attempts: int
+    input_tokens: int
+    output_tokens: int
+    missing_usage_attempts: int
+    duration_ms: int
+    estimated_cost_usd: float | None
+    roles: list[TaskRoleMetricsRead]
+
+
 class EventRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int

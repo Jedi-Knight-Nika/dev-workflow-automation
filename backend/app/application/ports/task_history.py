@@ -45,8 +45,31 @@ class ReviewFindingView:
     resolved_at: datetime | None
 
 
+@dataclass(frozen=True, slots=True)
+class TaskRoleMetricsView:
+    role: str
+    provider: str
+    model: str
+    attempts: int
+    input_tokens: int
+    output_tokens: int
+    duration_ms: int
+
+
+@dataclass(frozen=True, slots=True)
+class TaskMetricsView:
+    attempts: int
+    input_tokens: int
+    output_tokens: int
+    missing_usage_attempts: int
+    duration_ms: int
+    estimated_cost_usd: float | None
+    roles: tuple[TaskRoleMetricsView, ...]
+
+
 class TaskHistoryQueries(Protocol):
     async def jobs(self, task_id: uuid.UUID) -> list[EnqueuedJob]: ...
     async def events(self, task_id: uuid.UUID) -> list[TaskEventView]: ...
     async def validations(self, task_id: uuid.UUID) -> list[ValidationView]: ...
     async def findings(self, task_id: uuid.UUID) -> list[ReviewFindingView]: ...
+    async def metrics(self, task_id: uuid.UUID) -> TaskMetricsView: ...

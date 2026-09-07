@@ -89,6 +89,7 @@ from app.schemas import (
     TaskMessagePageRead,
     TaskMessageReaction,
     TaskMessageRead,
+    TaskMetricsRead,
     TaskRead,
     ValidationRead,
 )
@@ -286,6 +287,14 @@ async def list_task_jobs(
 ) -> list[JobRead]:
     items = await QueryTaskHistory(queries).jobs(task_id)
     return [JobRead.model_validate(item) for item in items]
+
+
+@router.get("/{task_id}/metrics", response_model=TaskMetricsRead)
+async def task_metrics(
+    task_id: uuid.UUID,
+    queries: TaskHistoryQueries = Depends(get_task_history_queries),
+) -> TaskMetricsRead:
+    return TaskMetricsRead.model_validate(await queries.metrics(task_id), from_attributes=True)
 
 
 @router.post("/{task_id}/jobs", response_model=JobRead, status_code=status.HTTP_201_CREATED)

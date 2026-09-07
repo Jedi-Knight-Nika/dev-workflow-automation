@@ -223,7 +223,15 @@
       layoutSaving = false;
     }
   }
-  let runningNode = $derived(nodes.find((node) => node.data.activeJobs > 0));
+  // A live console is useful while a node is running, queued, or waiting on a
+  // dependency. Keep the observer action available for all of those states.
+  let liveNode = $derived(
+    nodes.find(
+      (node) =>
+        node.data.activeJobs > 0 || node.data.queuedJobs > 0 || node.data.status === 'WAITING'
+    )
+  );
+  let fullscreen = $state(false);
   let canvasViewport: HTMLDivElement;
 
   onMount(() => {
@@ -290,10 +298,6 @@
 
   function statusCount(...statuses: string[]) {
     return nodes.filter((node) => statuses.includes(node.data.status)).length;
-  }
-
-  function openRunningConsole() {
-    if (runningNode) onConsole(runningNode.data.role, runningNode.id);
   }
 
   $effect(() => {
@@ -901,8 +905,16 @@
         >
       {/if}
     </div>
-    <Button size="sm" variant="ghost" disabled={!runningNode} onclick={openRunningConsole}>
-      {runningNode ? '⌘ Open live console' : '⌘ No active console'}
+    <Button
+      size="sm"
+      variant="ghost"
+      disabled={!liveNode}
+      onclick={() => liveNode && onConsole(liveNode.data.role, liveNode.id)}
+    >
+      {liveNode ? '⌘ Open live view' : '⌘ No live activity'}
+    </Button>
+    <Button size="sm" variant="ghost" onclick={() => (fullscreen = !fullscreen)}>
+      {fullscreen ? 'Exit fullscreen' : 'Fullscreen graph'}
     </Button>
     <Button size="sm" variant="primary" disabled={saving || !dirty} onclick={persist}>
       <span class="flex items-center gap-1.5">
@@ -955,7 +967,15 @@
       >
     </div>
   {/if}
-  <div bind:this={canvasViewport} class="canvas-viewport bg-surface">
+  <div bind:this={canvasViewport} class="canvas-viewport bg-surface" class:fullscreen>
+    {#if fullscreen}
+      <div class="fullscreen-toolbar">
+        <span>Team workflow · live graph</span>
+        <Button size="sm" variant="ghost" onclick={() => (fullscreen = false)}
+          >Exit fullscreen</Button
+        >
+      </div>
+    {/if}
     <SvelteFlow
       bind:nodes
       bind:edges
@@ -1974,6 +1994,37 @@
     max-height: 1200px;
     overflow: hidden;
     resize: both;
+  }
+  .canvas-viewport.fullscreen {
+    position: fixed;
+    inset: 0;
+    z-index: 60;
+    width: 100vw !important;
+    height: 100vh !important;
+    max-width: none;
+    max-height: none;
+    min-width: 0;
+    min-height: 0;
+    border-radius: 0;
+    resize: none;
+  }
+  .fullscreen-toolbar {
+    position: absolute;
+    top: 0.75rem;
+    left: 0.75rem;
+    right: 0.75rem;
+    z-index: 8;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    border: 1px solid var(--color-line);
+    border-radius: 0.65rem;
+    background: color-mix(in srgb, var(--color-panel) 88%, transparent);
+    padding: 0.45rem 0.6rem 0.45rem 0.8rem;
+    color: var(--color-muted);
+    font-size: 0.68rem;
+    backdrop-filter: blur(8px);
   }
   .resize-hint {
     position: absolute;
