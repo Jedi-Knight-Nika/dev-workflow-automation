@@ -1,0 +1,3286 @@
+{
+  "capture": {
+    "sql": "SELECT now() AS captured_at, current_database() AS database, current_setting('TimeZone') AS timezone, (SELECT version_num FROM alembic_version) AS migration",
+    "rows": [
+      {
+        "captured_at": "2026-09-07 09:13:58.686118+00:00",
+        "database": "engineering_worker",
+        "timezone": "Etc/UTC",
+        "migration": "0056_repository_merge_state"
+      }
+    ]
+  },
+  "totals": {
+    "sql": "SELECT count(*) AS calls, count(distinct job_id) AS jobs, sum(input_tokens) AS input_tokens, sum(output_tokens) AS output_tokens, sum(estimated_cost_usd) AS estimated_cost, count(estimated_cost_usd) AS priced_calls, count(*) FILTER (WHERE input_tokens IS NULL OR output_tokens IS NULL) AS missing_usage, sum(duration_ms) AS duration_ms, min(created_at) AS first_call, max(created_at) AS last_call FROM worker_runs",
+    "rows": [
+      {
+        "calls": 129,
+        "jobs": 79,
+        "input_tokens": 3001793,
+        "output_tokens": 92007,
+        "estimated_cost": null,
+        "priced_calls": 0,
+        "missing_usage": 9,
+        "duration_ms": 1772455,
+        "first_call": "2026-09-06 22:05:52.427630+00:00",
+        "last_call": "2026-09-07 07:28:55.884551+00:00"
+      }
+    ]
+  },
+  "roles": {
+    "sql": "SELECT role, provider, model, count(*) AS calls, count(distinct job_id) AS jobs, sum(input_tokens) AS input_tokens, sum(output_tokens) AS output_tokens, sum(duration_ms) AS duration_ms, max(input_tokens) AS largest_input FROM worker_runs GROUP BY role,provider,model ORDER BY sum(input_tokens+output_tokens) DESC",
+    "rows": [
+      {
+        "role": "EXECUTOR",
+        "provider": "openai",
+        "model": "gpt-5.6-luna",
+        "calls": 45,
+        "jobs": 18,
+        "input_tokens": 1656165,
+        "output_tokens": 29527,
+        "duration_ms": 585147,
+        "largest_input": 70018
+      },
+      {
+        "role": "INTAKE",
+        "provider": "openai",
+        "model": "gpt-5.6-luna",
+        "calls": 52,
+        "jobs": 35,
+        "input_tokens": 979689,
+        "output_tokens": 17546,
+        "duration_ms": 259633,
+        "largest_input": 29056
+      },
+      {
+        "role": "THINKER",
+        "provider": "openai",
+        "model": "gpt-5.6-sol",
+        "calls": 25,
+        "jobs": 21,
+        "input_tokens": 329824,
+        "output_tokens": 43460,
+        "duration_ms": 902657,
+        "largest_input": 25292
+      },
+      {
+        "role": "REVIEWER",
+        "provider": "openai",
+        "model": "gpt-5.6-terra",
+        "calls": 7,
+        "jobs": 5,
+        "input_tokens": 36115,
+        "output_tokens": 1474,
+        "duration_ms": 25018,
+        "largest_input": 5987
+      }
+    ]
+  },
+  "tasks": {
+    "sql": "SELECT t.id,t.external_key,t.state,t.created_at,t.completed_at,t.manual_takeover,t.archived_at,count(w.id) AS calls,count(distinct w.job_id) AS billed_jobs,coalesce(sum(w.input_tokens),0) AS input_tokens,coalesce(sum(w.output_tokens),0) AS output_tokens FROM tasks t LEFT JOIN jobs j ON j.task_id=t.id LEFT JOIN worker_runs w ON w.job_id=j.id GROUP BY t.id ORDER BY sum(w.input_tokens+w.output_tokens) DESC NULLS LAST",
+    "rows": [
+      {
+        "id": "f77e53ce-c3ec-4b56-8cdb-6bdd7ad4cbaa",
+        "external_key": "TRELLO-J2mg8B9P",
+        "state": "NEEDS_HUMAN",
+        "created_at": "2026-09-07 01:23:15.513237+00:00",
+        "completed_at": null,
+        "manual_takeover": false,
+        "archived_at": null,
+        "calls": 57,
+        "billed_jobs": 29,
+        "input_tokens": 1751308,
+        "output_tokens": 49735
+      },
+      {
+        "id": "5706fde2-c167-4105-867d-69e6f621a076",
+        "external_key": "TRELLO-73WLJ63q",
+        "state": "MERGED",
+        "created_at": "2026-09-06 21:18:47.113607+00:00",
+        "completed_at": null,
+        "manual_takeover": false,
+        "archived_at": null,
+        "calls": 51,
+        "billed_jobs": 40,
+        "input_tokens": 996974,
+        "output_tokens": 28321
+      },
+      {
+        "id": "427f9519-61f3-4e7b-8d99-0fbc6bcaada1",
+        "external_key": "TRELLO-VDu4nqWT",
+        "state": "NEEDS_HUMAN",
+        "created_at": "2026-09-06 21:18:47.162342+00:00",
+        "completed_at": null,
+        "manual_takeover": false,
+        "archived_at": null,
+        "calls": 21,
+        "billed_jobs": 10,
+        "input_tokens": 253511,
+        "output_tokens": 13951
+      }
+    ]
+  },
+  "task_roles": {
+    "sql": "SELECT t.external_key,w.role,count(*) AS calls,count(distinct w.job_id) AS jobs,sum(w.input_tokens) AS input_tokens,sum(w.output_tokens) AS output_tokens FROM worker_runs w JOIN jobs j ON j.id=w.job_id JOIN tasks t ON t.id=j.task_id GROUP BY t.external_key,w.role ORDER BY t.external_key,sum(w.input_tokens+w.output_tokens) DESC",
+    "rows": [
+      {
+        "external_key": "TRELLO-73WLJ63q",
+        "role": "INTAKE",
+        "calls": 25,
+        "jobs": 18,
+        "input_tokens": 534024,
+        "output_tokens": 8504
+      },
+      {
+        "external_key": "TRELLO-73WLJ63q",
+        "role": "EXECUTOR",
+        "calls": 10,
+        "jobs": 8,
+        "input_tokens": 305844,
+        "output_tokens": 7234
+      },
+      {
+        "external_key": "TRELLO-73WLJ63q",
+        "role": "THINKER",
+        "calls": 9,
+        "jobs": 9,
+        "input_tokens": 120991,
+        "output_tokens": 11109
+      },
+      {
+        "external_key": "TRELLO-73WLJ63q",
+        "role": "REVIEWER",
+        "calls": 7,
+        "jobs": 5,
+        "input_tokens": 36115,
+        "output_tokens": 1474
+      },
+      {
+        "external_key": "TRELLO-J2mg8B9P",
+        "role": "EXECUTOR",
+        "calls": 32,
+        "jobs": 8,
+        "input_tokens": 1259196,
+        "output_tokens": 21428
+      },
+      {
+        "external_key": "TRELLO-J2mg8B9P",
+        "role": "INTAKE",
+        "calls": 11,
+        "jobs": 11,
+        "input_tokens": 303135,
+        "output_tokens": 2957
+      },
+      {
+        "external_key": "TRELLO-J2mg8B9P",
+        "role": "THINKER",
+        "calls": 14,
+        "jobs": 10,
+        "input_tokens": 188977,
+        "output_tokens": 25350
+      },
+      {
+        "external_key": "TRELLO-VDu4nqWT",
+        "role": "INTAKE",
+        "calls": 16,
+        "jobs": 6,
+        "input_tokens": 142530,
+        "output_tokens": 6085
+      },
+      {
+        "external_key": "TRELLO-VDu4nqWT",
+        "role": "EXECUTOR",
+        "calls": 3,
+        "jobs": 2,
+        "input_tokens": 91125,
+        "output_tokens": 865
+      },
+      {
+        "external_key": "TRELLO-VDu4nqWT",
+        "role": "THINKER",
+        "calls": 2,
+        "jobs": 2,
+        "input_tokens": 19856,
+        "output_tokens": 7001
+      }
+    ]
+  },
+  "jobs": {
+    "sql": "SELECT j.id,t.external_key,j.role,j.action,j.state,j.attempt,j.created_at,j.started_at,j.finished_at,j.result->>'result' AS result,j.result->>'outcome' AS outcome,count(w.id) AS calls,coalesce(sum(w.input_tokens),0) AS input_tokens,coalesce(sum(w.output_tokens),0) AS output_tokens FROM jobs j JOIN tasks t ON t.id=j.task_id LEFT JOIN worker_runs w ON w.job_id=j.id GROUP BY j.id,t.external_key ORDER BY j.created_at",
+    "rows": [
+      {
+        "id": "153ddc27-0d3d-4a7d-9d87-02772dc56b69",
+        "external_key": "TRELLO-73WLJ63q",
+        "role": "INTAKE",
+        "action": "INTERPRET_TASK",
+        "state": "CANCELLED",
+        "attempt": 3,
+        "created_at": "2026-09-06 21:18:47.122867+00:00",
+        "started_at": "2026-09-06 22:06:10.244807+00:00",
+        "finished_at": "2026-09-06 22:06:26.908533+00:00",
+        "result": null,
+        "outcome": null,
+        "calls": 6,
+        "input_tokens": 13936,
+        "output_tokens": 2785
+      },
+      {
+        "id": "59611f4d-8cb6-4272-9025-66f7fee81739",
+        "external_key": "TRELLO-VDu4nqWT",
+        "role": "INTAKE",
+        "action": "INTERPRET_TASK",
+        "state": "CANCELLED",
+        "attempt": 3,
+        "created_at": "2026-09-06 21:18:47.165814+00:00",
+        "started_at": "2026-09-06 22:06:54.958604+00:00",
+        "finished_at": "2026-09-06 22:07:13.517970+00:00",
+        "result": null,
+        "outcome": null,
+        "calls": 9,
+        "input_tokens": 18457,
+        "output_tokens": 4256
+      },
+      {
+        "id": "abf76a9a-581f-4e4f-ab70-9abe43397464",
+        "external_key": "TRELLO-VDu4nqWT",
+        "role": "INTAKE",
+        "action": "INTERPRET_TASK",
+        "state": "FAILED",
+        "attempt": 3,
+        "created_at": "2026-09-06 23:09:04.200386+00:00",
+        "started_at": "2026-09-06 23:09:31.155393+00:00",
+        "finished_at": "2026-09-06 23:09:36.995201+00:00",
+        "result": null,
+        "outcome": null,
+        "calls": 3,
+        "input_tokens": 52746,
+        "output_tokens": 752
+      },
+      {
+        "id": "7cfe47ab-ab03-4c2b-94ae-04a02e3ffef2",
+        "external_key": "TRELLO-73WLJ63q",
+        "role": "INTAKE",
+        "action": "INTERPRET_TASK",
+        "state": "FAILED",
+        "attempt": 3,
+        "created_at": "2026-09-06 23:09:04.200392+00:00",
+        "started_at": "2026-09-06 23:09:37.019246+00:00",
+        "finished_at": "2026-09-06 23:09:41.320730+00:00",
+        "result": null,
+        "outcome": null,
+        "calls": 3,
+        "input_tokens": 78254,
+        "output_tokens": 631
+      },
+      {
+        "id": "0f505f1e-b024-48bb-9dbe-9814d2c203c8",
+        "external_key": "TRELLO-VDu4nqWT",
+        "role": "INTAKE",
+        "action": "INTERPRET_TASK",
+        "state": "SUCCEEDED",
+        "attempt": 1,
+        "created_at": "2026-09-06 23:13:36.973996+00:00",
+        "started_at": "2026-09-06 23:13:37.541001+00:00",
+        "finished_at": "2026-09-06 23:13:43.645210+00:00",
+        "result": "EVENT_INTERPRETED",
+        "outcome": null,
+        "calls": 1,
+        "input_tokens": 17584,
+        "output_tokens": 201
+      },
+      {
+        "id": "1aa89854-a138-4ddd-b1ec-21fde5534392",
+        "external_key": "TRELLO-73WLJ63q",
+        "role": "INTAKE",
+        "action": "INTERPRET_TASK",
+        "state": "SUCCEEDED",
+        "attempt": 1,
+        "created_at": "2026-09-06 23:13:36.974002+00:00",
+        "started_at": "2026-09-06 23:13:43.684778+00:00",
+        "finished_at": "2026-09-06 23:13:48.977457+00:00",
+        "result": "EVENT_INTERPRETED",
+        "outcome": null,
+        "calls": 1,
+        "input_tokens": 26078,
+        "output_tokens": 208
+      },
+      {
+        "id": "960ddfc4-a672-478a-870d-c1f45841a4e5",
+        "external_key": "TRELLO-VDu4nqWT",
+        "role": "THINKER",
+        "action": "CREATE_PLAN",
+        "state": "SUCCEEDED",
+        "attempt": 1,
+        "created_at": "2026-09-06 23:13:43.661761+00:00",
+        "started_at": "2026-09-06 23:13:49.018691+00:00",
+        "finished_at": "2026-09-06 23:15:12.220587+00:00",
+        "result": "PLAN_READY",
+        "outcome": null,
+        "calls": 1,
+        "input_tokens": 9255,
+        "output_tokens": 3717
+      },
+      {
+        "id": "7699e34a-8306-47c8-8b67-dd603780570e",
+        "external_key": "TRELLO-73WLJ63q",
+        "role": "THINKER",
+        "action": "CREATE_PLAN",
+        "state": "SUCCEEDED",
+        "attempt": 1,
+        "created_at": "2026-09-06 23:13:48.994512+00:00",
+        "started_at": "2026-09-06 23:15:12.247496+00:00",
+        "finished_at": "2026-09-06 23:15:31.667514+00:00",
+        "result": "PLAN_READY",
+        "outcome": null,
+        "calls": 1,
+        "input_tokens": 11061,
+        "output_tokens": 1001
+      },
+      {
+        "id": "8eb0d156-1043-4cd4-aaf4-19e05db2525e",
+        "external_key": "TRELLO-VDu4nqWT",
+        "role": "EXECUTOR",
+        "action": "IMPLEMENT_PLAN",
+        "state": "SUCCEEDED",
+        "attempt": 1,
+        "created_at": "2026-09-06 23:15:12.228079+00:00",
+        "started_at": "2026-09-06 23:15:31.687652+00:00",
+        "finished_at": "2026-09-06 23:15:44.179895+00:00",
+        "result": "BLOCKED",
+        "outcome": null,
+        "calls": 2,
+        "input_tokens": 59965,
+        "output_tokens": 659
+      },
+      {
+        "id": "95afc87f-d4ab-4a73-8517-0ca9d687a057",
+        "external_key": "TRELLO-73WLJ63q",
+        "role": "EXECUTOR",
+        "action": "IMPLEMENT_PLAN",
+        "state": "SUCCEEDED",
+        "attempt": 1,
+        "created_at": "2026-09-06 23:15:31.672393+00:00",
+        "started_at": "2026-09-06 23:15:44.206488+00:00",
+        "finished_at": "2026-09-06 23:15:54.228794+00:00",
+        "result": "BLOCKED",
+        "outcome": null,
+        "calls": 2,
+        "input_tokens": 61023,
+        "output_tokens": 561
+      },
+      {
+        "id": "9779f363-223f-4247-b863-c626bb509940",
+        "external_key": "TRELLO-73WLJ63q",
+        "role": "INTAKE",
+        "action": "INTERPRET_TASK",
+        "state": "SUCCEEDED",
+        "attempt": 1,
+        "created_at": "2026-09-06 23:31:54.974962+00:00",
+        "started_at": "2026-09-06 23:31:55.844276+00:00",
+        "finished_at": "2026-09-06 23:32:02.094736+00:00",
+        "result": "EVENT_INTERPRETED",
+        "outcome": null,
+        "calls": 1,
+        "input_tokens": 26082,
+        "output_tokens": 215
+      },
+      {
+        "id": "370c557a-48c6-4a6b-a1bd-5fefb752ebb1",
+        "external_key": "TRELLO-VDu4nqWT",
+        "role": "INTAKE",
+        "action": "INTERPRET_TASK",
+        "state": "SUCCEEDED",
+        "attempt": 1,
+        "created_at": "2026-09-06 23:31:54.974975+00:00",
+        "started_at": "2026-09-06 23:32:02.140116+00:00",
+        "finished_at": "2026-09-06 23:32:09.549134+00:00",
+        "result": "EVENT_INTERPRETED",
+        "outcome": null,
+        "calls": 1,
+        "input_tokens": 17660,
+        "output_tokens": 208
+      },
+      {
+        "id": "bbee4e57-ab17-4bac-bbed-943d63e63ec9",
+        "external_key": "TRELLO-73WLJ63q",
+        "role": "THINKER",
+        "action": "CREATE_PLAN",
+        "state": "SUCCEEDED",
+        "attempt": 1,
+        "created_at": "2026-09-06 23:32:02.108818+00:00",
+        "started_at": "2026-09-06 23:32:09.840082+00:00",
+        "finished_at": "2026-09-06 23:32:33.211670+00:00",
+        "result": "PLAN_READY",
+        "outcome": null,
+        "calls": 1,
+        "input_tokens": 11731,
+        "output_tokens": 1396
+      },
+      {
+        "id": "48d612df-9d26-470f-86bb-ed6bfb226c8f",
+        "external_key": "TRELLO-VDu4nqWT",
+        "role": "THINKER",
+        "action": "CREATE_PLAN",
+        "state": "SUCCEEDED",
+        "attempt": 1,
+        "created_at": "2026-09-06 23:32:09.559999+00:00",
+        "started_at": "2026-09-06 23:32:33.241078+00:00",
+        "finished_at": "2026-09-06 23:34:04.565866+00:00",
+        "result": "PLAN_READY",
+        "outcome": null,
+        "calls": 1,
+        "input_tokens": 10601,
+        "output_tokens": 3284
+      },
+      {
+        "id": "36b348dd-8263-4fd8-95d8-4ca35b0be15f",
+        "external_key": "TRELLO-73WLJ63q",
+        "role": "EXECUTOR",
+        "action": "IMPLEMENT_PLAN",
+        "state": "SUCCEEDED",
+        "attempt": 1,
+        "created_at": "2026-09-06 23:32:33.219082+00:00",
+        "started_at": "2026-09-06 23:34:04.596913+00:00",
+        "finished_at": "2026-09-06 23:34:10.737202+00:00",
+        "result": "BLOCKED",
+        "outcome": null,
+        "calls": 1,
+        "input_tokens": 31248,
+        "output_tokens": 242
+      },
+      {
+        "id": "d11ba2d4-792d-40fc-91f7-f944de317034",
+        "external_key": "TRELLO-VDu4nqWT",
+        "role": "EXECUTOR",
+        "action": "IMPLEMENT_PLAN",
+        "state": "SUCCEEDED",
+        "attempt": 1,
+        "created_at": "2026-09-06 23:34:04.572719+00:00",
+        "started_at": "2026-09-06 23:34:10.764759+00:00",
+        "finished_at": "2026-09-06 23:34:16.068014+00:00",
+        "result": "BLOCKED",
+        "outcome": null,
+        "calls": 1,
+        "input_tokens": 31160,
+        "output_tokens": 206
+      },
+      {
+        "id": "e71944d8-0e56-4b1e-856c-eba66730339d",
+        "external_key": "TRELLO-73WLJ63q",
+        "role": "INTAKE",
+        "action": "INTERPRET_TASK",
+        "state": "SUCCEEDED",
+        "attempt": 1,
+        "created_at": "2026-09-06 23:48:31.219401+00:00",
+        "started_at": "2026-09-06 23:48:31.261554+00:00",
+        "finished_at": "2026-09-06 23:48:40.782642+00:00",
+        "result": "EVENT_INTERPRETED",
+        "outcome": null,
+        "calls": 1,
+        "input_tokens": 26349,
+        "output_tokens": 396
+      },
+      {
+        "id": "6113b671-4cc6-424d-a888-a045636750f4",
+        "external_key": "TRELLO-VDu4nqWT",
+        "role": "INTAKE",
+        "action": "INTERPRET_TASK",
+        "state": "SUCCEEDED",
+        "attempt": 1,
+        "created_at": "2026-09-06 23:48:31.219407+00:00",
+        "started_at": "2026-09-06 23:48:41.644923+00:00",
+        "finished_at": "2026-09-06 23:48:48.581941+00:00",
+        "result": "EVENT_INTERPRETED",
+        "outcome": null,
+        "calls": 1,
+        "input_tokens": 17955,
+        "output_tokens": 316
+      },
+      {
+        "id": "45e02c87-2abc-4b12-bd7d-2ecfc8905692",
+        "external_key": "TRELLO-73WLJ63q",
+        "role": "THINKER",
+        "action": "CREATE_PLAN",
+        "state": "SUCCEEDED",
+        "attempt": 1,
+        "created_at": "2026-09-06 23:48:40.798501+00:00",
+        "started_at": "2026-09-06 23:48:48.954797+00:00",
+        "finished_at": "2026-09-06 23:49:14.497141+00:00",
+        "result": "PLAN_READY",
+        "outcome": null,
+        "calls": 1,
+        "input_tokens": 12473,
+        "output_tokens": 1648
+      },
+      {
+        "id": "76d6b0d6-1068-4b01-bcac-9c563071f0d0",
+        "external_key": "TRELLO-73WLJ63q",
+        "role": "EXECUTOR",
+        "action": "IMPLEMENT_PLAN",
+        "state": "FAILED",
+        "attempt": 3,
+        "created_at": "2026-09-06 23:49:14.507071+00:00",
+        "started_at": "2026-09-06 23:49:33.515332+00:00",
+        "finished_at": "2026-09-06 23:49:35.362604+00:00",
+        "result": null,
+        "outcome": null,
+        "calls": 0,
+        "input_tokens": 0,
+        "output_tokens": 0
+      },
+      {
+        "id": "faad177a-3107-402d-81d8-d4751d13f459",
+        "external_key": "TRELLO-73WLJ63q",
+        "role": "INTAKE",
+        "action": "INTERPRET_TASK",
+        "state": "SUCCEEDED",
+        "attempt": 1,
+        "created_at": "2026-09-07 00:01:15.265007+00:00",
+        "started_at": "2026-09-07 00:01:15.935264+00:00",
+        "finished_at": "2026-09-07 00:01:23.009028+00:00",
+        "result": "EVENT_INTERPRETED",
+        "outcome": null,
+        "calls": 1,
+        "input_tokens": 26599,
+        "output_tokens": 310
+      },
+      {
+        "id": "a5814b8d-ce36-42c3-94be-d8be6833562c",
+        "external_key": "TRELLO-VDu4nqWT",
+        "role": "INTAKE",
+        "action": "INTERPRET_TASK",
+        "state": "SUCCEEDED",
+        "attempt": 1,
+        "created_at": "2026-09-07 00:01:15.265015+00:00",
+        "started_at": "2026-09-07 00:01:23.241789+00:00",
+        "finished_at": "2026-09-07 00:01:30.484751+00:00",
+        "result": "EVENT_INTERPRETED",
+        "outcome": null,
+        "calls": 1,
+        "input_tokens": 18128,
+        "output_tokens": 352
+      },
+      {
+        "id": "15fa67ec-050c-48c6-b58c-65b8cfc48245",
+        "external_key": "TRELLO-73WLJ63q",
+        "role": "INTAKE",
+        "action": "INTERPRET_TASK",
+        "state": "SUCCEEDED",
+        "attempt": 1,
+        "created_at": "2026-09-07 00:15:00.735066+00:00",
+        "started_at": "2026-09-07 00:15:01.414367+00:00",
+        "finished_at": "2026-09-07 00:15:08.835021+00:00",
+        "result": "EVENT_INTERPRETED",
+        "outcome": null,
+        "calls": 1,
+        "input_tokens": 26808,
+        "output_tokens": 355
+      },
+      {
+        "id": "dedd785a-1756-438c-96c2-560db7975c5c",
+        "external_key": "TRELLO-73WLJ63q",
+        "role": "INTAKE",
+        "action": "INTERPRET_TASK",
+        "state": "SUCCEEDED",
+        "attempt": 1,
+        "created_at": "2026-09-07 00:18:38.115422+00:00",
+        "started_at": "2026-09-07 00:18:38.929499+00:00",
+        "finished_at": "2026-09-07 00:18:43.891020+00:00",
+        "result": "EVENT_INTERPRETED",
+        "outcome": null,
+        "calls": 1,
+        "input_tokens": 26900,
+        "output_tokens": 198
+      },
+      {
+        "id": "72e6774b-6011-4933-888e-a650a78194b8",
+        "external_key": "TRELLO-73WLJ63q",
+        "role": "THINKER",
+        "action": "CREATE_PLAN",
+        "state": "SUCCEEDED",
+        "attempt": 1,
+        "created_at": "2026-09-07 00:18:43.911960+00:00",
+        "started_at": "2026-09-07 00:18:43.943792+00:00",
+        "finished_at": "2026-09-07 00:19:00.729781+00:00",
+        "result": "PLAN_READY",
+        "outcome": null,
+        "calls": 1,
+        "input_tokens": 13190,
+        "output_tokens": 1001
+      },
+      {
+        "id": "62d7ea9b-9f8f-481f-bdef-81cf1145e1ff",
+        "external_key": "TRELLO-73WLJ63q",
+        "role": "EXECUTOR",
+        "action": "IMPLEMENT_PLAN",
+        "state": "SUCCEEDED",
+        "attempt": 1,
+        "created_at": "2026-09-07 00:19:00.738608+00:00",
+        "started_at": "2026-09-07 00:19:01.332680+00:00",
+        "finished_at": "2026-09-07 00:19:10.411640+00:00",
+        "result": "BLOCKED",
+        "outcome": null,
+        "calls": 1,
+        "input_tokens": 32231,
+        "output_tokens": 612
+      },
+      {
+        "id": "12a3704a-a980-4281-8446-28d2d7421615",
+        "external_key": "TRELLO-73WLJ63q",
+        "role": "INTAKE",
+        "action": "INTERPRET_TASK",
+        "state": "SUCCEEDED",
+        "attempt": 1,
+        "created_at": "2026-09-07 00:20:41.833316+00:00",
+        "started_at": "2026-09-07 00:20:42.152846+00:00",
+        "finished_at": "2026-09-07 00:20:47.262505+00:00",
+        "result": "EVENT_INTERPRETED",
+        "outcome": null,
+        "calls": 1,
+        "input_tokens": 27207,
+        "output_tokens": 181
+      },
+      {
+        "id": "f670c19b-e7bf-41a9-a9bc-37450d5e8c9a",
+        "external_key": "TRELLO-73WLJ63q",
+        "role": "THINKER",
+        "action": "CREATE_PLAN",
+        "state": "SUCCEEDED",
+        "attempt": 1,
+        "created_at": "2026-09-07 00:20:47.276975+00:00",
+        "started_at": "2026-09-07 00:20:47.324658+00:00",
+        "finished_at": "2026-09-07 00:21:07.102290+00:00",
+        "result": "PLAN_READY",
+        "outcome": null,
+        "calls": 1,
+        "input_tokens": 13551,
+        "output_tokens": 1031
+      },
+      {
+        "id": "b0230b02-1258-409d-93f0-561e95997ac1",
+        "external_key": "TRELLO-73WLJ63q",
+        "role": "EXECUTOR",
+        "action": "IMPLEMENT_PLAN",
+        "state": "SUCCEEDED",
+        "attempt": 1,
+        "created_at": "2026-09-07 00:21:07.107249+00:00",
+        "started_at": "2026-09-07 00:21:07.126582+00:00",
+        "finished_at": "2026-09-07 00:21:19.596385+00:00",
+        "result": "BLOCKED",
+        "outcome": null,
+        "calls": 1,
+        "input_tokens": 32751,
+        "output_tokens": 666
+      },
+      {
+        "id": "e1487492-0827-4432-a274-bfd3a96c549d",
+        "external_key": "TRELLO-73WLJ63q",
+        "role": "INTAKE",
+        "action": "INTERPRET_TASK",
+        "state": "SUCCEEDED",
+        "attempt": 1,
+        "created_at": "2026-09-07 00:23:08.148362+00:00",
+        "started_at": "2026-09-07 00:23:08.578915+00:00",
+        "finished_at": "2026-09-07 00:23:13.281443+00:00",
+        "result": "EVENT_INTERPRETED",
+        "outcome": null,
+        "calls": 1,
+        "input_tokens": 27376,
+        "output_tokens": 191
+      },
+      {
+        "id": "d641d6fc-5e86-4f92-9955-17bc87ede226",
+        "external_key": "TRELLO-73WLJ63q",
+        "role": "THINKER",
+        "action": "CREATE_PLAN",
+        "state": "SUCCEEDED",
+        "attempt": 1,
+        "created_at": "2026-09-07 00:23:13.294444+00:00",
+        "started_at": "2026-09-07 00:23:13.794276+00:00",
+        "finished_at": "2026-09-07 00:23:35.650535+00:00",
+        "result": "PLAN_READY",
+        "outcome": null,
+        "calls": 1,
+        "input_tokens": 13946,
+        "output_tokens": 1170
+      },
+      {
+        "id": "67b80eba-41cd-4cae-ba9b-0ea6284aa4cf",
+        "external_key": "TRELLO-73WLJ63q",
+        "role": "EXECUTOR",
+        "action": "IMPLEMENT_PLAN",
+        "state": "SUCCEEDED",
+        "attempt": 1,
+        "created_at": "2026-09-07 00:23:35.657517+00:00",
+        "started_at": "2026-09-07 00:23:35.679052+00:00",
+        "finished_at": "2026-09-07 00:23:45.718177+00:00",
+        "result": "BLOCKED",
+        "outcome": null,
+        "calls": 1,
+        "input_tokens": 33839,
+        "output_tokens": 536
+      },
+      {
+        "id": "86cc604c-7d15-4993-a9d9-7f7347376541",
+        "external_key": "TRELLO-73WLJ63q",
+        "role": "INTAKE",
+        "action": "INTERPRET_TASK",
+        "state": "SUCCEEDED",
+        "attempt": 1,
+        "created_at": "2026-09-07 00:27:54.710046+00:00",
+        "started_at": "2026-09-07 00:27:54.774844+00:00",
+        "finished_at": "2026-09-07 00:28:00.332424+00:00",
+        "result": "EVENT_INTERPRETED",
+        "outcome": null,
+        "calls": 1,
+        "input_tokens": 27528,
+        "output_tokens": 202
+      },
+      {
+        "id": "73e9da38-97ae-4286-87e6-6217fe34455d",
+        "external_key": "TRELLO-73WLJ63q",
+        "role": "THINKER",
+        "action": "CREATE_PLAN",
+        "state": "SUCCEEDED",
+        "attempt": 1,
+        "created_at": "2026-09-07 00:28:00.345909+00:00",
+        "started_at": "2026-09-07 00:28:01.023339+00:00",
+        "finished_at": "2026-09-07 00:28:22.918249+00:00",
+        "result": "PLAN_READY",
+        "outcome": null,
+        "calls": 1,
+        "input_tokens": 14381,
+        "output_tokens": 1243
+      },
+      {
+        "id": "97bee529-5f09-4ee6-adde-0213e7b80434",
+        "external_key": "TRELLO-73WLJ63q",
+        "role": "EXECUTOR",
+        "action": "IMPLEMENT_PLAN",
+        "state": "SUCCEEDED",
+        "attempt": 1,
+        "created_at": "2026-09-07 00:28:22.925112+00:00",
+        "started_at": "2026-09-07 00:28:22.943951+00:00",
+        "finished_at": "2026-09-07 00:29:25.969406+00:00",
+        "result": "IMPLEMENTED",
+        "outcome": null,
+        "calls": 2,
+        "input_tokens": 42488,
+        "output_tokens": 2941
+      },
+      {
+        "id": "eb2ac881-673e-42b7-aba7-9fc440b0493d",
+        "external_key": "TRELLO-73WLJ63q",
+        "role": "REVIEWER",
+        "action": "REVIEW_CHANGES",
+        "state": "FAILED",
+        "attempt": 3,
+        "created_at": "2026-09-07 00:29:25.976544+00:00",
+        "started_at": "2026-09-07 00:29:52.460163+00:00",
+        "finished_at": "2026-09-07 00:29:56.823300+00:00",
+        "result": null,
+        "outcome": null,
+        "calls": 3,
+        "input_tokens": 15465,
+        "output_tokens": 683
+      },
+      {
+        "id": "d21c7a70-b375-458f-979a-50cf936200e7",
+        "external_key": "TRELLO-73WLJ63q",
+        "role": "REVIEWER",
+        "action": "REVIEW_CHANGES",
+        "state": "SUCCEEDED",
+        "attempt": 1,
+        "created_at": "2026-09-07 00:32:01.579833+00:00",
+        "started_at": "2026-09-07 00:32:01.963035+00:00",
+        "finished_at": "2026-09-07 00:32:06.641702+00:00",
+        "result": "PASS",
+        "outcome": null,
+        "calls": 1,
+        "input_tokens": 4784,
+        "output_tokens": 206
+      },
+      {
+        "id": "31643c69-a587-4dc0-a77d-04091e40e6a5",
+        "external_key": "TRELLO-73WLJ63q",
+        "role": "INTAKE",
+        "action": "INTERPRET_MESSAGE",
+        "state": "SUCCEEDED",
+        "attempt": 1,
+        "created_at": "2026-09-07 00:34:34.093896+00:00",
+        "started_at": "2026-09-07 00:34:34.261989+00:00",
+        "finished_at": "2026-09-07 00:34:39.646795+00:00",
+        "result": "EVENT_INTERPRETED",
+        "outcome": null,
+        "calls": 1,
+        "input_tokens": 27889,
+        "output_tokens": 340
+      },
+      {
+        "id": "50ec1d62-a707-44d3-85b1-f4fe0f7a946b",
+        "external_key": "TRELLO-73WLJ63q",
+        "role": "THINKER",
+        "action": "CREATE_PLAN",
+        "state": "SUCCEEDED",
+        "attempt": 1,
+        "created_at": "2026-09-07 00:34:39.657063+00:00",
+        "started_at": "2026-09-07 00:34:40.360407+00:00",
+        "finished_at": "2026-09-07 00:35:09.082142+00:00",
+        "result": "PLAN_READY",
+        "outcome": null,
+        "calls": 1,
+        "input_tokens": 15023,
+        "output_tokens": 1379
+      },
+      {
+        "id": "77dc45dd-4235-432e-bbda-bee4b6ede86e",
+        "external_key": "TRELLO-73WLJ63q",
+        "role": "EXECUTOR",
+        "action": "IMPLEMENT_PLAN",
+        "state": "SUCCEEDED",
+        "attempt": 1,
+        "created_at": "2026-09-07 00:35:09.091359+00:00",
+        "started_at": "2026-09-07 00:35:09.115950+00:00",
+        "finished_at": "2026-09-07 00:35:25.145654+00:00",
+        "result": "IMPLEMENTED",
+        "outcome": null,
+        "calls": 1,
+        "input_tokens": 37208,
+        "output_tokens": 1113
+      },
+      {
+        "id": "6db085fd-caa5-4325-a0c6-a6bb52d1d067",
+        "external_key": "TRELLO-73WLJ63q",
+        "role": "REVIEWER",
+        "action": "REVIEW_CHANGES",
+        "state": "SUCCEEDED",
+        "attempt": 1,
+        "created_at": "2026-09-07 00:35:25.151206+00:00",
+        "started_at": "2026-09-07 00:35:25.660858+00:00",
+        "finished_at": "2026-09-07 00:35:30.017400+00:00",
+        "result": "UNCERTAIN",
+        "outcome": null,
+        "calls": 1,
+        "input_tokens": 4593,
+        "output_tokens": 261
+      },
+      {
+        "id": "477e32ce-79a1-4cb6-b437-cb866e487ad5",
+        "external_key": "TRELLO-73WLJ63q",
+        "role": "REVIEWER",
+        "action": "REVIEW_USER_MESSAGE",
+        "state": "SUCCEEDED",
+        "attempt": 1,
+        "created_at": "2026-09-07 00:48:32.160576+00:00",
+        "started_at": "2026-09-07 00:48:32.511536+00:00",
+        "finished_at": "2026-09-07 00:48:37.193066+00:00",
+        "result": "PASS",
+        "outcome": null,
+        "calls": 1,
+        "input_tokens": 5286,
+        "output_tokens": 185
+      },
+      {
+        "id": "ee316565-3e6f-420a-ba2b-330199db66af",
+        "external_key": "TRELLO-73WLJ63q",
+        "role": "INTAKE",
+        "action": "INTERPRET_TASK",
+        "state": "SUCCEEDED",
+        "attempt": 1,
+        "created_at": "2026-09-07 00:55:46.697541+00:00",
+        "started_at": "2026-09-07 00:55:47.487777+00:00",
+        "finished_at": "2026-09-07 00:55:54.026946+00:00",
+        "result": "EVENT_INTERPRETED",
+        "outcome": null,
+        "calls": 1,
+        "input_tokens": 28367,
+        "output_tokens": 379
+      },
+      {
+        "id": "3bb07778-a1bb-41d9-93db-119ab19f98d2",
+        "external_key": "TRELLO-73WLJ63q",
+        "role": "THINKER",
+        "action": "CREATE_PLAN",
+        "state": "SUCCEEDED",
+        "attempt": 1,
+        "created_at": "2026-09-07 00:55:54.044050+00:00",
+        "started_at": "2026-09-07 00:55:54.720420+00:00",
+        "finished_at": "2026-09-07 00:56:18.519821+00:00",
+        "result": "PLAN_READY",
+        "outcome": null,
+        "calls": 1,
+        "input_tokens": 15635,
+        "output_tokens": 1240
+      },
+      {
+        "id": "fc8d0c60-ef3e-44ce-ae1d-b98771e2d8d2",
+        "external_key": "TRELLO-73WLJ63q",
+        "role": "EXECUTOR",
+        "action": "IMPLEMENT_PLAN",
+        "state": "SUCCEEDED",
+        "attempt": 1,
+        "created_at": "2026-09-07 00:56:18.526936+00:00",
+        "started_at": "2026-09-07 00:56:18.555641+00:00",
+        "finished_at": "2026-09-07 00:56:27.283880+00:00",
+        "result": "IMPLEMENTED",
+        "outcome": null,
+        "calls": 1,
+        "input_tokens": 35056,
+        "output_tokens": 563
+      },
+      {
+        "id": "af9464c0-be83-4ac9-a0c4-a34021f10a7c",
+        "external_key": "TRELLO-73WLJ63q",
+        "role": "REVIEWER",
+        "action": "REVIEW_CHANGES",
+        "state": "SUCCEEDED",
+        "attempt": 1,
+        "created_at": "2026-09-07 00:56:27.291644+00:00",
+        "started_at": "2026-09-07 00:56:27.817918+00:00",
+        "finished_at": "2026-09-07 00:56:31.809258+00:00",
+        "result": "PASS",
+        "outcome": null,
+        "calls": 1,
+        "input_tokens": 5987,
+        "output_tokens": 139
+      },
+      {
+        "id": "a68e93cc-606a-4ace-8d9b-2e229712311e",
+        "external_key": "TRELLO-73WLJ63q",
+        "role": "INTAKE",
+        "action": "INTERPRET_EXTERNAL_COMMENT",
+        "state": "SUCCEEDED",
+        "attempt": 1,
+        "created_at": "2026-09-07 01:01:56.714886+00:00",
+        "started_at": "2026-09-07 01:01:57.145170+00:00",
+        "finished_at": "2026-09-07 01:02:02.115674+00:00",
+        "result": "EVENT_INTERPRETED",
+        "outcome": null,
+        "calls": 1,
+        "input_tokens": 28774,
+        "output_tokens": 228
+      },
+      {
+        "id": "98176728-a557-41c4-8e40-8285493c0b60",
+        "external_key": "TRELLO-73WLJ63q",
+        "role": "INTAKE",
+        "action": "INTERPRET_EXTERNAL_COMMENT",
+        "state": "SUCCEEDED",
+        "attempt": 1,
+        "created_at": "2026-09-07 01:05:54.988063+00:00",
+        "started_at": "2026-09-07 01:05:55.405735+00:00",
+        "finished_at": "2026-09-07 01:06:00.338292+00:00",
+        "result": "EVENT_INTERPRETED",
+        "outcome": null,
+        "calls": 1,
+        "input_tokens": 28772,
+        "output_tokens": 225
+      },
+      {
+        "id": "5a51b08f-5617-40b8-bdf9-c0094dcdb0a0",
+        "external_key": "TRELLO-73WLJ63q",
+        "role": "INTAKE",
+        "action": "INTERPRET_EXTERNAL_COMMENT",
+        "state": "SUCCEEDED",
+        "attempt": 1,
+        "created_at": "2026-09-07 01:06:48.016381+00:00",
+        "started_at": "2026-09-07 01:06:48.965647+00:00",
+        "finished_at": "2026-09-07 01:06:58.750808+00:00",
+        "result": "EVENT_INTERPRETED",
+        "outcome": null,
+        "calls": 1,
+        "input_tokens": 29004,
+        "output_tokens": 620
+      },
+      {
+        "id": "5a623f38-75c5-4085-b2aa-319ff0c5996b",
+        "external_key": "TRELLO-73WLJ63q",
+        "role": "INTAKE",
+        "action": "INTERPRET_EXTERNAL_COMMENT",
+        "state": "SUCCEEDED",
+        "attempt": 1,
+        "created_at": "2026-09-07 01:09:04.583493+00:00",
+        "started_at": "2026-09-07 01:09:05.523555+00:00",
+        "finished_at": "2026-09-07 01:09:15.923582+00:00",
+        "result": "EVENT_INTERPRETED",
+        "outcome": null,
+        "calls": 1,
+        "input_tokens": 29045,
+        "output_tokens": 616
+      },
+      {
+        "id": "78b73214-7acb-44cf-a8d6-4e04e0475ed0",
+        "external_key": "TRELLO-73WLJ63q",
+        "role": "INTAKE",
+        "action": "INTERPRET_EXTERNAL_COMMENT",
+        "state": "SUCCEEDED",
+        "attempt": 1,
+        "created_at": "2026-09-07 01:10:47.668798+00:00",
+        "started_at": "2026-09-07 01:10:48.116852+00:00",
+        "finished_at": "2026-09-07 01:10:57.863296+00:00",
+        "result": "EVENT_INTERPRETED",
+        "outcome": null,
+        "calls": 1,
+        "input_tokens": 29056,
+        "output_tokens": 424
+      },
+      {
+        "id": "71044030-eae2-4cfa-8239-ad96532a6e0e",
+        "external_key": "TRELLO-J2mg8B9P",
+        "role": "INTAKE",
+        "action": "INTERPRET_TASK",
+        "state": "SUCCEEDED",
+        "attempt": 1,
+        "created_at": "2026-09-07 01:23:15.523302+00:00",
+        "started_at": "2026-09-07 01:23:15.552292+00:00",
+        "finished_at": "2026-09-07 01:23:21.083689+00:00",
+        "result": "EVENT_INTERPRETED",
+        "outcome": null,
+        "calls": 1,
+        "input_tokens": 27535,
+        "output_tokens": 217
+      },
+      {
+        "id": "0028d0e6-808f-4aa3-ad03-f3b0afd43f14",
+        "external_key": "TRELLO-J2mg8B9P",
+        "role": "THINKER",
+        "action": "CREATE_PLAN",
+        "state": "SUCCEEDED",
+        "attempt": 1,
+        "created_at": "2026-09-07 01:23:21.099275+00:00",
+        "started_at": "2026-09-07 01:23:21.683797+00:00",
+        "finished_at": "2026-09-07 01:23:48.605836+00:00",
+        "result": "NEEDS_HUMAN",
+        "outcome": null,
+        "calls": 1,
+        "input_tokens": 11303,
+        "output_tokens": 1394
+      },
+      {
+        "id": "554ad06c-f365-420e-98f1-55a71f832c79",
+        "external_key": "TRELLO-J2mg8B9P",
+        "role": "INTAKE",
+        "action": "INTERPRET_TASK",
+        "state": "SUCCEEDED",
+        "attempt": 1,
+        "created_at": "2026-09-07 01:27:11.070809+00:00",
+        "started_at": "2026-09-07 01:27:11.263399+00:00",
+        "finished_at": "2026-09-07 01:27:19.999017+00:00",
+        "result": "EVENT_INTERPRETED",
+        "outcome": null,
+        "calls": 1,
+        "input_tokens": 27772,
+        "output_tokens": 468
+      },
+      {
+        "id": "421e5de7-18f9-4986-a298-4749e52518bb",
+        "external_key": "TRELLO-J2mg8B9P",
+        "role": "INTAKE",
+        "action": "INTERPRET_TASK",
+        "state": "SUCCEEDED",
+        "attempt": 1,
+        "created_at": "2026-09-07 01:29:07.013020+00:00",
+        "started_at": "2026-09-07 01:29:07.778716+00:00",
+        "finished_at": "2026-09-07 01:29:13.234480+00:00",
+        "result": "EVENT_INTERPRETED",
+        "outcome": null,
+        "calls": 1,
+        "input_tokens": 27439,
+        "output_tokens": 240
+      },
+      {
+        "id": "5c0c2ca9-6fcb-4926-8a8c-87095530821b",
+        "external_key": "TRELLO-J2mg8B9P",
+        "role": "THINKER",
+        "action": "CREATE_PLAN",
+        "state": "SUCCEEDED",
+        "attempt": 1,
+        "created_at": "2026-09-07 01:29:13.249999+00:00",
+        "started_at": "2026-09-07 01:29:13.744912+00:00",
+        "finished_at": "2026-09-07 01:29:53.575303+00:00",
+        "result": "PLAN_READY",
+        "outcome": null,
+        "calls": 1,
+        "input_tokens": 12193,
+        "output_tokens": 2151
+      },
+      {
+        "id": "dc849566-2f85-4f7c-8947-b4098e91fc7f",
+        "external_key": "TRELLO-J2mg8B9P",
+        "role": "EXECUTOR",
+        "action": "IMPLEMENT_PLAN",
+        "state": "SUCCEEDED",
+        "attempt": 1,
+        "created_at": "2026-09-07 01:29:53.583334+00:00",
+        "started_at": "2026-09-07 01:29:53.607897+00:00",
+        "finished_at": "2026-09-07 01:30:14.568640+00:00",
+        "result": "BLOCKED",
+        "outcome": null,
+        "calls": 1,
+        "input_tokens": 30463,
+        "output_tokens": 1135
+      },
+      {
+        "id": "989977f6-3c1f-48b3-9a9b-638fa059e85b",
+        "external_key": "TRELLO-J2mg8B9P",
+        "role": "INTAKE",
+        "action": "INTERPRET_TASK",
+        "state": "SUCCEEDED",
+        "attempt": 1,
+        "created_at": "2026-09-07 01:32:48.441045+00:00",
+        "started_at": "2026-09-07 01:32:48.918115+00:00",
+        "finished_at": "2026-09-07 01:32:54.975025+00:00",
+        "result": "EVENT_INTERPRETED",
+        "outcome": null,
+        "calls": 1,
+        "input_tokens": 27444,
+        "output_tokens": 270
+      },
+      {
+        "id": "b99cf507-51bf-4efa-8684-8e1e460fbf9d",
+        "external_key": "TRELLO-J2mg8B9P",
+        "role": "THINKER",
+        "action": "CREATE_PLAN",
+        "state": "SUCCEEDED",
+        "attempt": 1,
+        "created_at": "2026-09-07 01:32:54.991899+00:00",
+        "started_at": "2026-09-07 01:32:55.032910+00:00",
+        "finished_at": "2026-09-07 01:33:29.043845+00:00",
+        "result": "PLAN_READY",
+        "outcome": null,
+        "calls": 1,
+        "input_tokens": 12764,
+        "output_tokens": 1900
+      },
+      {
+        "id": "930a91f8-d9e0-4f26-a635-d1b777986bf8",
+        "external_key": "TRELLO-J2mg8B9P",
+        "role": "EXECUTOR",
+        "action": "IMPLEMENT_PLAN",
+        "state": "SUCCEEDED",
+        "attempt": 1,
+        "created_at": "2026-09-07 01:33:29.054339+00:00",
+        "started_at": "2026-09-07 01:33:29.079679+00:00",
+        "finished_at": "2026-09-07 01:33:37.758338+00:00",
+        "result": "BLOCKED",
+        "outcome": null,
+        "calls": 1,
+        "input_tokens": 37907,
+        "output_tokens": 413
+      },
+      {
+        "id": "e7530801-d533-4535-bf18-048ffa96add2",
+        "external_key": "TRELLO-J2mg8B9P",
+        "role": "INTAKE",
+        "action": "INTERPRET_TASK",
+        "state": "SUCCEEDED",
+        "attempt": 1,
+        "created_at": "2026-09-07 01:36:22.860243+00:00",
+        "started_at": "2026-09-07 01:36:23.720193+00:00",
+        "finished_at": "2026-09-07 01:36:29.579537+00:00",
+        "result": "EVENT_INTERPRETED",
+        "outcome": null,
+        "calls": 1,
+        "input_tokens": 27437,
+        "output_tokens": 251
+      },
+      {
+        "id": "fffbf6c0-1d1a-466e-b34e-2e4ba54e602c",
+        "external_key": "TRELLO-J2mg8B9P",
+        "role": "THINKER",
+        "action": "CREATE_PLAN",
+        "state": "SUCCEEDED",
+        "attempt": 1,
+        "created_at": "2026-09-07 01:36:29.598042+00:00",
+        "started_at": "2026-09-07 01:36:29.881623+00:00",
+        "finished_at": "2026-09-07 01:37:54.683086+00:00",
+        "result": "PLAN_READY",
+        "outcome": null,
+        "calls": 2,
+        "input_tokens": 17927,
+        "output_tokens": 2696
+      },
+      {
+        "id": "ef7f98bc-e5cd-4c59-ba22-8ac28efa20ec",
+        "external_key": "TRELLO-J2mg8B9P",
+        "role": "EXECUTOR",
+        "action": "IMPLEMENT_PLAN",
+        "state": "SUCCEEDED",
+        "attempt": 1,
+        "created_at": "2026-09-07 01:37:54.691376+00:00",
+        "started_at": "2026-09-07 01:37:54.712900+00:00",
+        "finished_at": "2026-09-07 01:38:05.428801+00:00",
+        "result": "BLOCKED",
+        "outcome": null,
+        "calls": 1,
+        "input_tokens": 41812,
+        "output_tokens": 490
+      },
+      {
+        "id": "817e5f20-df87-469f-9b24-fe7ed3b8509c",
+        "external_key": "TRELLO-J2mg8B9P",
+        "role": "INTAKE",
+        "action": "INTERPRET_TASK",
+        "state": "SUCCEEDED",
+        "attempt": 1,
+        "created_at": "2026-09-07 01:41:45.752493+00:00",
+        "started_at": "2026-09-07 01:41:46.241738+00:00",
+        "finished_at": "2026-09-07 01:41:52.584424+00:00",
+        "result": "EVENT_INTERPRETED",
+        "outcome": null,
+        "calls": 1,
+        "input_tokens": 27442,
+        "output_tokens": 275
+      },
+      {
+        "id": "43ecabd9-cec0-4004-8430-a319061582cc",
+        "external_key": "TRELLO-J2mg8B9P",
+        "role": "THINKER",
+        "action": "CREATE_PLAN",
+        "state": "SUCCEEDED",
+        "attempt": 1,
+        "created_at": "2026-09-07 01:41:52.598901+00:00",
+        "started_at": "2026-09-07 01:41:53.279443+00:00",
+        "finished_at": "2026-09-07 01:42:44.934488+00:00",
+        "result": "PLAN_READY",
+        "outcome": null,
+        "calls": 1,
+        "input_tokens": 18562,
+        "output_tokens": 4013
+      },
+      {
+        "id": "062cbe54-2618-45ea-a584-35175c2bba88",
+        "external_key": "TRELLO-J2mg8B9P",
+        "role": "EXECUTOR",
+        "action": "IMPLEMENT_PLAN",
+        "state": "SUCCEEDED",
+        "attempt": 1,
+        "created_at": "2026-09-07 01:42:44.942584+00:00",
+        "started_at": "2026-09-07 01:42:44.963425+00:00",
+        "finished_at": "2026-09-07 01:43:09.502615+00:00",
+        "result": "BLOCKED",
+        "outcome": null,
+        "calls": 4,
+        "input_tokens": 137075,
+        "output_tokens": 1837
+      },
+      {
+        "id": "10fdd586-2524-445e-908d-95dbd876bca8",
+        "external_key": "TRELLO-J2mg8B9P",
+        "role": "INTAKE",
+        "action": "INTERPRET_TASK",
+        "state": "SUCCEEDED",
+        "attempt": 1,
+        "created_at": "2026-09-07 01:48:49.662225+00:00",
+        "started_at": "2026-09-07 01:48:50.079363+00:00",
+        "finished_at": "2026-09-07 01:48:55.871469+00:00",
+        "result": "EVENT_INTERPRETED",
+        "outcome": null,
+        "calls": 1,
+        "input_tokens": 27440,
+        "output_tokens": 252
+      },
+      {
+        "id": "9c60bd54-7b40-4c7b-b3d8-24b788b1a012",
+        "external_key": "TRELLO-J2mg8B9P",
+        "role": "THINKER",
+        "action": "CREATE_PLAN",
+        "state": "SUCCEEDED",
+        "attempt": 1,
+        "created_at": "2026-09-07 01:48:55.885331+00:00",
+        "started_at": "2026-09-07 01:48:56.289074+00:00",
+        "finished_at": "2026-09-07 01:50:18.219764+00:00",
+        "result": "PLAN_READY",
+        "outcome": null,
+        "calls": 2,
+        "input_tokens": 24746,
+        "output_tokens": 1928
+      },
+      {
+        "id": "fac9495b-32e6-419d-925a-31c34bc946eb",
+        "external_key": "TRELLO-J2mg8B9P",
+        "role": "EXECUTOR",
+        "action": "IMPLEMENT_PLAN",
+        "state": "SUCCEEDED",
+        "attempt": 1,
+        "created_at": "2026-09-07 01:50:18.227465+00:00",
+        "started_at": "2026-09-07 01:50:18.247220+00:00",
+        "finished_at": "2026-09-07 01:51:04.027892+00:00",
+        "result": "BLOCKED",
+        "outcome": null,
+        "calls": 5,
+        "input_tokens": 192883,
+        "output_tokens": 2840
+      },
+      {
+        "id": "47d5927d-a0e1-4284-bc31-d7190f0f89d3",
+        "external_key": "TRELLO-J2mg8B9P",
+        "role": "INTAKE",
+        "action": "INTERPRET_TASK",
+        "state": "SUCCEEDED",
+        "attempt": 1,
+        "created_at": "2026-09-07 01:54:54.014010+00:00",
+        "started_at": "2026-09-07 01:54:55.260133+00:00",
+        "finished_at": "2026-09-07 01:55:01.649149+00:00",
+        "result": "EVENT_INTERPRETED",
+        "outcome": null,
+        "calls": 1,
+        "input_tokens": 27443,
+        "output_tokens": 251
+      },
+      {
+        "id": "a486a235-2efa-4b33-bd46-def16b10eeb9",
+        "external_key": "TRELLO-J2mg8B9P",
+        "role": "THINKER",
+        "action": "CREATE_PLAN",
+        "state": "SUCCEEDED",
+        "attempt": 1,
+        "created_at": "2026-09-07 01:55:01.663878+00:00",
+        "started_at": "2026-09-07 01:55:02.365762+00:00",
+        "finished_at": "2026-09-07 01:56:19.191886+00:00",
+        "result": "PLAN_READY",
+        "outcome": null,
+        "calls": 2,
+        "input_tokens": 25248,
+        "output_tokens": 1934
+      },
+      {
+        "id": "58c7f29c-a353-449e-a71e-1320be2bc71c",
+        "external_key": "TRELLO-J2mg8B9P",
+        "role": "EXECUTOR",
+        "action": "IMPLEMENT_PLAN",
+        "state": "SUCCEEDED",
+        "attempt": 1,
+        "created_at": "2026-09-07 01:56:19.199814+00:00",
+        "started_at": "2026-09-07 01:56:19.226606+00:00",
+        "finished_at": "2026-09-07 01:57:35.599897+00:00",
+        "result": "BLOCKED",
+        "outcome": null,
+        "calls": 5,
+        "input_tokens": 260673,
+        "output_tokens": 5490
+      },
+      {
+        "id": "7798d008-f3d8-4b15-83d1-c080bcf70bc1",
+        "external_key": "TRELLO-J2mg8B9P",
+        "role": "INTAKE",
+        "action": "INTERPRET_TASK",
+        "state": "SUCCEEDED",
+        "attempt": 1,
+        "created_at": "2026-09-07 06:04:23.718869+00:00",
+        "started_at": "2026-09-07 06:04:23.957657+00:00",
+        "finished_at": "2026-09-07 06:04:32.061331+00:00",
+        "result": "EVENT_INTERPRETED",
+        "outcome": null,
+        "calls": 1,
+        "input_tokens": 27442,
+        "output_tokens": 239
+      },
+      {
+        "id": "9334c7fb-ce28-4489-944b-9f79f94dca67",
+        "external_key": "TRELLO-J2mg8B9P",
+        "role": "THINKER",
+        "action": "CREATE_PLAN",
+        "state": "SUCCEEDED",
+        "attempt": 2,
+        "created_at": "2026-09-07 06:04:32.079355+00:00",
+        "started_at": "2026-09-07 06:09:37.375891+00:00",
+        "finished_at": "2026-09-07 06:10:58.640037+00:00",
+        "result": "PLAN_READY",
+        "outcome": null,
+        "calls": 2,
+        "input_tokens": 25292,
+        "output_tokens": 2372
+      },
+      {
+        "id": "d5e737fa-943f-4be5-9b91-e36b3538635d",
+        "external_key": "TRELLO-J2mg8B9P",
+        "role": "INTAKE",
+        "action": "INTERPRET_MESSAGE",
+        "state": "SUCCEEDED",
+        "attempt": 1,
+        "created_at": "2026-09-07 06:15:12.952324+00:00",
+        "started_at": "2026-09-07 06:15:13.307649+00:00",
+        "finished_at": "2026-09-07 06:15:27.287759+00:00",
+        "result": "EVENT_INTERPRETED",
+        "outcome": null,
+        "calls": 1,
+        "input_tokens": 28564,
+        "output_tokens": 274
+      },
+      {
+        "id": "80c8f848-bfe1-49d8-857a-60ef70ec9d70",
+        "external_key": "TRELLO-J2mg8B9P",
+        "role": "THINKER",
+        "action": "CREATE_PLAN",
+        "state": "SUCCEEDED",
+        "attempt": 1,
+        "created_at": "2026-09-07 06:15:27.299799+00:00",
+        "started_at": "2026-09-07 06:15:27.325096+00:00",
+        "finished_at": "2026-09-07 06:16:12.070808+00:00",
+        "result": "PLAN_READY",
+        "outcome": null,
+        "calls": 1,
+        "input_tokens": 20574,
+        "output_tokens": 3726
+      },
+      {
+        "id": "e895b4cb-6d7e-4a94-b3fb-2b8908e5af22",
+        "external_key": "TRELLO-J2mg8B9P",
+        "role": "EXECUTOR",
+        "action": "IMPLEMENT_PLAN",
+        "state": "FAILED",
+        "attempt": 1,
+        "created_at": "2026-09-07 06:16:12.076819+00:00",
+        "started_at": "2026-09-07 06:16:12.096261+00:00",
+        "finished_at": "2026-09-07 06:18:47.021753+00:00",
+        "result": null,
+        "outcome": null,
+        "calls": 7,
+        "input_tokens": 186117,
+        "output_tokens": 1727
+      },
+      {
+        "id": "c1b02551-8e94-4baa-954f-c8b324508434",
+        "external_key": "TRELLO-J2mg8B9P",
+        "role": "INTAKE",
+        "action": "INTERPRET_TASK",
+        "state": "SUCCEEDED",
+        "attempt": 1,
+        "created_at": "2026-09-07 07:26:04.721100+00:00",
+        "started_at": "2026-09-07 07:26:05.724456+00:00",
+        "finished_at": "2026-09-07 07:26:13.070801+00:00",
+        "result": "EVENT_INTERPRETED",
+        "outcome": null,
+        "calls": 1,
+        "input_tokens": 27177,
+        "output_tokens": 220
+      },
+      {
+        "id": "0d206e40-8c98-4901-86a6-4a332068353b",
+        "external_key": "TRELLO-J2mg8B9P",
+        "role": "THINKER",
+        "action": "CREATE_PLAN",
+        "state": "SUCCEEDED",
+        "attempt": 1,
+        "created_at": "2026-09-07 07:26:13.091900+00:00",
+        "started_at": "2026-09-07 07:26:13.611452+00:00",
+        "finished_at": "2026-09-07 07:26:49.550236+00:00",
+        "result": "PLAN_READY",
+        "outcome": null,
+        "calls": 1,
+        "input_tokens": 20368,
+        "output_tokens": 3236
+      },
+      {
+        "id": "ed55ae89-1574-4ddb-9fab-9710e9d5ac22",
+        "external_key": "TRELLO-J2mg8B9P",
+        "role": "EXECUTOR",
+        "action": "IMPLEMENT_PLAN",
+        "state": "SUCCEEDED",
+        "attempt": 1,
+        "created_at": "2026-09-07 07:26:49.560944+00:00",
+        "started_at": "2026-09-07 07:26:49.580415+00:00",
+        "finished_at": "2026-09-07 07:28:56.047690+00:00",
+        "result": "BLOCKED",
+        "outcome": null,
+        "calls": 8,
+        "input_tokens": 372266,
+        "output_tokens": 7496
+      }
+    ]
+  },
+  "daily": {
+    "sql": "SELECT date_trunc('day',created_at) AS day,count(*) AS calls,sum(input_tokens) AS input_tokens,sum(output_tokens) AS output_tokens FROM worker_runs GROUP BY 1 ORDER BY 1",
+    "rows": [
+      {
+        "day": "2026-09-06 00:00:00+00:00",
+        "calls": 38,
+        "input_tokens": 533618,
+        "output_tokens": 22682
+      },
+      {
+        "day": "2026-09-07 00:00:00+00:00",
+        "calls": 91,
+        "input_tokens": 2468175,
+        "output_tokens": 69325
+      }
+    ]
+  },
+  "quality": {
+    "sql": "SELECT count(*) AS rows,count(provider_request_id) AS with_request_id,count(distinct provider_request_id) AS distinct_request_ids,count(*) FILTER (WHERE input_tokens<0 OR output_tokens<0) AS negative_usage,count(*) FILTER (WHERE effective_runtime_config_hash IS NOT NULL) AS runtime_snapshots FROM worker_runs",
+    "rows": [
+      {
+        "rows": 129,
+        "with_request_id": 120,
+        "distinct_request_ids": 120,
+        "negative_usage": 0,
+        "runtime_snapshots": 129
+      }
+    ]
+  },
+  "contexts": {
+    "sql": "SELECT j.role,count(*) AS contexts,min(c.estimated_input_tokens) AS minimum_estimated_tokens,round(avg(c.estimated_input_tokens)) AS average_estimated_tokens,max(c.estimated_input_tokens) AS maximum_estimated_tokens,round(avg(c.compilation_duration_ms)) AS average_compilation_ms FROM job_contexts c JOIN jobs j ON j.id=c.job_id GROUP BY j.role ORDER BY j.role",
+    "rows": [
+      {
+        "role": "INTAKE",
+        "contexts": 35,
+        "minimum_estimated_tokens": 313,
+        "average_estimated_tokens": "21778",
+        "maximum_estimated_tokens": 26084,
+        "average_compilation_ms": "892"
+      },
+      {
+        "role": "THINKER",
+        "contexts": 21,
+        "minimum_estimated_tokens": 7244,
+        "average_estimated_tokens": "13684",
+        "maximum_estimated_tokens": 20887,
+        "average_compilation_ms": "451"
+      },
+      {
+        "role": "EXECUTOR",
+        "contexts": 18,
+        "minimum_estimated_tokens": 29909,
+        "average_estimated_tokens": "35443",
+        "maximum_estimated_tokens": 39962,
+        "average_compilation_ms": "748"
+      },
+      {
+        "role": "REVIEWER",
+        "contexts": 5,
+        "minimum_estimated_tokens": 3747,
+        "average_estimated_tokens": "4259",
+        "maximum_estimated_tokens": 4955,
+        "average_compilation_ms": "13"
+      }
+    ]
+  },
+  "agents": {
+    "sql": "SELECT a.id,a.name,a.enabled,a.provider,a.model,a.custom_instructions,a.runtime_overrides,a.config_version,r.name AS role,r.version AS role_version,r.system_instructions,r.permissions,r.capabilities,r.runtime_profile,r.override_policy FROM ai_agents a JOIN roles r ON r.id=a.role_id ORDER BY a.enabled DESC,r.name",
+    "rows": [
+      {
+        "id": "9de7789c-6571-4c93-8043-ba7f4453a9dc",
+        "name": "Intake",
+        "enabled": true,
+        "provider": "openai",
+        "model": null,
+        "custom_instructions": "",
+        "runtime_overrides": {},
+        "config_version": 2,
+        "role": "Deliverer",
+        "role_version": 3,
+        "system_instructions": "Coordinate incoming tasks and messages and outgoing delivery. Interpret intent accurately; never restart implementation for a metadata-only request. Use the runtime's typed GitHub actions and merge gates.",
+        "permissions": [
+          "CREATE_PR",
+          "PUSH_TASK_BRANCH",
+          "READ_CI",
+          "READ_DIFF",
+          "READ_PR",
+          "READ_RAG",
+          "READ_REPOSITORY",
+          "READ_TASKS",
+          "UPDATE_PR"
+        ],
+        "capabilities": [
+          "CAN_CLASSIFY_EXTERNAL_EVENT",
+          "CAN_CREATE_PR_METADATA",
+          "CAN_PREPARE_DELIVERY"
+        ],
+        "runtime_profile": {
+          "temperature": null,
+          "reasoning_max": "MEDIUM",
+          "reasoning_min": "PROVIDER_DEFAULT",
+          "max_tool_calls": 40,
+          "max_model_turns": 6,
+          "context_strategy": "BALANCED",
+          "max_job_attempts": 2,
+          "max_output_tokens": null,
+          "reasoning_default": "LOW",
+          "job_timeout_seconds": 1800,
+          "structured_output_mode": "REQUIRED",
+          "dynamic_reasoning_allowed": false
+        },
+        "override_policy": {
+          "provider": "ALLOW",
+          "model": "ALLOW",
+          "reasoning_level": "ALLOW_WITHIN_RANGE",
+          "max_output_tokens": "ALLOW",
+          "temperature": "ALLOW_IF_SUPPORTED",
+          "context_strategy": "ALLOW",
+          "max_tool_calls": "ALLOW_WITHIN_RANGE",
+          "job_timeout_seconds": "ALLOW_WITHIN_RANGE",
+          "permissions": "REDUCE_ONLY",
+          "system_instructions": "ADDITIVE_ONLY",
+          "allowed_results": "LOCKED"
+        }
+      },
+      {
+        "id": "95b71310-df03-4934-ae1f-b2d26dbcc10b",
+        "name": "dachi",
+        "enabled": true,
+        "provider": "openai",
+        "model": "gpt-5.6-luna",
+        "custom_instructions": "",
+        "runtime_overrides": {
+          "reasoning_level": "LOW",
+          "max_output_tokens": 4096
+        },
+        "config_version": 3,
+        "role": "Deliverer",
+        "role_version": 3,
+        "system_instructions": "Coordinate incoming tasks and messages and outgoing delivery. Interpret intent accurately; never restart implementation for a metadata-only request. Use the runtime's typed GitHub actions and merge gates.",
+        "permissions": [
+          "CREATE_PR",
+          "PUSH_TASK_BRANCH",
+          "READ_CI",
+          "READ_DIFF",
+          "READ_PR",
+          "READ_RAG",
+          "READ_REPOSITORY",
+          "READ_TASKS",
+          "UPDATE_PR"
+        ],
+        "capabilities": [
+          "CAN_CLASSIFY_EXTERNAL_EVENT",
+          "CAN_CREATE_PR_METADATA",
+          "CAN_PREPARE_DELIVERY"
+        ],
+        "runtime_profile": {
+          "temperature": null,
+          "reasoning_max": "MEDIUM",
+          "reasoning_min": "PROVIDER_DEFAULT",
+          "max_tool_calls": 40,
+          "max_model_turns": 6,
+          "context_strategy": "BALANCED",
+          "max_job_attempts": 2,
+          "max_output_tokens": null,
+          "reasoning_default": "LOW",
+          "job_timeout_seconds": 1800,
+          "structured_output_mode": "REQUIRED",
+          "dynamic_reasoning_allowed": false
+        },
+        "override_policy": {
+          "provider": "ALLOW",
+          "model": "ALLOW",
+          "reasoning_level": "ALLOW_WITHIN_RANGE",
+          "max_output_tokens": "ALLOW",
+          "temperature": "ALLOW_IF_SUPPORTED",
+          "context_strategy": "ALLOW",
+          "max_tool_calls": "ALLOW_WITHIN_RANGE",
+          "job_timeout_seconds": "ALLOW_WITHIN_RANGE",
+          "permissions": "REDUCE_ONLY",
+          "system_instructions": "ADDITIVE_ONLY",
+          "allowed_results": "LOCKED"
+        }
+      },
+      {
+        "id": "960d6d31-7bf2-4d9e-9cd3-400b7f556fba",
+        "name": "Executor",
+        "enabled": true,
+        "provider": "openai",
+        "model": null,
+        "custom_instructions": "",
+        "runtime_overrides": {},
+        "config_version": 1,
+        "role": "Executor",
+        "role_version": 1,
+        "system_instructions": "Implement only the approved task plan.",
+        "permissions": [
+          "READ_REPOSITORY",
+          "WRITE_REPOSITORY",
+          "RUN_COMMANDS",
+          "RUN_TESTS",
+          "CREATE_COMMIT",
+          "READ_RAG"
+        ],
+        "capabilities": [
+          "CAN_IMPLEMENT",
+          "CAN_RUN_VALIDATION"
+        ],
+        "runtime_profile": {
+          "temperature": null,
+          "reasoning_max": "HIGH",
+          "reasoning_min": "PROVIDER_DEFAULT",
+          "max_tool_calls": 80,
+          "max_model_turns": 20,
+          "context_strategy": "BALANCED",
+          "max_job_attempts": 2,
+          "max_output_tokens": null,
+          "reasoning_default": "HIGH",
+          "job_timeout_seconds": 1800,
+          "structured_output_mode": "REQUIRED",
+          "dynamic_reasoning_allowed": true
+        },
+        "override_policy": {
+          "provider": "ALLOW",
+          "model": "ALLOW",
+          "reasoning_level": "ALLOW_WITHIN_RANGE",
+          "max_output_tokens": "ALLOW",
+          "temperature": "ALLOW_IF_SUPPORTED",
+          "context_strategy": "ALLOW",
+          "max_tool_calls": "ALLOW_WITHIN_RANGE",
+          "job_timeout_seconds": "ALLOW_WITHIN_RANGE",
+          "permissions": "REDUCE_ONLY",
+          "system_instructions": "ADDITIVE_ONLY",
+          "allowed_results": "LOCKED"
+        }
+      },
+      {
+        "id": "211a6f7a-6bdf-4036-991c-0a1be4397ba0",
+        "name": "სანი",
+        "enabled": true,
+        "provider": "openai",
+        "model": "gpt-5.6-sol",
+        "custom_instructions": "",
+        "runtime_overrides": {
+          "reasoning_level": "HIGH",
+          "max_output_tokens": 16384
+        },
+        "config_version": 2,
+        "role": "Executor",
+        "role_version": 1,
+        "system_instructions": "Implement only the approved task plan.",
+        "permissions": [
+          "READ_REPOSITORY",
+          "WRITE_REPOSITORY",
+          "RUN_COMMANDS",
+          "RUN_TESTS",
+          "CREATE_COMMIT",
+          "READ_RAG"
+        ],
+        "capabilities": [
+          "CAN_IMPLEMENT",
+          "CAN_RUN_VALIDATION"
+        ],
+        "runtime_profile": {
+          "temperature": null,
+          "reasoning_max": "HIGH",
+          "reasoning_min": "PROVIDER_DEFAULT",
+          "max_tool_calls": 80,
+          "max_model_turns": 20,
+          "context_strategy": "BALANCED",
+          "max_job_attempts": 2,
+          "max_output_tokens": null,
+          "reasoning_default": "HIGH",
+          "job_timeout_seconds": 1800,
+          "structured_output_mode": "REQUIRED",
+          "dynamic_reasoning_allowed": true
+        },
+        "override_policy": {
+          "provider": "ALLOW",
+          "model": "ALLOW",
+          "reasoning_level": "ALLOW_WITHIN_RANGE",
+          "max_output_tokens": "ALLOW",
+          "temperature": "ALLOW_IF_SUPPORTED",
+          "context_strategy": "ALLOW",
+          "max_tool_calls": "ALLOW_WITHIN_RANGE",
+          "job_timeout_seconds": "ALLOW_WITHIN_RANGE",
+          "permissions": "REDUCE_ONLY",
+          "system_instructions": "ADDITIVE_ONLY",
+          "allowed_results": "LOCKED"
+        }
+      },
+      {
+        "id": "cf1e5539-6c0b-4bdf-90eb-91ea8d9095ff",
+        "name": "agentebis orkestratori",
+        "enabled": true,
+        "provider": "openai",
+        "model": "gpt-5.6-sol",
+        "custom_instructions": "",
+        "runtime_overrides": {},
+        "config_version": 1,
+        "role": "Orchestrator",
+        "role_version": 1,
+        "system_instructions": "Coordinate jobs without bypassing platform policy.",
+        "permissions": [
+          "READ_TASKS"
+        ],
+        "capabilities": [],
+        "runtime_profile": {
+          "temperature": null,
+          "reasoning_max": "HIGH",
+          "reasoning_min": "PROVIDER_DEFAULT",
+          "max_tool_calls": 40,
+          "max_model_turns": 20,
+          "context_strategy": "BALANCED",
+          "max_job_attempts": 2,
+          "max_output_tokens": null,
+          "reasoning_default": "MEDIUM",
+          "job_timeout_seconds": 1800,
+          "structured_output_mode": "REQUIRED",
+          "dynamic_reasoning_allowed": true
+        },
+        "override_policy": {
+          "provider": "ALLOW",
+          "model": "ALLOW",
+          "reasoning_level": "ALLOW_WITHIN_RANGE",
+          "max_output_tokens": "ALLOW",
+          "temperature": "ALLOW_IF_SUPPORTED",
+          "context_strategy": "ALLOW",
+          "max_tool_calls": "ALLOW_WITHIN_RANGE",
+          "job_timeout_seconds": "ALLOW_WITHIN_RANGE",
+          "permissions": "REDUCE_ONLY",
+          "system_instructions": "ADDITIVE_ONLY",
+          "allowed_results": "LOCKED"
+        }
+      },
+      {
+        "id": "2cc23d1f-3816-4007-b841-5111d5f56cbd",
+        "name": "Orchestrator",
+        "enabled": true,
+        "provider": "openai",
+        "model": null,
+        "custom_instructions": "",
+        "runtime_overrides": {},
+        "config_version": 1,
+        "role": "Orchestrator",
+        "role_version": 1,
+        "system_instructions": "Coordinate jobs without bypassing platform policy.",
+        "permissions": [
+          "READ_TASKS"
+        ],
+        "capabilities": [],
+        "runtime_profile": {
+          "temperature": null,
+          "reasoning_max": "HIGH",
+          "reasoning_min": "PROVIDER_DEFAULT",
+          "max_tool_calls": 40,
+          "max_model_turns": 20,
+          "context_strategy": "BALANCED",
+          "max_job_attempts": 2,
+          "max_output_tokens": null,
+          "reasoning_default": "MEDIUM",
+          "job_timeout_seconds": 1800,
+          "structured_output_mode": "REQUIRED",
+          "dynamic_reasoning_allowed": true
+        },
+        "override_policy": {
+          "provider": "ALLOW",
+          "model": "ALLOW",
+          "reasoning_level": "ALLOW_WITHIN_RANGE",
+          "max_output_tokens": "ALLOW",
+          "temperature": "ALLOW_IF_SUPPORTED",
+          "context_strategy": "ALLOW",
+          "max_tool_calls": "ALLOW_WITHIN_RANGE",
+          "job_timeout_seconds": "ALLOW_WITHIN_RANGE",
+          "permissions": "REDUCE_ONLY",
+          "system_instructions": "ADDITIVE_ONLY",
+          "allowed_results": "LOCKED"
+        }
+      },
+      {
+        "id": "2c2f6f84-a86e-44b8-abff-b4a1e1c3df7d",
+        "name": "რევიუერი",
+        "enabled": true,
+        "provider": "openai",
+        "model": "gpt-5.6-sol",
+        "custom_instructions": "",
+        "runtime_overrides": {
+          "reasoning_level": "HIGH",
+          "max_output_tokens": 8192
+        },
+        "config_version": 2,
+        "role": "Reviewer",
+        "role_version": 2,
+        "system_instructions": "Review correctness, regressions, business rules and tests.",
+        "permissions": [
+          "READ_REPOSITORY",
+          "READ_DIFF",
+          "RUN_TESTS",
+          "READ_RAG",
+          "READ_PR",
+          "READ_CI"
+        ],
+        "capabilities": [
+          "CAN_REVIEW",
+          "CAN_PRODUCE_FINDINGS",
+          "CAN_RUN_VALIDATION"
+        ],
+        "runtime_profile": {
+          "temperature": null,
+          "reasoning_max": "HIGH",
+          "reasoning_min": "MEDIUM",
+          "max_tool_calls": 40,
+          "max_model_turns": 20,
+          "context_strategy": "BALANCED",
+          "max_job_attempts": 2,
+          "max_output_tokens": null,
+          "reasoning_default": "HIGH",
+          "job_timeout_seconds": 1800,
+          "structured_output_mode": "REQUIRED",
+          "dynamic_reasoning_allowed": true
+        },
+        "override_policy": {
+          "provider": "ALLOW",
+          "model": "ALLOW",
+          "reasoning_level": "ALLOW_WITHIN_RANGE",
+          "max_output_tokens": "ALLOW",
+          "temperature": "ALLOW_IF_SUPPORTED",
+          "context_strategy": "ALLOW",
+          "max_tool_calls": "ALLOW_WITHIN_RANGE",
+          "job_timeout_seconds": "ALLOW_WITHIN_RANGE",
+          "permissions": "REDUCE_ONLY",
+          "system_instructions": "ADDITIVE_ONLY",
+          "allowed_results": "LOCKED"
+        }
+      },
+      {
+        "id": "f2164217-7b54-4a69-a224-e64e3e6042b1",
+        "name": "Reviewer",
+        "enabled": true,
+        "provider": "openai",
+        "model": null,
+        "custom_instructions": "",
+        "runtime_overrides": {},
+        "config_version": 1,
+        "role": "Reviewer",
+        "role_version": 2,
+        "system_instructions": "Review correctness, regressions, business rules and tests.",
+        "permissions": [
+          "READ_REPOSITORY",
+          "READ_DIFF",
+          "RUN_TESTS",
+          "READ_RAG",
+          "READ_PR",
+          "READ_CI"
+        ],
+        "capabilities": [
+          "CAN_REVIEW",
+          "CAN_PRODUCE_FINDINGS",
+          "CAN_RUN_VALIDATION"
+        ],
+        "runtime_profile": {
+          "temperature": null,
+          "reasoning_max": "HIGH",
+          "reasoning_min": "MEDIUM",
+          "max_tool_calls": 40,
+          "max_model_turns": 20,
+          "context_strategy": "BALANCED",
+          "max_job_attempts": 2,
+          "max_output_tokens": null,
+          "reasoning_default": "HIGH",
+          "job_timeout_seconds": 1800,
+          "structured_output_mode": "REQUIRED",
+          "dynamic_reasoning_allowed": true
+        },
+        "override_policy": {
+          "provider": "ALLOW",
+          "model": "ALLOW",
+          "reasoning_level": "ALLOW_WITHIN_RANGE",
+          "max_output_tokens": "ALLOW",
+          "temperature": "ALLOW_IF_SUPPORTED",
+          "context_strategy": "ALLOW",
+          "max_tool_calls": "ALLOW_WITHIN_RANGE",
+          "job_timeout_seconds": "ALLOW_WITHIN_RANGE",
+          "permissions": "REDUCE_ONLY",
+          "system_instructions": "ADDITIVE_ONLY",
+          "allowed_results": "LOCKED"
+        }
+      },
+      {
+        "id": "e86ed8ac-228b-4fe0-84e2-103f2c52fd42",
+        "name": "ტესტო",
+        "enabled": true,
+        "provider": "openai",
+        "model": "gpt-5.6-terra",
+        "custom_instructions": "",
+        "runtime_overrides": {
+          "reasoning_level": "MEDIUM",
+          "max_output_tokens": 8192
+        },
+        "config_version": 2,
+        "role": "Tester",
+        "role_version": 2,
+        "system_instructions": "Verify tests and report only evidenced results.",
+        "permissions": [
+          "READ_REPOSITORY",
+          "READ_DIFF",
+          "READ_TASK",
+          "RUN_COMMANDS",
+          "RUN_TESTS",
+          "RUN_BUILD",
+          "RUN_LINTER",
+          "READ_RAG"
+        ],
+        "capabilities": [
+          "CAN_RUN_VALIDATION",
+          "CAN_PRODUCE_FINDINGS"
+        ],
+        "runtime_profile": {
+          "temperature": null,
+          "reasoning_max": "HIGH",
+          "reasoning_min": "PROVIDER_DEFAULT",
+          "max_tool_calls": 30,
+          "max_model_turns": 20,
+          "context_strategy": "BALANCED",
+          "max_job_attempts": 2,
+          "max_output_tokens": null,
+          "reasoning_default": "MEDIUM",
+          "job_timeout_seconds": 1800,
+          "structured_output_mode": "REQUIRED",
+          "dynamic_reasoning_allowed": true
+        },
+        "override_policy": {
+          "provider": "ALLOW",
+          "model": "ALLOW",
+          "reasoning_level": "ALLOW_WITHIN_RANGE",
+          "max_output_tokens": "ALLOW",
+          "temperature": "ALLOW_IF_SUPPORTED",
+          "context_strategy": "ALLOW",
+          "max_tool_calls": "ALLOW_WITHIN_RANGE",
+          "job_timeout_seconds": "ALLOW_WITHIN_RANGE",
+          "permissions": "REDUCE_ONLY",
+          "system_instructions": "ADDITIVE_ONLY",
+          "allowed_results": "LOCKED"
+        }
+      },
+      {
+        "id": "725f48cf-974c-49e3-9870-a8f1ecc92581",
+        "name": "Thinker",
+        "enabled": true,
+        "provider": "openai",
+        "model": null,
+        "custom_instructions": "",
+        "runtime_overrides": {},
+        "config_version": 1,
+        "role": "Thinker",
+        "role_version": 1,
+        "system_instructions": "Produce concrete plans and escalate missing context.",
+        "permissions": [
+          "READ_REPOSITORY",
+          "READ_DIFF",
+          "READ_RAG",
+          "READ_TASKS",
+          "READ_PR"
+        ],
+        "capabilities": [
+          "CAN_PLAN",
+          "CAN_REPLAN"
+        ],
+        "runtime_profile": {
+          "temperature": null,
+          "reasoning_max": "MAX",
+          "reasoning_min": "MEDIUM",
+          "max_tool_calls": 40,
+          "max_model_turns": 20,
+          "context_strategy": "DEEP",
+          "max_job_attempts": 2,
+          "max_output_tokens": null,
+          "reasoning_default": "HIGH",
+          "job_timeout_seconds": 1800,
+          "structured_output_mode": "REQUIRED",
+          "dynamic_reasoning_allowed": true
+        },
+        "override_policy": {
+          "provider": "ALLOW",
+          "model": "ALLOW",
+          "reasoning_level": "ALLOW_WITHIN_RANGE",
+          "max_output_tokens": "ALLOW",
+          "temperature": "ALLOW_IF_SUPPORTED",
+          "context_strategy": "ALLOW",
+          "max_tool_calls": "ALLOW_WITHIN_RANGE",
+          "job_timeout_seconds": "ALLOW_WITHIN_RANGE",
+          "permissions": "REDUCE_ONLY",
+          "system_instructions": "ADDITIVE_ONLY",
+          "allowed_results": "LOCKED"
+        }
+      },
+      {
+        "id": "ed5aaf20-1225-4d5b-a0a1-e1ff657d0315",
+        "name": "aka",
+        "enabled": true,
+        "provider": "openai",
+        "model": "gpt-5.6-sol",
+        "custom_instructions": "",
+        "runtime_overrides": {
+          "reasoning_level": "HIGH",
+          "max_output_tokens": 8192
+        },
+        "config_version": 2,
+        "role": "Thinker",
+        "role_version": 1,
+        "system_instructions": "Produce concrete plans and escalate missing context.",
+        "permissions": [
+          "READ_REPOSITORY",
+          "READ_DIFF",
+          "READ_RAG",
+          "READ_TASKS",
+          "READ_PR"
+        ],
+        "capabilities": [
+          "CAN_PLAN",
+          "CAN_REPLAN"
+        ],
+        "runtime_profile": {
+          "temperature": null,
+          "reasoning_max": "MAX",
+          "reasoning_min": "MEDIUM",
+          "max_tool_calls": 40,
+          "max_model_turns": 20,
+          "context_strategy": "DEEP",
+          "max_job_attempts": 2,
+          "max_output_tokens": null,
+          "reasoning_default": "HIGH",
+          "job_timeout_seconds": 1800,
+          "structured_output_mode": "REQUIRED",
+          "dynamic_reasoning_allowed": true
+        },
+        "override_policy": {
+          "provider": "ALLOW",
+          "model": "ALLOW",
+          "reasoning_level": "ALLOW_WITHIN_RANGE",
+          "max_output_tokens": "ALLOW",
+          "temperature": "ALLOW_IF_SUPPORTED",
+          "context_strategy": "ALLOW",
+          "max_tool_calls": "ALLOW_WITHIN_RANGE",
+          "job_timeout_seconds": "ALLOW_WITHIN_RANGE",
+          "permissions": "REDUCE_ONLY",
+          "system_instructions": "ADDITIVE_ONLY",
+          "allowed_results": "LOCKED"
+        }
+      },
+      {
+        "id": "009e05eb-4e7a-4565-b759-b2f6207fd494",
+        "name": "არჩილი",
+        "enabled": false,
+        "provider": "openai",
+        "model": "gpt-5.6-luna",
+        "custom_instructions": "",
+        "runtime_overrides": {
+          "reasoning_level": "LOW",
+          "max_output_tokens": 4096
+        },
+        "config_version": 2,
+        "role": "Deliverer",
+        "role_version": 3,
+        "system_instructions": "Coordinate incoming tasks and messages and outgoing delivery. Interpret intent accurately; never restart implementation for a metadata-only request. Use the runtime's typed GitHub actions and merge gates.",
+        "permissions": [
+          "CREATE_PR",
+          "PUSH_TASK_BRANCH",
+          "READ_CI",
+          "READ_DIFF",
+          "READ_PR",
+          "READ_RAG",
+          "READ_REPOSITORY",
+          "READ_TASKS",
+          "UPDATE_PR"
+        ],
+        "capabilities": [
+          "CAN_CLASSIFY_EXTERNAL_EVENT",
+          "CAN_CREATE_PR_METADATA",
+          "CAN_PREPARE_DELIVERY"
+        ],
+        "runtime_profile": {
+          "temperature": null,
+          "reasoning_max": "MEDIUM",
+          "reasoning_min": "PROVIDER_DEFAULT",
+          "max_tool_calls": 40,
+          "max_model_turns": 6,
+          "context_strategy": "BALANCED",
+          "max_job_attempts": 2,
+          "max_output_tokens": null,
+          "reasoning_default": "LOW",
+          "job_timeout_seconds": 1800,
+          "structured_output_mode": "REQUIRED",
+          "dynamic_reasoning_allowed": false
+        },
+        "override_policy": {
+          "provider": "ALLOW",
+          "model": "ALLOW",
+          "reasoning_level": "ALLOW_WITHIN_RANGE",
+          "max_output_tokens": "ALLOW",
+          "temperature": "ALLOW_IF_SUPPORTED",
+          "context_strategy": "ALLOW",
+          "max_tool_calls": "ALLOW_WITHIN_RANGE",
+          "job_timeout_seconds": "ALLOW_WITHIN_RANGE",
+          "permissions": "REDUCE_ONLY",
+          "system_instructions": "ADDITIVE_ONLY",
+          "allowed_results": "LOCKED"
+        }
+      },
+      {
+        "id": "0c033982-2f7a-4912-a1a6-39f83118cefd",
+        "name": "Deliverer",
+        "enabled": false,
+        "provider": "openai",
+        "model": null,
+        "custom_instructions": "",
+        "runtime_overrides": {},
+        "config_version": 1,
+        "role": "Deliverer",
+        "role_version": 3,
+        "system_instructions": "Coordinate incoming tasks and messages and outgoing delivery. Interpret intent accurately; never restart implementation for a metadata-only request. Use the runtime's typed GitHub actions and merge gates.",
+        "permissions": [
+          "CREATE_PR",
+          "PUSH_TASK_BRANCH",
+          "READ_CI",
+          "READ_DIFF",
+          "READ_PR",
+          "READ_RAG",
+          "READ_REPOSITORY",
+          "READ_TASKS",
+          "UPDATE_PR"
+        ],
+        "capabilities": [
+          "CAN_CLASSIFY_EXTERNAL_EVENT",
+          "CAN_CREATE_PR_METADATA",
+          "CAN_PREPARE_DELIVERY"
+        ],
+        "runtime_profile": {
+          "temperature": null,
+          "reasoning_max": "MEDIUM",
+          "reasoning_min": "PROVIDER_DEFAULT",
+          "max_tool_calls": 40,
+          "max_model_turns": 6,
+          "context_strategy": "BALANCED",
+          "max_job_attempts": 2,
+          "max_output_tokens": null,
+          "reasoning_default": "LOW",
+          "job_timeout_seconds": 1800,
+          "structured_output_mode": "REQUIRED",
+          "dynamic_reasoning_allowed": false
+        },
+        "override_policy": {
+          "provider": "ALLOW",
+          "model": "ALLOW",
+          "reasoning_level": "ALLOW_WITHIN_RANGE",
+          "max_output_tokens": "ALLOW",
+          "temperature": "ALLOW_IF_SUPPORTED",
+          "context_strategy": "ALLOW",
+          "max_tool_calls": "ALLOW_WITHIN_RANGE",
+          "job_timeout_seconds": "ALLOW_WITHIN_RANGE",
+          "permissions": "REDUCE_ONLY",
+          "system_instructions": "ADDITIVE_ONLY",
+          "allowed_results": "LOCKED"
+        }
+      }
+    ]
+  },
+  "nodes": {
+    "sql": "SELECT n.id,n.label,n.role,n.enabled,n.provider,n.model,n.system_prompt,n.reasoning_effort,n.max_output_tokens,n.timeout_minutes,n.max_retries,n.max_review_cycles,n.context_depth,n.rag_retrieval_depth,n.model_validation_status,n.poll_interval_seconds,n.integration_mode FROM workflow_nodes n ORDER BY n.id",
+    "rows": [
+      {
+        "id": "004b07bb-ce7e-5e33-99ee-5548ba130074",
+        "label": "Orchestrator",
+        "role": "ORCHESTRATOR",
+        "enabled": true,
+        "provider": "openai",
+        "model": "",
+        "system_prompt": "",
+        "reasoning_effort": "default",
+        "max_output_tokens": null,
+        "timeout_minutes": 60,
+        "max_retries": 2,
+        "max_review_cycles": 3,
+        "context_depth": "normal",
+        "rag_retrieval_depth": "normal",
+        "model_validation_status": "NOT_CONFIGURED",
+        "poll_interval_seconds": 300,
+        "integration_mode": "webhook"
+      },
+      {
+        "id": "10000000-0000-0000-0000-000000000001",
+        "label": "agentebis orkestratori",
+        "role": "ORCHESTRATOR",
+        "enabled": true,
+        "provider": "openai",
+        "model": "gpt-5.6-sol",
+        "system_prompt": "",
+        "reasoning_effort": "default",
+        "max_output_tokens": null,
+        "timeout_minutes": 60,
+        "max_retries": 2,
+        "max_review_cycles": 3,
+        "context_depth": "normal",
+        "rag_retrieval_depth": "normal",
+        "model_validation_status": "UNVERIFIED",
+        "poll_interval_seconds": 300,
+        "integration_mode": "webhook"
+      },
+      {
+        "id": "10000000-0000-0000-0000-000000000002",
+        "label": "dachi",
+        "role": "DELIVERER",
+        "enabled": true,
+        "provider": "openai",
+        "model": "gpt-5.6-luna",
+        "system_prompt": "",
+        "reasoning_effort": "low",
+        "max_output_tokens": 4096,
+        "timeout_minutes": 60,
+        "max_retries": 2,
+        "max_review_cycles": 3,
+        "context_depth": "normal",
+        "rag_retrieval_depth": "normal",
+        "model_validation_status": "AVAILABLE",
+        "poll_interval_seconds": 300,
+        "integration_mode": "webhook"
+      },
+      {
+        "id": "10000000-0000-0000-0000-000000000003",
+        "label": "aka",
+        "role": "THINKER",
+        "enabled": true,
+        "provider": "openai",
+        "model": "gpt-5.6-sol",
+        "system_prompt": "",
+        "reasoning_effort": "high",
+        "max_output_tokens": 8192,
+        "timeout_minutes": 60,
+        "max_retries": 2,
+        "max_review_cycles": 3,
+        "context_depth": "normal",
+        "rag_retrieval_depth": "normal",
+        "model_validation_status": "AVAILABLE",
+        "poll_interval_seconds": 300,
+        "integration_mode": "webhook"
+      },
+      {
+        "id": "10000000-0000-0000-0000-000000000004",
+        "label": "სანი",
+        "role": "EXECUTOR",
+        "enabled": true,
+        "provider": "openai",
+        "model": "gpt-5.6-sol",
+        "system_prompt": "",
+        "reasoning_effort": "high",
+        "max_output_tokens": 16384,
+        "timeout_minutes": 60,
+        "max_retries": 2,
+        "max_review_cycles": 3,
+        "context_depth": "normal",
+        "rag_retrieval_depth": "normal",
+        "model_validation_status": "AVAILABLE",
+        "poll_interval_seconds": 300,
+        "integration_mode": "webhook"
+      },
+      {
+        "id": "10000000-0000-0000-0000-000000000005",
+        "label": "რევიუერი",
+        "role": "REVIEWER",
+        "enabled": true,
+        "provider": "openai",
+        "model": "gpt-5.6-sol",
+        "system_prompt": "",
+        "reasoning_effort": "high",
+        "max_output_tokens": 8192,
+        "timeout_minutes": 60,
+        "max_retries": 2,
+        "max_review_cycles": 3,
+        "context_depth": "normal",
+        "rag_retrieval_depth": "normal",
+        "model_validation_status": "AVAILABLE",
+        "poll_interval_seconds": 300,
+        "integration_mode": "webhook"
+      },
+      {
+        "id": "10000000-0000-0000-0000-000000000007",
+        "label": "ტესტო",
+        "role": "TESTER",
+        "enabled": true,
+        "provider": "openai",
+        "model": "gpt-5.6-terra",
+        "system_prompt": "",
+        "reasoning_effort": "medium",
+        "max_output_tokens": 8192,
+        "timeout_minutes": 60,
+        "max_retries": 2,
+        "max_review_cycles": 3,
+        "context_depth": "normal",
+        "rag_retrieval_depth": "normal",
+        "model_validation_status": "AVAILABLE",
+        "poll_interval_seconds": 300,
+        "integration_mode": "manual"
+      },
+      {
+        "id": "538a1e4a-1cb7-51e0-b752-66fdbf54e7ce",
+        "label": "Executor",
+        "role": "EXECUTOR",
+        "enabled": true,
+        "provider": "openai",
+        "model": "",
+        "system_prompt": "",
+        "reasoning_effort": "default",
+        "max_output_tokens": null,
+        "timeout_minutes": 60,
+        "max_retries": 2,
+        "max_review_cycles": 3,
+        "context_depth": "normal",
+        "rag_retrieval_depth": "normal",
+        "model_validation_status": "NOT_CONFIGURED",
+        "poll_interval_seconds": 300,
+        "integration_mode": "webhook"
+      },
+      {
+        "id": "7b3fcff9-698d-557e-b518-1cf9c8459cff",
+        "label": "Thinker",
+        "role": "THINKER",
+        "enabled": true,
+        "provider": "openai",
+        "model": "",
+        "system_prompt": "",
+        "reasoning_effort": "default",
+        "max_output_tokens": null,
+        "timeout_minutes": 60,
+        "max_retries": 2,
+        "max_review_cycles": 3,
+        "context_depth": "normal",
+        "rag_retrieval_depth": "normal",
+        "model_validation_status": "NOT_CONFIGURED",
+        "poll_interval_seconds": 300,
+        "integration_mode": "webhook"
+      },
+      {
+        "id": "8c103ef8-3f51-50ef-b630-a6014e89157f",
+        "label": "Reviewer",
+        "role": "REVIEWER",
+        "enabled": true,
+        "provider": "openai",
+        "model": "",
+        "system_prompt": "",
+        "reasoning_effort": "default",
+        "max_output_tokens": null,
+        "timeout_minutes": 60,
+        "max_retries": 2,
+        "max_review_cycles": 3,
+        "context_depth": "normal",
+        "rag_retrieval_depth": "normal",
+        "model_validation_status": "NOT_CONFIGURED",
+        "poll_interval_seconds": 300,
+        "integration_mode": "webhook"
+      },
+      {
+        "id": "ea2b5848-62a5-590c-8c4d-aa2336cfbd34",
+        "label": "Deliverer",
+        "role": "DELIVERER",
+        "enabled": true,
+        "provider": "openai",
+        "model": "",
+        "system_prompt": "",
+        "reasoning_effort": "default",
+        "max_output_tokens": null,
+        "timeout_minutes": 60,
+        "max_retries": 2,
+        "max_review_cycles": 3,
+        "context_depth": "normal",
+        "rag_retrieval_depth": "normal",
+        "model_validation_status": "NOT_CONFIGURED",
+        "poll_interval_seconds": 300,
+        "integration_mode": "webhook"
+      }
+    ]
+  },
+  "workflow": {
+    "sql": "SELECT w.team_id,w.version,s.role AS source,t.role AS target,e.outcome,e.job_type,e.internal_task_state,e.external_status_key,e.configuration FROM workflow_edges e JOIN workflow_definitions w ON w.id=e.workflow_id JOIN workflow_nodes s ON s.id=e.source_node_id JOIN workflow_nodes t ON t.id=e.target_node_id ORDER BY s.role,e.outcome,t.role",
+    "rows": [
+      {
+        "team_id": "00000000-0000-0000-0000-000000000001",
+        "version": 23,
+        "source": "DELIVERER",
+        "target": "ORCHESTRATOR",
+        "outcome": "consultation",
+        "job_type": null,
+        "internal_task_state": null,
+        "external_status_key": null,
+        "configuration": {
+          "kind": "consultation"
+        }
+      },
+      {
+        "team_id": "97c55f7d-3cc9-4341-be0f-91b767b883a2",
+        "version": 2,
+        "source": "DELIVERER",
+        "target": "ORCHESTRATOR",
+        "outcome": "consultation",
+        "job_type": null,
+        "internal_task_state": null,
+        "external_status_key": null,
+        "configuration": {
+          "kind": "consultation"
+        }
+      },
+      {
+        "team_id": "97c55f7d-3cc9-4341-be0f-91b767b883a2",
+        "version": 2,
+        "source": "DELIVERER",
+        "target": "THINKER",
+        "outcome": "success",
+        "job_type": null,
+        "internal_task_state": null,
+        "external_status_key": null,
+        "configuration": {}
+      },
+      {
+        "team_id": "00000000-0000-0000-0000-000000000001",
+        "version": 23,
+        "source": "DELIVERER",
+        "target": "THINKER",
+        "outcome": "success",
+        "job_type": null,
+        "internal_task_state": null,
+        "external_status_key": null,
+        "configuration": {}
+      },
+      {
+        "team_id": "00000000-0000-0000-0000-000000000001",
+        "version": 23,
+        "source": "EXECUTOR",
+        "target": "ORCHESTRATOR",
+        "outcome": "consultation",
+        "job_type": null,
+        "internal_task_state": null,
+        "external_status_key": null,
+        "configuration": {
+          "kind": "consultation"
+        }
+      },
+      {
+        "team_id": "97c55f7d-3cc9-4341-be0f-91b767b883a2",
+        "version": 2,
+        "source": "EXECUTOR",
+        "target": "ORCHESTRATOR",
+        "outcome": "consultation",
+        "job_type": null,
+        "internal_task_state": null,
+        "external_status_key": null,
+        "configuration": {
+          "kind": "consultation"
+        }
+      },
+      {
+        "team_id": "00000000-0000-0000-0000-000000000001",
+        "version": 23,
+        "source": "EXECUTOR",
+        "target": "REVIEWER",
+        "outcome": "success",
+        "job_type": null,
+        "internal_task_state": null,
+        "external_status_key": null,
+        "configuration": {}
+      },
+      {
+        "team_id": "97c55f7d-3cc9-4341-be0f-91b767b883a2",
+        "version": 2,
+        "source": "EXECUTOR",
+        "target": "REVIEWER",
+        "outcome": "success",
+        "job_type": null,
+        "internal_task_state": null,
+        "external_status_key": null,
+        "configuration": {}
+      },
+      {
+        "team_id": "97c55f7d-3cc9-4341-be0f-91b767b883a2",
+        "version": 2,
+        "source": "ORCHESTRATOR",
+        "target": "DELIVERER",
+        "outcome": "consultation",
+        "job_type": null,
+        "internal_task_state": null,
+        "external_status_key": null,
+        "configuration": {
+          "kind": "consultation"
+        }
+      },
+      {
+        "team_id": "00000000-0000-0000-0000-000000000001",
+        "version": 23,
+        "source": "ORCHESTRATOR",
+        "target": "DELIVERER",
+        "outcome": "consultation",
+        "job_type": null,
+        "internal_task_state": null,
+        "external_status_key": null,
+        "configuration": {
+          "kind": "consultation"
+        }
+      },
+      {
+        "team_id": "97c55f7d-3cc9-4341-be0f-91b767b883a2",
+        "version": 2,
+        "source": "ORCHESTRATOR",
+        "target": "EXECUTOR",
+        "outcome": "consultation",
+        "job_type": null,
+        "internal_task_state": null,
+        "external_status_key": null,
+        "configuration": {
+          "kind": "consultation"
+        }
+      },
+      {
+        "team_id": "00000000-0000-0000-0000-000000000001",
+        "version": 23,
+        "source": "ORCHESTRATOR",
+        "target": "EXECUTOR",
+        "outcome": "consultation",
+        "job_type": null,
+        "internal_task_state": null,
+        "external_status_key": null,
+        "configuration": {
+          "kind": "consultation"
+        }
+      },
+      {
+        "team_id": "00000000-0000-0000-0000-000000000001",
+        "version": 23,
+        "source": "ORCHESTRATOR",
+        "target": "REVIEWER",
+        "outcome": "consultation",
+        "job_type": null,
+        "internal_task_state": null,
+        "external_status_key": null,
+        "configuration": {
+          "kind": "consultation"
+        }
+      },
+      {
+        "team_id": "97c55f7d-3cc9-4341-be0f-91b767b883a2",
+        "version": 2,
+        "source": "ORCHESTRATOR",
+        "target": "REVIEWER",
+        "outcome": "consultation",
+        "job_type": null,
+        "internal_task_state": null,
+        "external_status_key": null,
+        "configuration": {
+          "kind": "consultation"
+        }
+      },
+      {
+        "team_id": "00000000-0000-0000-0000-000000000001",
+        "version": 23,
+        "source": "ORCHESTRATOR",
+        "target": "TESTER",
+        "outcome": "consultation",
+        "job_type": null,
+        "internal_task_state": null,
+        "external_status_key": null,
+        "configuration": {
+          "kind": "consultation"
+        }
+      },
+      {
+        "team_id": "00000000-0000-0000-0000-000000000001",
+        "version": 23,
+        "source": "ORCHESTRATOR",
+        "target": "THINKER",
+        "outcome": "consultation",
+        "job_type": null,
+        "internal_task_state": null,
+        "external_status_key": null,
+        "configuration": {
+          "kind": "consultation"
+        }
+      },
+      {
+        "team_id": "97c55f7d-3cc9-4341-be0f-91b767b883a2",
+        "version": 2,
+        "source": "ORCHESTRATOR",
+        "target": "THINKER",
+        "outcome": "consultation",
+        "job_type": null,
+        "internal_task_state": null,
+        "external_status_key": null,
+        "configuration": {
+          "kind": "consultation"
+        }
+      },
+      {
+        "team_id": "97c55f7d-3cc9-4341-be0f-91b767b883a2",
+        "version": 2,
+        "source": "ORCHESTRATOR",
+        "target": "DELIVERER",
+        "outcome": "success",
+        "job_type": null,
+        "internal_task_state": null,
+        "external_status_key": null,
+        "configuration": {}
+      },
+      {
+        "team_id": "00000000-0000-0000-0000-000000000001",
+        "version": 23,
+        "source": "ORCHESTRATOR",
+        "target": "DELIVERER",
+        "outcome": "success",
+        "job_type": null,
+        "internal_task_state": null,
+        "external_status_key": null,
+        "configuration": {}
+      },
+      {
+        "team_id": "97c55f7d-3cc9-4341-be0f-91b767b883a2",
+        "version": 2,
+        "source": "REVIEWER",
+        "target": "ORCHESTRATOR",
+        "outcome": "consultation",
+        "job_type": null,
+        "internal_task_state": null,
+        "external_status_key": null,
+        "configuration": {
+          "kind": "consultation"
+        }
+      },
+      {
+        "team_id": "00000000-0000-0000-0000-000000000001",
+        "version": 23,
+        "source": "REVIEWER",
+        "target": "ORCHESTRATOR",
+        "outcome": "consultation",
+        "job_type": null,
+        "internal_task_state": null,
+        "external_status_key": null,
+        "configuration": {
+          "kind": "consultation"
+        }
+      },
+      {
+        "team_id": "97c55f7d-3cc9-4341-be0f-91b767b883a2",
+        "version": 2,
+        "source": "REVIEWER",
+        "target": "DELIVERER",
+        "outcome": "success",
+        "job_type": null,
+        "internal_task_state": null,
+        "external_status_key": null,
+        "configuration": {}
+      },
+      {
+        "team_id": "00000000-0000-0000-0000-000000000001",
+        "version": 23,
+        "source": "REVIEWER",
+        "target": "TESTER",
+        "outcome": "success",
+        "job_type": null,
+        "internal_task_state": null,
+        "external_status_key": null,
+        "configuration": {}
+      },
+      {
+        "team_id": "00000000-0000-0000-0000-000000000001",
+        "version": 23,
+        "source": "TESTER",
+        "target": "ORCHESTRATOR",
+        "outcome": "consultation",
+        "job_type": null,
+        "internal_task_state": null,
+        "external_status_key": null,
+        "configuration": {
+          "kind": "consultation"
+        }
+      },
+      {
+        "team_id": "00000000-0000-0000-0000-000000000001",
+        "version": 23,
+        "source": "TESTER",
+        "target": "DELIVERER",
+        "outcome": "success",
+        "job_type": null,
+        "internal_task_state": null,
+        "external_status_key": null,
+        "configuration": {}
+      },
+      {
+        "team_id": "97c55f7d-3cc9-4341-be0f-91b767b883a2",
+        "version": 2,
+        "source": "THINKER",
+        "target": "ORCHESTRATOR",
+        "outcome": "consultation",
+        "job_type": null,
+        "internal_task_state": null,
+        "external_status_key": null,
+        "configuration": {
+          "kind": "consultation"
+        }
+      },
+      {
+        "team_id": "00000000-0000-0000-0000-000000000001",
+        "version": 23,
+        "source": "THINKER",
+        "target": "ORCHESTRATOR",
+        "outcome": "consultation",
+        "job_type": null,
+        "internal_task_state": null,
+        "external_status_key": null,
+        "configuration": {
+          "kind": "consultation"
+        }
+      },
+      {
+        "team_id": "00000000-0000-0000-0000-000000000001",
+        "version": 23,
+        "source": "THINKER",
+        "target": "EXECUTOR",
+        "outcome": "success",
+        "job_type": null,
+        "internal_task_state": null,
+        "external_status_key": null,
+        "configuration": {}
+      },
+      {
+        "team_id": "97c55f7d-3cc9-4341-be0f-91b767b883a2",
+        "version": 2,
+        "source": "THINKER",
+        "target": "EXECUTOR",
+        "outcome": "success",
+        "job_type": null,
+        "internal_task_state": null,
+        "external_status_key": null,
+        "configuration": {}
+      }
+    ]
+  },
+  "teams": {
+    "sql": "SELECT id,name,enabled,max_concurrent_tasks,repository_ids FROM teams",
+    "rows": [
+      {
+        "id": "97c55f7d-3cc9-4341-be0f-91b767b883a2",
+        "name": "my fuickin teram",
+        "enabled": false,
+        "max_concurrent_tasks": 1,
+        "repository_ids": []
+      },
+      {
+        "id": "00000000-0000-0000-0000-000000000001",
+        "name": "Default team",
+        "enabled": true,
+        "max_concurrent_tasks": 1,
+        "repository_ids": [
+          "6a3858e9-b6c6-4dc3-a430-772b947a3645"
+        ]
+      }
+    ]
+  },
+  "settings": {
+    "sql": "SELECT timezone,default_reasoning_level,default_max_output_tokens,max_concurrent_workers,default_job_timeout_seconds,default_merge_policy,auto_index_repositories,incremental_index_after_merge,context_strategy,monthly_cost_warning,monthly_cost_hard_stop FROM account_settings",
+    "rows": [
+      {
+        "timezone": "UTC",
+        "default_reasoning_level": "medium",
+        "default_max_output_tokens": null,
+        "max_concurrent_workers": 1,
+        "default_job_timeout_seconds": 3600,
+        "default_merge_policy": "REQUIRE_HUMAN",
+        "auto_index_repositories": true,
+        "incremental_index_after_merge": true,
+        "context_strategy": "BALANCED",
+        "monthly_cost_warning": null,
+        "monthly_cost_hard_stop": null
+      }
+    ]
+  },
+  "pricing": {
+    "sql": "SELECT role,configuration->>'input_cost_per_million' AS input_rate,configuration->>'output_cost_per_million' AS output_rate FROM agent_configs ORDER BY role",
+    "rows": [
+      {
+        "role": "INTAKE",
+        "input_rate": null,
+        "output_rate": null
+      },
+      {
+        "role": "THINKER",
+        "input_rate": null,
+        "output_rate": null
+      },
+      {
+        "role": "EXECUTOR",
+        "input_rate": null,
+        "output_rate": null
+      },
+      {
+        "role": "REVIEWER",
+        "input_rate": null,
+        "output_rate": null
+      },
+      {
+        "role": "TESTER",
+        "input_rate": null,
+        "output_rate": null
+      },
+      {
+        "role": "ORCHESTRATOR",
+        "input_rate": null,
+        "output_rate": null
+      },
+      {
+        "role": "DELIVERER",
+        "input_rate": null,
+        "output_rate": null
+      }
+    ]
+  },
+  "integrations": {
+    "sql": "SELECT provider_name,status,sync_status,last_synced_at FROM integrations ORDER BY provider_name",
+    "rows": [
+      {
+        "provider_name": "github",
+        "status": "CONNECTED",
+        "sync_status": "IDLE",
+        "last_synced_at": null
+      },
+      {
+        "provider_name": "openai",
+        "status": "CONNECTED",
+        "sync_status": "IDLE",
+        "last_synced_at": null
+      },
+      {
+        "provider_name": "trello",
+        "status": "CONNECTED",
+        "sync_status": "READY",
+        "last_synced_at": "2026-09-07 09:13:14.645886+00:00"
+      }
+    ]
+  },
+  "repositories": {
+    "sql": "SELECT id,owner,name,enabled,latest_sha,indexed_sha,index_status,indexed_at FROM repositories",
+    "rows": [
+      {
+        "id": "6a3858e9-b6c6-4dc3-a430-772b947a3645",
+        "owner": "Jedi-Knight-Nika",
+        "name": "dev-workflow-automation",
+        "enabled": true,
+        "latest_sha": "ea7af55c446db7e7ad8451c34242434101704826",
+        "indexed_sha": "81741252bffe49575c25780f019e6868dec555a4",
+        "index_status": "READY",
+        "indexed_at": "2026-09-07 01:19:38.630094+00:00"
+      }
+    ]
+  },
+  "knowledge": {
+    "sql": "SELECT repository_id,count(*) AS chunks,count(distinct file_path) AS files,count(distinct commit_sha) AS revisions,count(embedding) AS embedded_chunks FROM knowledge_chunks GROUP BY repository_id",
+    "rows": [
+      {
+        "repository_id": "6a3858e9-b6c6-4dc3-a430-772b947a3645",
+        "chunks": 2788,
+        "files": 559,
+        "revisions": 1,
+        "embedded_chunks": 2788
+      }
+    ]
+  },
+  "manual_knowledge": {
+    "sql": "SELECT role,count(*) AS chunks,count(distinct source_id) AS sources FROM agent_knowledge_chunks GROUP BY role",
+    "rows": []
+  },
+  "vector_ddl": {
+    "sql": "SELECT table_name,column_name,udt_name FROM information_schema.columns WHERE table_name IN ('knowledge_chunks','agent_knowledge_chunks') AND column_name='embedding'",
+    "rows": [
+      {
+        "table_name": "knowledge_chunks",
+        "column_name": "embedding",
+        "udt_name": "vector"
+      },
+      {
+        "table_name": "agent_knowledge_chunks",
+        "column_name": "embedding",
+        "udt_name": "vector"
+      }
+    ]
+  },
+  "vector_indexes": {
+    "sql": "SELECT tablename,indexname,indexdef FROM pg_indexes WHERE tablename IN ('knowledge_chunks','agent_knowledge_chunks')",
+    "rows": [
+      {
+        "tablename": "knowledge_chunks",
+        "indexname": "knowledge_chunks_pkey",
+        "indexdef": "CREATE UNIQUE INDEX knowledge_chunks_pkey ON public.knowledge_chunks USING btree (id)"
+      },
+      {
+        "tablename": "knowledge_chunks",
+        "indexname": "uq_knowledge_chunk_location",
+        "indexdef": "CREATE UNIQUE INDEX uq_knowledge_chunk_location ON public.knowledge_chunks USING btree (repository_id, commit_sha, file_path, chunk_index)"
+      },
+      {
+        "tablename": "knowledge_chunks",
+        "indexname": "ix_knowledge_chunks_repository",
+        "indexdef": "CREATE INDEX ix_knowledge_chunks_repository ON public.knowledge_chunks USING btree (repository_id, commit_sha)"
+      },
+      {
+        "tablename": "knowledge_chunks",
+        "indexname": "ix_knowledge_chunks_embedding",
+        "indexdef": "CREATE INDEX ix_knowledge_chunks_embedding ON public.knowledge_chunks USING ivfflat (embedding vector_cosine_ops) WITH (lists='100')"
+      },
+      {
+        "tablename": "agent_knowledge_chunks",
+        "indexname": "agent_knowledge_chunks_pkey",
+        "indexdef": "CREATE UNIQUE INDEX agent_knowledge_chunks_pkey ON public.agent_knowledge_chunks USING btree (id)"
+      },
+      {
+        "tablename": "agent_knowledge_chunks",
+        "indexname": "ix_agent_knowledge_chunks_role",
+        "indexdef": "CREATE INDEX ix_agent_knowledge_chunks_role ON public.agent_knowledge_chunks USING btree (role)"
+      },
+      {
+        "tablename": "agent_knowledge_chunks",
+        "indexname": "ix_agent_knowledge_chunks_embedding",
+        "indexdef": "CREATE INDEX ix_agent_knowledge_chunks_embedding ON public.agent_knowledge_chunks USING ivfflat (embedding vector_cosine_ops) WITH (lists='20')"
+      },
+      {
+        "tablename": "agent_knowledge_chunks",
+        "indexname": "ix_agent_knowledge_chunks_source",
+        "indexdef": "CREATE INDEX ix_agent_knowledge_chunks_source ON public.agent_knowledge_chunks USING btree (source_id)"
+      }
+    ]
+  },
+  "failures": {
+    "sql": "SELECT failure_class,count(*) AS events,count(distinct job_id) AS jobs FROM failure_events GROUP BY failure_class ORDER BY count(*) DESC",
+    "rows": [
+      {
+        "failure_class": "UNKNOWN_SYSTEM_ERROR",
+        "events": 12,
+        "jobs": 5
+      },
+      {
+        "failure_class": "GITHUB_UNAVAILABLE",
+        "events": 4,
+        "jobs": 0
+      },
+      {
+        "failure_class": "EXTERNAL_WAIT",
+        "events": 3,
+        "jobs": 1
+      },
+      {
+        "failure_class": "POLICY_DENIED",
+        "events": 2,
+        "jobs": 2
+      },
+      {
+        "failure_class": "VALIDATION_FAILURE",
+        "events": 1,
+        "jobs": 1
+      },
+      {
+        "failure_class": "WORKER_TIMEOUT",
+        "events": 1,
+        "jobs": 1
+      }
+    ]
+  },
+  "events": {
+    "sql": "SELECT event_type,count(*) AS events FROM task_events GROUP BY event_type ORDER BY count(*) DESC",
+    "rows": [
+      {
+        "event_type": "MODEL_STREAM_PROGRESS",
+        "events": 119
+      },
+      {
+        "event_type": "JOB_CLAIMED",
+        "events": 93
+      },
+      {
+        "event_type": "JOB_SUCCEEDED",
+        "events": 72
+      },
+      {
+        "event_type": "JOB_QUEUED",
+        "events": 70
+      },
+      {
+        "event_type": "EXTERNAL_STATE_SYNC_SKIPPED",
+        "events": 40
+      },
+      {
+        "event_type": "EXTERNAL_STATE_SYNCED",
+        "events": 34
+      },
+      {
+        "event_type": "TASK_REPOSITORY_SCOPE_SELECTED",
+        "events": 31
+      },
+      {
+        "event_type": "TASK_REOPENED",
+        "events": 27
+      },
+      {
+        "event_type": "INTAKE_INTERPRETED",
+        "events": 24
+      },
+      {
+        "event_type": "EXECUTOR_NEEDS_HUMAN",
+        "events": 14
+      },
+      {
+        "event_type": "JOB_RETRY_SCHEDULED",
+        "events": 12
+      },
+      {
+        "event_type": "INTAKE_NEEDS_HUMAN",
+        "events": 6
+      },
+      {
+        "event_type": "LINEAR_SYNC_SKIPPED",
+        "events": 5
+      },
+      {
+        "event_type": "JOB_FAILED",
+        "events": 5
+      },
+      {
+        "event_type": "TASK_CREATED_FROM_TRELLO",
+        "events": 3
+      },
+      {
+        "event_type": "TASK_MESSAGE_ADDED",
+        "events": 3
+      },
+      {
+        "event_type": "GITHUB_EVIDENCE_RECONCILED",
+        "events": 2
+      },
+      {
+        "event_type": "PULL_REQUEST_UPDATED",
+        "events": 2
+      },
+      {
+        "event_type": "WORKFLOW_ROUTE_APPLIED",
+        "events": 2
+      },
+      {
+        "event_type": "REPAIR_LIMIT_REACHED",
+        "events": 2
+      },
+      {
+        "event_type": "JOB_WAITING_HUMAN",
+        "events": 2
+      },
+      {
+        "event_type": "TASK_READY_TO_MERGE",
+        "events": 2
+      },
+      {
+        "event_type": "REVIEW_NEEDS_HUMAN",
+        "events": 1
+      },
+      {
+        "event_type": "TASK_PAUSED",
+        "events": 1
+      },
+      {
+        "event_type": "PULL_REQUEST_MERGE_DEFERRED",
+        "events": 1
+      },
+      {
+        "event_type": "PULL_REQUEST_MERGE_REQUESTED",
+        "events": 1
+      },
+      {
+        "event_type": "REPLAN_LIMIT_REACHED",
+        "events": 1
+      },
+      {
+        "event_type": "MANUAL_TAKEOVER_STARTED",
+        "events": 1
+      },
+      {
+        "event_type": "PULL_REQUEST_COMMIT_MESSAGE_UPDATED",
+        "events": 1
+      },
+      {
+        "event_type": "THINKER_NEEDS_HUMAN",
+        "events": 1
+      },
+      {
+        "event_type": "PULL_REQUEST_METADATA_UPDATED",
+        "events": 1
+      },
+      {
+        "event_type": "JOB_FINISHED_DURING_TAKEOVER",
+        "events": 1
+      },
+      {
+        "event_type": "PULL_REQUEST_CREATED",
+        "events": 1
+      },
+      {
+        "event_type": "PULL_REQUEST_MERGED",
+        "events": 1
+      },
+      {
+        "event_type": "GITHUB_COMMENT_ACTION_REJECTED",
+        "events": 1
+      }
+    ]
+  },
+  "retry_counters": {
+    "sql": "SELECT sum(provider_retry_count) AS provider,sum(integration_retry_count) AS integration,sum(worker_retry_count) AS worker,sum(protocol_retry_count) AS protocol,sum(engineering_retry_count) AS engineering FROM job_retry_states",
+    "rows": [
+      {
+        "provider": 0,
+        "integration": 0,
+        "worker": 1,
+        "protocol": 0,
+        "engineering": 3
+      }
+    ]
+  },
+  "scopes": {
+    "sql": "SELECT t.external_key,r.name,s.changed,s.pull_request_number,s.base_revision,s.current_revision,s.merged_at FROM task_repository_scopes s JOIN tasks t ON t.id=s.task_id JOIN repositories r ON r.id=s.repository_id ORDER BY t.external_key",
+    "rows": [
+      {
+        "external_key": "TRELLO-73WLJ63q",
+        "name": "dev-workflow-automation",
+        "changed": false,
+        "pull_request_number": 1,
+        "base_revision": "ecdc15b827a1065c83f01e580cc400a8bf7d88f3",
+        "current_revision": "9ce0f6adfeeb3d6e65141183632e429fb721b92f",
+        "merged_at": null
+      },
+      {
+        "external_key": "TRELLO-J2mg8B9P",
+        "name": "dev-workflow-automation",
+        "changed": false,
+        "pull_request_number": null,
+        "base_revision": "ea7af55c446db7e7ad8451c34242434101704826",
+        "current_revision": "ea7af55c446db7e7ad8451c34242434101704826",
+        "merged_at": null
+      },
+      {
+        "external_key": "TRELLO-VDu4nqWT",
+        "name": "dev-workflow-automation",
+        "changed": false,
+        "pull_request_number": null,
+        "base_revision": "ecdc15b827a1065c83f01e580cc400a8bf7d88f3",
+        "current_revision": "ecdc15b827a1065c83f01e580cc400a8bf7d88f3",
+        "merged_at": null
+      }
+    ]
+  },
+  "messages": {
+    "sql": "SELECT author_type,author_role,kind,count(*) AS messages FROM task_messages WHERE deleted_at IS NULL GROUP BY author_type,author_role,kind ORDER BY author_type,author_role",
+    "rows": [
+      {
+        "author_type": "AGENT",
+        "author_role": "EXECUTOR",
+        "kind": "STATUS_UPDATE",
+        "messages": 15
+      },
+      {
+        "author_type": "AGENT",
+        "author_role": "INTAKE",
+        "kind": "STATUS_UPDATE",
+        "messages": 4
+      },
+      {
+        "author_type": "AGENT",
+        "author_role": "REVIEWER",
+        "kind": "STATUS_UPDATE",
+        "messages": 4
+      },
+      {
+        "author_type": "AGENT",
+        "author_role": "THINKER",
+        "kind": "STATUS_UPDATE",
+        "messages": 4
+      },
+      {
+        "author_type": "USER",
+        "author_role": null,
+        "kind": "COMMENT",
+        "messages": 3
+      }
+    ]
+  }
+}

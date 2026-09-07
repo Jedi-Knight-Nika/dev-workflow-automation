@@ -1,0 +1,15 @@
+{
+  "captured_at": null,
+  "capture_note": "Read separately after the 2026-09-07T09:21:39Z runtime snapshot; exact capture timestamp was not recorded.",
+  "service": "worker",
+  "scheduler_enabled": true,
+  "scheduler_max_concurrent_jobs": 2,
+  "worker_transport": "local",
+  "worker_timeout_seconds": 300,
+  "max_job_tokens": 0,
+  "max_task_tokens": 0,
+  "max_team_tokens": 0,
+  "max_job_cost_usd": 0,
+  "max_task_cost_usd": 0,
+  "max_team_cost_usd": 0
+}
