@@ -27,8 +27,8 @@ class TaskListFilters:
     provider_state: str | None = None
     assigned_team_id: uuid.UUID | None = None
     unassigned: bool = False
-    sort: Literal["priority", "created", "updated", "due"] = "priority"
-    direction: Literal["asc", "desc"] = "asc"
+    sort: Literal["priority", "created", "updated", "due"] = "created"
+    direction: Literal["asc", "desc"] = "desc"
 
 
 @dataclass(frozen=True, slots=True)

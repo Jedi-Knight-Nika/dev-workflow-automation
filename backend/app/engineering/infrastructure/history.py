@@ -99,7 +99,9 @@ class SqlAlchemyTaskHistoryQueries:
     async def jobs(self, task_id: uuid.UUID) -> list[EnqueuedJob]:
         records = (
             await self._session.scalars(
-                select(Job).where(Job.task_id == task_id).order_by(Job.created_at)
+                select(Job)
+                .where(Job.task_id == task_id)
+                .order_by(Job.created_at.desc(), Job.id.desc())
             )
         ).all()
         return [job_to_view(record) for record in records]
@@ -107,7 +109,9 @@ class SqlAlchemyTaskHistoryQueries:
     async def events(self, task_id: uuid.UUID) -> list[TaskEventView]:
         records = (
             await self._session.scalars(
-                select(TaskEvent).where(TaskEvent.task_id == task_id).order_by(TaskEvent.id)
+                select(TaskEvent)
+                .where(TaskEvent.task_id == task_id)
+                .order_by(TaskEvent.created_at.desc(), TaskEvent.id.desc())
             )
         ).all()
         return [

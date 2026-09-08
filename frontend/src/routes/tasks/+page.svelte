@@ -19,7 +19,7 @@
     error = $state('');
   let creating = $state(false),
     view = $state<'board' | 'list'>('board');
-  let filters = $state<TaskFilters>({ sort: 'priority', direction: 'asc' });
+  let filters = $state<TaskFilters>({ sort: 'created', direction: 'desc' });
   let draft = $state({
     title: '',
     description: '',

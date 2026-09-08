@@ -81,7 +81,9 @@
     } else {
       const merged = new SvelteMap(messages.map((message) => [message.id, message]));
       for (const message of notes.items) merged.set(message.id, message);
-      messages = [...merged.values()].sort((a, b) => a.id - b.id);
+      messages = [...merged.values()].sort(
+        (a, b) => Date.parse(b.created_at) - Date.parse(a.created_at) || b.id - a.id
+      );
     }
   }
 
@@ -154,7 +156,7 @@
     loadingOlder = true;
     try {
       const notes = await listTaskMessages(task.id, cursor);
-      messages = [...notes.items, ...messages];
+      messages = [...messages, ...notes.items];
       cursor = notes.next_before_id;
     } catch (cause) {
       error = String(cause);

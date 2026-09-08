@@ -41,16 +41,17 @@ class SqlAlchemyTaskConversationStore:
         records = list(
             (
                 await self._session.scalars(
-                    statement.order_by(TaskMessage.id.desc()).limit(limit + 1)
+                    statement.order_by(TaskMessage.created_at.desc(), TaskMessage.id.desc()).limit(
+                        limit + 1
+                    )
                 )
             ).all()
         )
         has_more = len(records) > limit
         visible = records[:limit]
-        visible.reverse()
         return TaskMessagePage(
             [_view(record) for record in visible],
-            visible[0].id if has_more and visible else None,
+            visible[-1].id if has_more and visible else None,
         )
 
     async def add_user_message(

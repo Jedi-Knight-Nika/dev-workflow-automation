@@ -85,8 +85,8 @@ async def list_tasks(
     provider_state: str | None = Query(default=None, max_length=200),
     assigned_team_id: uuid.UUID | None = None,
     unassigned: bool = False,
-    sort: Literal["priority", "created", "updated", "due"] = "priority",
-    direction: Literal["asc", "desc"] = "asc",
+    sort: Literal["priority", "created", "updated", "due"] = "created",
+    direction: Literal["asc", "desc"] = "desc",
     queries: TaskQueries = Depends(get_task_queries),
 ) -> list[TaskRead]:
     filters = TaskListFilters(
