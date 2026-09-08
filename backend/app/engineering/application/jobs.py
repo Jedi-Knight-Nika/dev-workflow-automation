@@ -93,12 +93,23 @@ class RunEngineeringJob:
                 if secret in detail:
                     detail = detail.split(secret, 1)[0] + secret + "<redacted>"
             structlog.get_logger().warning(
-                "phase_execution_failed", action=lease.action, error_type=type(exc).__name__, detail=detail
+                "phase_execution_failed",
+                action=lease.action,
+                error_type=type(exc).__name__,
+                detail=detail,
             )
-            # SDK/transport errors can contain credentials or prompt text. Do not persist them.
-            await self.jobs.block(
-                lease, WaitReason.MISSING_CONFIGURATION, f"Execution failed: {type(exc).__name__}"
+            # Domain/configuration errors are intentionally bounded and safe to persist;
+            # this is what lets an operator fix a blocked publication instead of seeing
+            # only the unhelpful exception class. Unknown SDK/transport errors remain
+            # type-only because they may contain prompts, credentials, or provider data.
+            safe_reason = f"Execution failed: {type(exc).__name__}"
+            suspicious = any(
+                marker in detail.lower()
+                for marker in ("api_key=", "password=", "secret", "token=", "prompt")
             )
+            if isinstance(exc, ValueError) and detail and not suspicious:
+                safe_reason = f"Execution failed: {detail}"
+            await self.jobs.block(lease, WaitReason.MISSING_CONFIGURATION, safe_reason)
         finally:
             operation.cancel()
             watcher.cancel()

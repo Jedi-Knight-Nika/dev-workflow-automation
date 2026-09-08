@@ -12,6 +12,11 @@ from app.engineering.infrastructure.task_models import Job, Task, TaskEvent
 from app.platform.scheduling.states import JobState
 from app.teams.infrastructure.team_models import Team
 
+# Team concurrency limits paid/agent execution slots. Deterministic lifecycle
+# handoffs must not wait behind another Developer: validation, publication and
+# merge are safe to run while another task is coding.
+CONCURRENCY_SLOT_ACTIONS = ("INTERPRET_EVENT", "THINKER_TURN", "DEVELOPER_TURN")
+
 
 async def record_event(
     session: AsyncSession,
@@ -76,7 +81,9 @@ async def claim_next_job(
         select(func.count(func.distinct(busy_job.task_id)))
         .join(busy_task, busy_task.id == busy_job.task_id)
         .where(
-            busy_task.team_id == Team.id, busy_job.state.in_([JobState.CLAIMED, JobState.RUNNING])
+            busy_task.team_id == Team.id,
+            busy_job.state.in_([JobState.CLAIMED, JobState.RUNNING]),
+            busy_job.action.in_(CONCURRENCY_SLOT_ACTIONS),
         )
         .correlate(Team)
         .scalar_subquery()
@@ -117,7 +124,11 @@ async def claim_next_job(
     active = await session.scalar(
         select(func.count(func.distinct(Job.task_id)))
         .join(Task)
-        .where(Task.team_id == task.team_id, Job.state.in_([JobState.CLAIMED, JobState.RUNNING]))
+        .where(
+            Task.team_id == task.team_id,
+            Job.state.in_([JobState.CLAIMED, JobState.RUNNING]),
+            Job.action.in_(CONCURRENCY_SLOT_ACTIONS),
+        )
     )
     if (
         team is None

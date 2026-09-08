@@ -28,7 +28,9 @@ async def capture(
     )
     output = bytearray()
     stderr_task = (
-        asyncio.create_task(process.stderr.read(output_limit)) if include_stderr and process.stderr else None
+        asyncio.create_task(process.stderr.read(output_limit))
+        if include_stderr and process.stderr
+        else None
     )
     try:
         async with asyncio.timeout(timeout):

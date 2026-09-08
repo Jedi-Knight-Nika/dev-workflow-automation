@@ -48,3 +48,13 @@ def test_counter_survives_native_rollover_and_polling_is_not_a_loop():
         governor.command("unchanged-test", failed=True, expensive=True)
     assert governor.observe(52000, 11000)[1] == "REPEATED_TOOL_LOOP"
     assert governor.snapshot()["tokens_to_first_edit"] == 12000
+
+
+def test_cycle_and_cached_input_telemetry_is_cumulative():
+    governor = DeveloperProgressGovernor(TokenEfficiencyPolicy())
+    governor.observe(1000, 900, 700)
+    governor.observe(1800, 1200, 500)
+    snapshot = governor.snapshot()
+    assert snapshot["inference_cycle_count"] == 2
+    assert snapshot["cached_input_tokens_observed"] == 1200
+    assert snapshot["uncached_input_tokens_observed"] == 600

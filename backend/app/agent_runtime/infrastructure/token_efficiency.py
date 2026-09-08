@@ -322,10 +322,18 @@ class SqlTokenEfficiency:
             s["context_peak_tokens"] for s in samples if s.get("context_peak_tokens") is not None
         ]
         cached, inputs = total("cache_read_tokens"), total("input_tokens")
+        uncached = inputs - cached if inputs is not None and cached is not None else None
+        cycle_counts = [
+            int(s["inference_cycle_count"])
+            for s in samples
+            if s.get("inference_cycle_count") is not None
+        ]
         return {
             "task_id": str(task_id),
             "total_input_tokens": inputs,
             "cached_input_tokens": cached,
+            "uncached_input_tokens": uncached,
+            "inference_cycle_count": sum(cycle_counts) if cycle_counts else None,
             "output_tokens": total("output_tokens"),
             "tokens_to_first_edit": first,
             "peak_active_context_tokens": max(peaks) if peaks else None,

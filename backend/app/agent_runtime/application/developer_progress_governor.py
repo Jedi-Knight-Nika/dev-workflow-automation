@@ -34,10 +34,14 @@ class DeveloperProgressGovernor:
     compaction_count: int = 0
     phase: str = "DISCOVERY"
     failed_checks: dict[str, int] = field(default_factory=dict)
+    inference_cycles: int = 0
+    cached_input: int = 0
 
     def restore(self, snapshot: dict[str, Any]) -> None:
         self.total = int(snapshot.get("input_tokens_observed") or 0)
         self.first_edit = snapshot.get("tokens_to_first_edit")
+        self.cached_input = int(snapshot.get("cached_input_tokens_observed") or 0)
+        self.inference_cycles = int(snapshot.get("inference_cycle_count") or 0)
         self.last_progress = self.total - int(snapshot.get("tokens_since_last_progress") or 0)
         self.peak_context = snapshot.get("context_peak_tokens")
         self.diff_fingerprint = snapshot.get("diff_fingerprint")
@@ -84,9 +88,17 @@ class DeveloperProgressGovernor:
         if failed and expensive:
             self.repeats[fingerprint] = self.repeats.get(fingerprint, 0) + 1
 
-    def observe(self, total: int, active_context: int | None) -> tuple[list[str], str | None]:
+    def observe(
+        self,
+        total: int,
+        active_context: int | None,
+        cached_input: int | None = None,
+    ) -> tuple[list[str], str | None]:
         # Cumulative usage never resets when a native context compacts.
         self.total = max(self.total, total)
+        self.inference_cycles += 1
+        if cached_input is not None:
+            self.cached_input += cached_input
         self.active_context = active_context
         if active_context is not None:
             self.peak_context = max(self.peak_context or 0, active_context)
@@ -130,6 +142,9 @@ class DeveloperProgressGovernor:
         return {
             "policy": asdict(self.policy),
             "input_tokens_observed": self.total,
+            "cached_input_tokens_observed": self.cached_input,
+            "uncached_input_tokens_observed": max(self.total - self.cached_input, 0),
+            "inference_cycle_count": self.inference_cycles,
             "tokens_to_first_edit": self.first_edit,
             "active_context_estimate": self.active_context,
             "context_peak_tokens": self.peak_context,

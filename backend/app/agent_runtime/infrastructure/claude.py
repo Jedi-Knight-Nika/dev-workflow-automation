@@ -197,6 +197,7 @@ class ClaudeHarness:
                             warnings, stop = self.governor.observe(
                                 self.progress_offset + sum(self.usage_by_message.values()),
                                 usage.input_tokens,
+                                usage.cache_read_input_tokens,
                             )
                             self.pending_warning.extend(warnings)
                             if stop:

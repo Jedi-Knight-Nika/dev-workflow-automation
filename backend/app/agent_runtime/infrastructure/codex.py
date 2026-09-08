@@ -148,6 +148,7 @@ class CodexHarness:
                         warnings, stop = self.governor.observe(
                             self.progress_offset + (usage.input_tokens or 0),
                             payload.token_usage.last.input_tokens,
+                            usage.cache_read_input_tokens,
                         )
                         self._emit_progress()
                         if stop and not interrupted_for_budget:

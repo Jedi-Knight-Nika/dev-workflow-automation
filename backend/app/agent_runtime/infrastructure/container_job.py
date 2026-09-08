@@ -47,7 +47,9 @@ async def run_container_job(
         response.raise_for_status()
         if response.json()["StatusCode"] != 0:
             detail = await _failure_detail(client, container_id)
-            raise RuntimeError(f"Isolated operation failed; workspace retained for inspection: {detail}")
+            raise RuntimeError(
+                f"Isolated operation failed; workspace retained for inspection: {detail}"
+            )
         frames, events = DockerFrames(), []
         async with client.stream(
             "GET", f"/containers/{container_id}/logs", params={"stdout": "true"}

@@ -44,6 +44,13 @@ from app.repositories.infrastructure.models import Repository, RepositoryRuntime
 from app.teams.infrastructure.models import TeamAgentProfile
 from app.teams.infrastructure.team_models import Team
 
+# These stop reasons mean the governor cut a turn for budget/efficiency, not that
+# the Developer hit a real bug. Loop/validation-stuck reasons are deliberately
+# excluded below; they still fall through to a human WAITING_HUMAN block.
+AUTOMATIC_ROLLOVER_STOP_REASONS = frozenset(
+    {"EXPLORATION_LIMIT", "NO_PROGRESS", "CONTEXT_HARD_LIMIT", "REPEATED_COMPACTION"}
+)
+
 
 class SqlPhaseExecutor:
     def __init__(self, sessions: async_sessionmaker[AsyncSession], settings: Settings) -> None:
@@ -397,6 +404,32 @@ class SqlPhaseExecutor:
                             "Native provider authentication failed; verify the integration "
                             "and runner login before resuming this session",
                         )
+                    if (
+                        receipt.status == "interrupted"
+                        and receipt.failure_code in AUTOMATIC_ROLLOVER_STOP_REASONS
+                        and token_policy.automatic_rollover
+                        and token_policy.mode == "ENFORCE"
+                    ):
+                        try:
+                            async with self.sessions() as session:
+                                await SqlTokenEfficiency(session).rollover(
+                                    task.id,
+                                    task.requirement_version,
+                                    str(
+                                        receipt.summary
+                                        or native.checkpoint.get("summary")
+                                        or "Continue from current validated code and pending review feedback."
+                                    )[:1800],
+                                    job_id=lease.job_id,
+                                    lease_token=lease.token,
+                                )
+                        except (ValueError, RuntimeError, OSError) as exc:
+                            raise PhaseBlocked(
+                                WaitReason.MISSING_REQUIREMENT,
+                                f"Efficiency checkpoint blocked ({receipt.failure_code}); "
+                                "retained native context",
+                            ) from exc
+                        return await self.execute(lease)
                     raise PhaseBlocked(
                         WaitReason.MISSING_REQUIREMENT,
                         "Developer did not finish; inspect its preserved session"
