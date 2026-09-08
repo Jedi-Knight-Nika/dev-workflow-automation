@@ -125,7 +125,7 @@
       <strong>{t('teamsPage.independentLanes')}</strong>
       <p>{t('teamsPage.independentLanesDescription')}</p>
     </div>
-    <button class="create-button" onclick={() => void open()}>
+    <button class="create-button accent-action" onclick={() => void open()}>
       <span aria-hidden="true">+</span>
       {t('teamsPage.createTeam')}
     </button>
@@ -240,7 +240,9 @@
             {/if}
             <span
               class="button-help"
-              title={team.execution_paused ? t('teamsPage.executionPaused') : t('teamsPage.stopHelp')}
+              title={team.execution_paused
+                ? t('teamsPage.executionPaused')
+                : t('teamsPage.stopHelp')}
             >
               <button
                 class="stop"
@@ -280,7 +282,11 @@
     <header>
       <div>
         <span>{t('teamsPage.configEyebrow')}</span>
-        <h2>{editing ? t('teamsPage.editTeam', { name: editing.name }) : t('teamsPage.createTeamTitle')}</h2>
+        <h2>
+          {editing
+            ? t('teamsPage.editTeam', { name: editing.name })
+            : t('teamsPage.createTeamTitle')}
+        </h2>
       </div>
       <button onclick={() => (showForm = false)}>×</button>
     </header>
@@ -366,11 +372,11 @@
     <footer>
       <button class="cancel" onclick={() => (showForm = false)}>{t('teamsPage.cancel')}</button>
       <div class="save-group">
-        <span
-          >{editing
-            ? t('teamsPage.updateTeamSettings')
-            : t('teamsPage.createTeamTitle')}</span
-        ><button class="primary" disabled={busy || !name.trim()} onclick={() => void save()}
+        <span>{editing ? t('teamsPage.updateTeamSettings') : t('teamsPage.createTeamTitle')}</span
+        ><button
+          class="primary accent-action"
+          disabled={busy || !name.trim()}
+          onclick={() => void save()}
           >{busy
             ? t('teamsPage.saving')
             : editing
@@ -387,7 +393,7 @@
     border-radius: 0.55rem;
     background: var(--color-brand);
     padding: 0.65rem 0.9rem;
-    color: white;
+    color: var(--color-on-brand);
     font-size: 0.8rem;
     font-weight: 700;
   }
@@ -417,14 +423,14 @@
     gap: 0.5rem;
     border: 1px solid color-mix(in srgb, var(--color-brand-2) 45%, var(--color-brand));
     border-radius: 0.6rem;
-    background: linear-gradient(120deg, var(--color-brand), var(--color-brand-2));
+    background: linear-gradient(120deg in srgb, var(--color-action-start), var(--color-action-end));
     padding: 0.62rem 0.85rem;
-    color: #08050d;
+    color: var(--color-on-brand);
     font-size: 0.76rem;
     font-weight: 800;
     box-shadow: 0 8px 22px color-mix(in srgb, var(--color-brand) 22%, transparent);
     transition:
-      filter 150ms ease,
+      box-shadow 150ms ease,
       transform 150ms ease;
   }
   .create-button span {
@@ -432,7 +438,7 @@
     line-height: 0;
   }
   .create-button:hover {
-    filter: brightness(1.08);
+    box-shadow: 0 8px 24px color-mix(in srgb, var(--color-brand) 40%, transparent);
     transform: translateY(-1px);
   }
   .team-grid {

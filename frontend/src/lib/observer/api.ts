@@ -4,6 +4,7 @@ import type {
   Conversation,
   FocusMode,
   ObserverMessage,
+  ObserverConfiguration,
   ObserverScope,
   ObserverStatus,
   ObserverStreamEvent
@@ -17,10 +18,12 @@ export function scopeQuery(scope: ObserverScope): string {
 }
 
 export const observerApi = {
-  configuration: () =>
-    api<{ enabled: boolean; local_ai_enabled: boolean; model: string; memory_reserve_mb: number }>(
-      '/observer/configuration'
-    ),
+  configuration: () => api<ObserverConfiguration>('/observer/configuration'),
+  rename: (display_name: string) =>
+    api<ObserverConfiguration>('/observer/configuration', {
+      method: 'PUT',
+      body: JSON.stringify({ display_name })
+    }),
   setEnabled: (enabled: boolean) =>
     api<{ enabled: boolean }>('/observer/configuration', {
       method: 'PUT',
@@ -69,7 +72,7 @@ export async function streamAnswer(
     signal,
     headers: { Accept: 'text/event-stream' }
   });
-  if (!response.ok || !response.body) throw new Error('Observer stream unavailable.');
+  if (!response.ok || !response.body) throw new Error('Assistant stream unavailable.');
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
@@ -79,7 +82,7 @@ export async function streamAnswer(
       const chunk = await reader.read();
       if (chunk.done) break;
       buffer += decoder.decode(chunk.value, { stream: true }).replaceAll('\r\n', '\n');
-      if (buffer.length > 65536) throw new Error('Observer response exceeded its display limit.');
+      if (buffer.length > 65536) throw new Error('Assistant response exceeded its display limit.');
       let boundary: number;
       while ((boundary = buffer.indexOf('\n\n')) >= 0) {
         const frame = buffer.slice(0, boundary);
@@ -97,7 +100,7 @@ export async function streamAnswer(
       }
     }
     if (!completed && !signal.aborted)
-      throw new Error('Observer disconnected. Your saved conversation is available in history.');
+      throw new Error('Assistant disconnected. Your saved conversation is available in history.');
   } finally {
     await reader.cancel().catch(() => {});
     reader.releaseLock();

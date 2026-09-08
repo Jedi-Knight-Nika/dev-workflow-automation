@@ -29,14 +29,11 @@ export function initTheme(): void {
   }
   if (stored === 'light' || stored === 'dark') {
     theme = stored;
-    return;
+  } else {
+    const prefersLight =
+      typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: light)').matches;
+    theme = prefersLight ? 'light' : 'dark';
   }
-  const prefersLight =
-    typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: light)').matches;
-  theme = prefersLight ? 'light' : 'dark';
-  // No stored choice yet: the no-FOUC inline script in app.html only acts on a
-  // stored value, so the system-preference fallback here must also update the
-  // DOM attribute itself, or the toggle icon and the rendered theme disagree.
   if (typeof document !== 'undefined') {
     document.documentElement.dataset.theme = theme;
   }

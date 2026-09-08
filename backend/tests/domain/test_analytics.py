@@ -1,7 +1,9 @@
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from unittest.mock import AsyncMock
 
+from app.analytics.application.dashboard import BuildDashboard
 from app.analytics.domain.efficiency import RunFact, TaskFact, quantile, run_totals, task_metrics
 from app.analytics.domain.forecast import forecast
 
@@ -89,3 +91,26 @@ def test_quantiles_are_interpolated_and_empty_is_not_zero():
     assert quantile([], 0.5) is None
     assert quantile([1, 3], 0.5) == 2
     assert quantile([1, 3], 0.9) == 2.8
+
+
+async def test_dashboard_periods_consistently_exclude_future_dated_receipts():
+    now = datetime.now(UTC)
+    facts = AsyncMock()
+    facts.tasks.return_value = [
+        task(
+            completed_at=now - timedelta(minutes=1),
+            runs=[
+                run(started_at=now - timedelta(minutes=2), finished_at=now - timedelta(minutes=1)),
+                run(
+                    Decimal(1000),
+                    started_at=now + timedelta(days=1),
+                    finished_at=now + timedelta(days=1),
+                ),
+            ],
+        )
+    ]
+    value = await BuildDashboard(facts, forecasts_enabled=False, minimum=5).dashboard(30)
+    assert value["totals"]["known_cost_usd"] == "1"
+    assert value["month_totals"]["known_cost_usd"] == "1"
+    assert value["agents"][0]["known_cost_usd"] == "1"
+    assert len(value["daily"]) == 1

@@ -14,6 +14,10 @@
   --color-warning: #ffb648;
   --color-brand: #b26bff;
   --color-brand-2: #3fd8ff;
+  --color-on-brand: #000000;
+  --color-on-accent: #000000;
+  --color-action-start: var(--color-brand);
+  --color-action-end: var(--color-brand);
   --color-bg: var(--color-panel-alt);
   --color-soft: color-mix(in srgb, var(--color-brand) 8%, var(--color-panel-alt));
 
@@ -48,6 +52,7 @@
     --color-warning: #b45309;
     --color-brand: #7c3aed;
     --color-brand-2: #0891b2;
+    --color-on-brand: #ffffff;
     color-scheme: light;
   }
 }
@@ -67,6 +72,7 @@
   --color-warning: #b45309;
   --color-brand: #7c3aed;
   --color-brand-2: #0891b2;
+  --color-on-brand: #ffffff;
   color-scheme: light;
 }
 
@@ -418,7 +424,30 @@
     @apply min-h-9 cursor-pointer rounded-lg border px-3 py-2 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-40;
   }
   .btn-primary {
-    @apply border-brand bg-brand text-white hover:opacity-90;
+    @apply border-brand bg-brand text-on-brand;
+    transition-property: border-color, box-shadow;
+  }
+  .button-accent-gradient {
+    background: linear-gradient(120deg in srgb, var(--color-action-start), var(--color-action-end));
+    color: var(--color-on-brand);
+  }
+  /* A crossfade between contrasting text colors passes through unreadable gray.
+     Keep ink and fill synchronized, including labels nested inside a button. */
+  .accent-action,
+  .accent-action *,
+  .btn-primary,
+  .btn-primary *,
+  .button-accent-gradient,
+  .button-accent-gradient * {
+    transition-property: transform, border-color, box-shadow;
+  }
+  .accent-action:active,
+  .btn-primary:active,
+  .button-accent-gradient:active {
+    filter: none;
+  }
+  .btn-primary:enabled:hover {
+    box-shadow: 0 0 16px -5px var(--color-brand);
   }
   .btn-secondary {
     @apply border-line bg-panel text-heading hover:border-brand;

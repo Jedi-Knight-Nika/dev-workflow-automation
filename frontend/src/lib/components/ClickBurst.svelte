@@ -8,7 +8,7 @@
   let nextId = 0;
   const MAX_BURSTS = 6;
   const LIFETIME_MS = 720;
-  const JARVIS_LIFETIME_MS = 520;
+  const JARVIS_LIFETIME_MS = 650;
 
   const jarvis = $derived(getDisplayMode() === 'jarvis');
 
@@ -38,11 +38,11 @@
   >
     {#if jarvis}
       <span
-        class="absolute lock"
+        class="absolute rounded-full ping"
         style="--rc: {burst.color}; animation-duration: {JARVIS_LIFETIME_MS}ms;"
       ></span>
       <span
-        class="absolute lock-dot"
+        class="absolute rounded-full ping-core"
         style="--rc: {burst.color}; animation-duration: {JARVIS_LIFETIME_MS}ms;"
       ></span>
     {:else}
@@ -105,48 +105,48 @@
     }
   }
 
-  .lock {
-    top: -10px;
-    left: -10px;
-    width: 20px;
-    height: 20px;
-    border: 1.5px solid var(--rc);
-    box-shadow: 0 0 8px 1px color-mix(in srgb, var(--rc) 55%, transparent);
-    animation-name: -global-jarvis-click-lock;
+  .ping {
+    top: -1px;
+    left: -1px;
+    width: 2px;
+    height: 2px;
+    border: 1px solid var(--rc);
+    box-shadow: 0 0 6px 0 color-mix(in srgb, var(--rc) 50%, transparent);
+    animation-name: -global-jarvis-click-ping;
     animation-timing-function: cubic-bezier(0.16, 0.84, 0.3, 1);
     animation-fill-mode: forwards;
   }
-  .lock-dot {
-    top: -1.5px;
-    left: -1.5px;
-    width: 3px;
-    height: 3px;
-    border-radius: 50%;
-    background: var(--rc);
-    box-shadow: 0 0 6px 1px color-mix(in srgb, var(--rc) 70%, transparent);
-    animation-name: -global-jarvis-click-dot;
+  .ping-core {
+    top: -2.5px;
+    left: -2.5px;
+    width: 5px;
+    height: 5px;
+    background: radial-gradient(circle, var(--rc), transparent 70%);
+    animation-name: -global-jarvis-click-core;
     animation-timing-function: ease-out;
     animation-fill-mode: forwards;
   }
-  @keyframes -global-jarvis-click-lock {
+  @keyframes -global-jarvis-click-ping {
     0% {
-      transform: scale(1.9);
-      opacity: 0;
-    }
-    30% {
-      opacity: 1;
+      transform: scale(1);
+      opacity: 0.9;
     }
     100% {
-      transform: scale(1);
+      transform: scale(13);
       opacity: 0;
     }
   }
-  @keyframes -global-jarvis-click-dot {
+  @keyframes -global-jarvis-click-core {
     0% {
       opacity: 1;
+      transform: scale(1);
+    }
+    60% {
+      opacity: 0.5;
     }
     100% {
       opacity: 0;
+      transform: scale(2.2);
     }
   }
 </style>

@@ -54,7 +54,7 @@ class Observer:
         if reason is None and self.model:
             ready = await self.model.available()
             if not ready:
-                reason = "Local Observer model is unavailable or not provisioned. No model is downloaded automatically."
+                reason = "The local assistant model is unavailable or not provisioned. No model is downloaded automatically."
         return {
             "enabled": True,
             "ai_available": ready,
@@ -122,7 +122,7 @@ class Observer:
         if not await self.store.claim_question(owner, identifier):
             yield {
                 "type": "observer.failed",
-                "message": "Observer is busy or this question was interrupted. Open history or ask again.",
+                "message": "The assistant is busy or this question was interrupted. Open history or ask again.",
             }
             return
         yield {"type": "observer.started"}
@@ -238,7 +238,7 @@ class Observer:
                     {"status": "INTERRUPTED", "prompt_eval_count": None, "eval_count": None},
                 )
             reason = (
-                "Observer reached its time or availability limit. No engineering action was taken."
+                "The assistant reached its time or availability limit. No engineering action was taken."
             )
         facts = evidence[:8]
         incomplete = [e for e in evidence[8:] if not e.complete][:2]

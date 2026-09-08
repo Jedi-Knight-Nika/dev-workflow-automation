@@ -171,6 +171,21 @@ def test_adapters_never_import_http_contracts():
         assert not any("app.interfaces" in name for name in imported_modules(path)), path
 
 
+@pytest.mark.parametrize("module", ["domain.py", "application.py", "ports.py"])
+def test_companion_inner_modules_depend_only_on_their_own_contracts(module):
+    path = BACKEND_ROOT / "app/observability/observer" / module
+    for imported in imported_modules(path):
+        assert imported.split(".")[0] not in {"fastapi", "sqlalchemy", "httpx", "asyncpg"}, path
+        if imported.startswith("app."):
+            assert any(
+                imported == prefix or imported.startswith(prefix + ".")
+                for prefix in (
+                    "app.observability.observer.domain",
+                    "app.observability.observer.ports",
+                )
+            ), (path, imported)
+
+
 def test_no_parallel_horizontal_runtime():
     root = BACKEND_ROOT / "app"
     for folder in [

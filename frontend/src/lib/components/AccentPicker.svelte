@@ -15,37 +15,6 @@
     return t(`accent.${id}` as const);
   }
 
-  let track: HTMLDivElement;
-  let dragging = $state(false);
-
-  function hueFromPointer(clientX: number): number {
-    const rect = track.getBoundingClientRect();
-    const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
-    return Math.round(ratio * 360);
-  }
-
-  function handleMove(event: PointerEvent) {
-    setCustomHue(hueFromPointer(event.clientX));
-  }
-
-  function handleUp() {
-    dragging = false;
-    window.removeEventListener('pointermove', handleMove);
-    window.removeEventListener('pointerup', handleUp);
-  }
-
-  function startDrag(event: PointerEvent) {
-    event.preventDefault();
-    dragging = true;
-    setCustomHue(hueFromPointer(event.clientX));
-    window.addEventListener('pointermove', handleMove);
-    window.addEventListener('pointerup', handleUp);
-  }
-
-  function nudge(delta: number) {
-    setCustomHue(getCustomHue() + delta);
-  }
-
   const customPreview = $derived(customHuePreview(getCustomHue()));
 </script>
 
@@ -68,34 +37,36 @@
         <span class="label">{label(id)}</span>
       </button>
     {/each}
+    <button
+      type="button"
+      class="swatch cycle"
+      class:active={getAccentId() === 'cycle'}
+      style="--swatch-a: var(--color-brand); --swatch-b: var(--color-brand-2)"
+      onclick={() => setAccentId('cycle')}
+      aria-pressed={getAccentId() === 'cycle'}
+      aria-describedby="accent-cycle-hint"
+    >
+      <span class="dot" aria-hidden="true"></span>
+      <span class="label">{t('accent.cycle')}</span>
+    </button>
   </div>
+  <p id="accent-cycle-hint" class="cycle-hint">{t('accent.cycleHint')}</p>
   <div class="custom" class:active={getAccentId() === 'custom'}>
     <div class="custom-header">
       <span class="custom-label">{t('accent.customLabel')}</span>
       <span class="custom-hint">{t('accent.customHint')}</span>
     </div>
-    <div
+    <input
+      type="range"
       class="track"
-      class:dragging
-      bind:this={track}
-      onpointerdown={startDrag}
-      role="slider"
-      tabindex="0"
       aria-label={t('accent.hueSlider')}
-      aria-valuemin={0}
-      aria-valuemax={360}
-      aria-valuenow={getCustomHue()}
-      onkeydown={(event) => {
-        if (event.key === 'ArrowRight' || event.key === 'ArrowUp') nudge(4);
-        else if (event.key === 'ArrowLeft' || event.key === 'ArrowDown') nudge(-4);
-      }}
-    >
-      <div
-        class="handle"
-        class:dragging
-        style={`left: ${(getCustomHue() / 360) * 100}%; --swatch-a: ${customPreview.brand}; --swatch-b: ${customPreview.brand2};`}
-      ></div>
-    </div>
+      min="0"
+      max="360"
+      step="1"
+      value={getCustomHue()}
+      oninput={(event) => setCustomHue(event.currentTarget.valueAsNumber)}
+      style={`--swatch-a: ${customPreview.brand}; --swatch-b: ${customPreview.brand2};`}
+    />
   </div>
 </section>
 
@@ -156,6 +127,18 @@
   .label {
     font-size: 0.8rem;
   }
+  .cycle .dot {
+    background: conic-gradient(#b26bff, #3fa9ff, #4ade80, #fbbf24, #fb7185, #2dd4bf, #b26bff);
+  }
+  .cycle-hint {
+    margin-top: 0.75rem;
+    font-size: 0.75rem;
+  }
+  .swatch:focus-visible,
+  .track:focus-visible {
+    outline: 2px solid var(--color-heading);
+    outline-offset: 4px;
+  }
 
   .custom {
     margin-top: 1.1rem;
@@ -185,7 +168,10 @@
     color: var(--color-muted);
   }
   .track {
-    position: relative;
+    appearance: none;
+    display: block;
+    width: 100%;
+    margin: 0.35rem 0;
     height: 1.1rem;
     border-radius: 999px;
     background: linear-gradient(
@@ -202,16 +188,11 @@
     touch-action: none;
     box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-line) 80%, transparent);
   }
-  .track.dragging {
-    cursor: grabbing;
-  }
-  .handle {
-    position: absolute;
-    top: 50%;
+  .track::-webkit-slider-thumb {
+    appearance: none;
     width: 1.6rem;
     height: 1.6rem;
     border-radius: 50%;
-    transform: translate(-50%, -50%);
     background: linear-gradient(135deg, var(--swatch-a), var(--swatch-b));
     border: 2px solid white;
     box-shadow:
@@ -220,10 +201,13 @@
     cursor: grab;
     transition: box-shadow 0.2s var(--ease-smooth);
   }
-  .handle.dragging {
-    cursor: grabbing;
-    box-shadow:
-      0 0 0 2px color-mix(in srgb, var(--swatch-a) 75%, transparent),
-      0 0 22px -2px color-mix(in srgb, var(--swatch-a) 85%, transparent);
+  .track::-moz-range-thumb {
+    width: 1.4rem;
+    height: 1.4rem;
+    border-radius: 50%;
+    background: linear-gradient(135deg, var(--swatch-a), var(--swatch-b));
+    border: 2px solid white;
+    box-shadow: 0 0 0 1px var(--color-line);
+    cursor: grab;
   }
 </style>

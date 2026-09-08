@@ -2,30 +2,30 @@
   import { page } from '$app/state';
   import { resolve } from '$app/paths';
   import { browser } from '$app/environment';
-  import { onMount } from 'svelte';
+  import { onMount, untrack } from 'svelte';
   import { fade } from 'svelte/transition';
   import type { Snippet } from 'svelte';
   import MobileNav from '$lib/components/MobileNav.svelte';
   import ObserverShell from '$lib/observer/ObserverShell.svelte';
-  import ThemeToggle from '$lib/components/ThemeToggle.svelte';
-  import LanguageToggle from '$lib/components/LanguageToggle.svelte';
   import ClickBurst from '$lib/components/ClickBurst.svelte';
   import JarvisOverlay from '$lib/components/JarvisOverlay.svelte';
   import { NAV_ITEMS, isActiveNavItem } from '$lib/nav';
-  import { t } from '$lib/i18n/index.svelte';
-  import { getTheme } from '$lib/theme.svelte';
+  import { t, initLocale } from '$lib/i18n/index.svelte';
+  import { getTheme, initTheme } from '$lib/theme.svelte';
   import { initAccent, reapplyAccentForTheme } from '$lib/accent.svelte';
   import { getDisplayMode, initDisplayMode } from '$lib/display.svelte';
 
   let { children }: { children: Snippet } = $props();
 
   onMount(() => {
-    initAccent();
+    initTheme();
+    initLocale();
     initDisplayMode();
+    return initAccent();
   });
   $effect(() => {
     getTheme();
-    reapplyAccentForTheme();
+    untrack(reapplyAccentForTheme);
   });
 
   const reducedMotion = browser && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -120,13 +120,9 @@
         >
       {/each}
     </nav>
-    <div class="border-line flex items-center justify-between gap-2 border-t px-4 py-3">
-      <span class="text-muted text-xs">{t('nav.theme')}</span>
-      <div class="flex items-center gap-2">
-        <LanguageToggle />
-        <ThemeToggle />
-      </div>
-    </div>
+    <footer class="border-line text-muted border-t px-5 py-4 text-[11px] tracking-wide">
+      <small>© Nikolla_L</small>
+    </footer>
     <div
       role="separator"
       aria-orientation="vertical"

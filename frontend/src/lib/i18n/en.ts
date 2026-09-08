@@ -667,6 +667,12 @@ export const en = {
   'monitoring.saving': 'Saving…',
   'monitoring.save': 'Save monitoring preferences',
 
+  'appearance.title': 'Appearance & language',
+  'appearance.description':
+    'Saved automatically in this browser. These controls only change the interface.',
+  'accent.cycle': 'Cycle colors',
+  'accent.cycleHint':
+    'Cycle colors rotates through the presets every 8 seconds. It pauses in hidden tabs and with reduced motion. Pick a color to stop.',
   'accent.title': 'Accent color',
   'accent.description':
     'Choose the brand hue used for gradients, glow, and highlights across the app. Light and dark mode stay as they are.',

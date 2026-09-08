@@ -272,15 +272,19 @@ class SqlObserverStore:
             ]
 
     async def preference(self, owner: str, changes: dict[str, Any] | None = None) -> dict[str, Any]:
+        if changes is None:
+            # Status/briefing reads must not create rows or contend with settings writes.
+            async with self.sessions() as session:
+                row = await session.get(ObserverPreference, owner)
+                return {"focus": "normal", "last_seen_at": None, **(row.values if row else {})}
         async with self.sessions() as session, session.begin():
             await session.execute(
                 insert(ObserverPreference).values(owner=owner, values={}).on_conflict_do_nothing()
             )
             row = await session.get(ObserverPreference, owner, with_for_update=True)
             assert row is not None
-            if changes is not None:
-                row.values = {**row.values, **changes}
-                row.updated_at = datetime.now(UTC)
+            row.values = {**row.values, **changes}
+            row.updated_at = datetime.now(UTC)
             return {"focus": "normal", "last_seen_at": None, **row.values}
 
     async def receipt(self, question: str, receipt: dict[str, Any]) -> None:

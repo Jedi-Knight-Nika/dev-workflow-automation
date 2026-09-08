@@ -137,6 +137,7 @@
     >
     <div class="periods">
       {#each [['today', t('cockpit.periodToday')], ['7d', t('cockpit.period7d')], ['30d', t('cockpit.period30d')]] as item (item[0])}<button
+          class="accent-action"
           class:active={period === item[0]}
           onclick={() => void selectPeriod(item[0] as typeof period)}>{item[1]}</button
         >{/each}
@@ -230,10 +231,13 @@
             ></a
           >
           <footer>
-            <div><span>{t('cockpit.elapsedLabel')}</span><b>{elapsed(dashboard.active_worker.started_at)}</b></div>
             <div>
-              <span title={t('cockpit.recordedTokensTitle')}>{t('cockpit.recordedTokens')}</span
-              ><b
+              <span>{t('cockpit.elapsedLabel')}</span><b
+                >{elapsed(dashboard.active_worker.started_at)}</b
+              >
+            </div>
+            <div>
+              <span title={t('cockpit.recordedTokensTitle')}>{t('cockpit.recordedTokens')}</span><b
                 >{compact.format(
                   dashboard.active_worker.input_tokens + dashboard.active_worker.output_tokens
                 )}</b
@@ -454,7 +458,9 @@
                 >{:else if meter[0] === 'disk'}<small
                   >{bytes(telemetry.disk_used_bytes)} / {bytes(telemetry.disk_total_bytes)}</small
                 >{:else}<small
-                  >{t('cockpit.load', { value: telemetry.load_average?.[0].toFixed(2) ?? '—' })}</small
+                  >{t('cockpit.load', {
+                    value: telemetry.load_average?.[0].toFixed(2) ?? '—'
+                  })}</small
                 >{/if}
             </article>
           {/each}
@@ -525,7 +531,7 @@
   }
   .periods .active {
     background: var(--color-brand);
-    color: white;
+    color: var(--color-on-brand);
   }
   .panel,
   .metric,
@@ -660,7 +666,13 @@
     color: var(--color-muted);
   }
   .worker {
-    background: radial-gradient(circle at 50% 35%, color-mix(in srgb, var(--color-brand) 9%, transparent), transparent 45%), var(--color-panel);
+    background:
+      radial-gradient(
+        circle at 50% 35%,
+        color-mix(in srgb, var(--color-brand) 9%, transparent),
+        transparent 45%
+      ),
+      var(--color-panel);
   }
   .worker header > i {
     width: 7px;

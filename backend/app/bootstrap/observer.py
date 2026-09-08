@@ -84,6 +84,7 @@ class ObserverRuntime:
         values = await get_observer().store.preference("deployment", changes)
         config = {
             "enabled": settings.observer_enabled and values.get("enabled", True),
+            "display_name": values.get("display_name", "Jarvis"),
             "local_ai_enabled": settings.observer_local_ai_enabled,
             "model": settings.observer_model,
             "memory_reserve_mb": settings.observer_min_available_memory_mb,

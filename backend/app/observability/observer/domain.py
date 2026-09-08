@@ -124,8 +124,15 @@ def detect(snapshot: Snapshot, thresholds: dict[str, int]) -> list[Attention]:
             None,
         )
         current_pressure = number(snapshot.host.get(pressure_metric)) if pressure_metric else None
-        cleared_pressure = current_pressure is not None and current_pressure < min(
-            thresholds.values()
+        pressure_threshold = thresholds.get(
+            {"host_cpu": "cpu", "host_memory": "memory", "host_disk": "disk"}.get(
+                pressure_metric or "", ""
+            )
+        )
+        cleared_pressure = (
+            current_pressure is not None
+            and pressure_threshold is not None
+            and current_pressure < pressure_threshold
         )
         historical = (kind == "UNAVAILABLE" and running) or cleared_pressure
         result.append(

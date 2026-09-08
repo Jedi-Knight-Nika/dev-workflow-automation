@@ -1,3 +1,11 @@
+export interface ObserverConfiguration {
+  enabled: boolean;
+  display_name: string;
+  local_ai_enabled: boolean;
+  model: string;
+  memory_reserve_mb: number;
+}
+
 export type ObserverScope = {
   page: 'DASHBOARD' | 'TASK' | 'TEAM';
   task_id?: string;

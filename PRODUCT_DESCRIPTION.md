@@ -202,6 +202,8 @@ Operational paths are `/health/live`, `/health/ready`, `/metrics`, and signed `/
 
 ## Frontend
 
+Settings owns language (English/Georgian), light/dark theme, Default/Jarvis display mode, and accent controls. These browser-local preferences save immediately; the sidebar footer carries `© Nikolla_L`. Accent selection supports six presets, a native keyboard/touch hue slider, and an optional cycle through the presets every eight seconds. Cycling uses one shell-owned timer, pauses in hidden tabs or reduced-motion mode, and stops on manual color selection. It makes no backend or model calls. Solid accent buttons choose a contrasting foreground; primary gradients soften their secondary stop when necessary to keep labels readable in either theme without changing decorative colors.
+
 The SvelteKit operator console uses one API helper and typed services. The dashboard contains selective CPU/RAM/budget/disk gauges, a service leaderboard, AI cost and efficiency, agent comparison, forecasts, reliability, incidents, and active runners. Exact values accompany gauges; trends use lines, comparisons use tables/bars, and missing data is visibly unavailable.
 
 The Team page has a fixed read-only lifecycle canvas with current task, model, tokens, cost, resources, and elapsed time. Waiting stages show zero AI activity. Task detail exposes overview, execution, receipts, token efficiency, resources, review, incidents, and forecast-versus-actual evidence.
@@ -282,9 +284,11 @@ Production acceptance additionally requires representative authorized tickets: s
 
 Token optimization is judged by completed-task rate, median and high-percentile total/uncached input, peak active context, cost, intervention, and wall time. Monitoring overhead is measured on the same workload enabled and disabled. Passing local checks does not establish provider invoice accuracy, universal cost savings, unattended reliability, or every-repository support; those claims require recorded real-task evidence.
 
-## Observer: ambient operations companion
+## Jarvis: ambient operations companion
 
-Observer is an optional read-only operations feature in the application shell. It combines deterministic attention rules, bounded product queries, saved conversations and a small animated particle halo. It is not an engineering role, does not buy provider calls and cannot issue engineering commands. Its failures do not change task execution, Team budgets, native sessions, validation or merge gates.
+Jarvis is the default display name of the optional read-only operations companion in the application shell. Settings → Jarvis assistant → Assistant name lets the operator save another name (1–40 characters). The deployment-wide name is stored in the existing companion preferences, survives restarts, and updates the launcher, panel, conversation labels and Settings heading across same-browser tabs. Renaming while disabled does not enable the assistant. It is presentation metadata, never a model instruction, Team role or Developer session setting. Technical Observer module names, APIs, event names and stored history remain stable for integrations.
+
+The companion combines deterministic attention rules, bounded product queries, saved conversations and a small animated particle halo. It is not an engineering role, does not buy provider calls and cannot issue engineering commands. Its failures do not change task execution, Team budgets, native sessions, validation or merge gates.
 
 ### Ownership and extraction boundary
 
@@ -326,7 +330,7 @@ The memory setting is minimum available headroom for model weights, context and 
 
 ### Master switch and shutdown behavior
 
-Settings → Observer assistant has a persisted master on/off switch. Turning it off stops the controller's detection task, cancels active Observer question/inference tasks, rejects new Observer work, clears its cached projections and removes frontend polling, animation and panel activity. Conversations are retained for re-enablement. Same-browser tabs receive the change through BroadcastChannel; other connected clients discover the switch on their next bounded status request and then stop polling.
+Settings → Jarvis assistant (or its chosen name) has a persisted master on/off switch. Turning it off stops the controller's detection task, cancels active Observer question/inference tasks, rejects new Observer work, clears its cached projections and removes frontend polling, animation and panel activity. Conversations are retained for re-enablement. Same-browser tabs receive the change through BroadcastChannel; other connected clients discover the switch on their next bounded status request and then stop polling.
 
 Re-enablement is push-driven using PostgreSQL LISTEN/NOTIFY. The disabled feature has no recurring detection or model timer. One idle configuration-listener connection per API/controller process remains so the Settings switch can wake it; loaded application code and stored records are not physically removed. Setting `OBSERVER_ENABLED=false` at deployment and restarting also removes that listener. Shared Ollama, Interpreter, Prometheus and Team workflows are not stopped by an Observer switch. In-flight local responses are cancelled and unknown interrupted usage remains unknown, never fabricated as zero.
 
@@ -345,6 +349,14 @@ Local model receipts are separate from paid `ai_runs` and never enter Team spend
 Focused checks cover capacity/missing-data behavior, read-only routing, input/scope bounds, invented fact rejection, deterministic briefings, master-switch cancellation, PostgreSQL hold/dedupe/snooze/resolution, conversation isolation and migration metadata. Browser checks exercise grounded chat/SSE, saved history, desktop/mobile layouts and disabled-state polling. No paid model task is needed for these checks.
 
 Production acceptance remains separate: complete the engineering and monitoring gates, benchmark at least fifty representative local-model questions, measure shared-host interference and animation performance, and tune notification noise during dogfood. Broader statistical anomaly families, richer natural-language synthesis, automatic daily briefings and voice are not claimed as accepted by these initial checks. There is no voice/microphone access, model fine-tuning, new agent role or mandatory external animation runtime.
+
+## Backend maintenance review
+
+The backend review covers domain/application boundaries, leased execution and cancellation, spending admission/receipts, context-governor and checkpoint contracts, delivery gates, integration adapters, monitoring, analytics and migrations. Safe corrections remove writes/row locks from assistant preference reads, use the matching resource threshold when deciding whether an incident recovered, reject empty or non-finite-timestamp monitoring series, and exclude future-dated receipts from current-window cost charts. No Developer prompt, harness policy, token threshold, reservation or merge rule is changed by this cleanup. Companion domain/application imports now have an explicit architecture guard as well.
+
+Validation: the seven-revision chain upgrades an empty disposable PostgreSQL database and Alembic detects no schema/model drift. The Linux backend suite passes 445 tests with 22 opt-in Docker/native-SDK tests skipped; local lint and typing cover all 279 source files. The frontend suite passes 39 tests plus lint/type checks. Disposable test databases are removed afterward; application records are not reset. These checks are regression evidence, not a new paid-task or real-SDK benchmark.
+
+Two existing deployment/upgrade cautions remain outside automatic cleanup: the local PostgreSQL `template1` database reports collation 2.36 against runtime 2.41 (the application database itself reports matching 2.41); and the historical canonical-identifiers migration rewrites stored version-prefixed task branch names without renaming external Git refs. Existing migration history and live Git branches are not rewritten during this review. Older deployments crossing that historical migration must reconcile published branch identities with GitHub before resuming delivery; template maintenance requires a deliberate database administration step, not an application reset.
 
 ## Final operating rule
 

@@ -190,7 +190,9 @@
       </div>
       <footer>
         <span>Policy revision {policy.version}</span>
-        <button disabled={busy}>{busy ? 'Saving…' : 'Save automation policy'}</button>
+        <button class="accent-action" disabled={busy}
+          >{busy ? 'Saving…' : 'Save automation policy'}</button
+        >
       </footer>
     </form>
   {/if}
@@ -449,12 +451,8 @@
     border: 1px solid color-mix(in srgb, var(--color-accent) 65%, transparent);
     border-radius: 8px;
     padding: 0.7rem 1.1rem;
-    background: linear-gradient(
-      135deg,
-      color-mix(in srgb, var(--color-brand) 75%, #111827),
-      color-mix(in srgb, var(--color-accent) 60%, #111827)
-    );
-    color: white;
+    background: linear-gradient(135deg in srgb, var(--color-action-start), var(--color-action-end));
+    color: var(--color-on-brand);
     cursor: pointer;
     font-weight: 750;
     box-shadow: 0 0 18px -7px var(--color-accent);

@@ -5,6 +5,7 @@ import hashlib
 import json
 import re
 import secrets
+import unicodedata
 from collections.abc import AsyncIterator
 from datetime import datetime
 from typing import Any, Literal
@@ -97,8 +98,21 @@ router = APIRouter(prefix="/observer", tags=["observer"])
 
 
 class ConfigurationInput(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-    enabled: bool
+    model_config = ConfigDict(extra="forbid", strict=True, str_strip_whitespace=True)
+    enabled: bool | None = None
+    display_name: str | None = Field(default=None, min_length=1, max_length=40)
+
+    @model_validator(mode="after")
+    def validate_changes(self) -> "ConfigurationInput":
+        if not self.model_fields_set or any(
+            getattr(self, field) is None for field in self.model_fields_set
+        ):
+            raise ValueError("Provide a name or enabled setting; null is not a setting")
+        if self.display_name and any(
+            unicodedata.category(char).startswith("C") for char in self.display_name
+        ):
+            raise ValueError("The assistant name cannot contain control characters")
+        return self
 
 
 @router.get("/configuration")
@@ -108,7 +122,7 @@ async def configuration() -> dict[str, object]:
 
 @router.put("/configuration")
 async def save_configuration(body: ConfigurationInput) -> dict[str, object]:
-    return await observer_runtime.configure({"enabled": body.enabled})
+    return await observer_runtime.configure(body.model_dump(exclude_unset=True))
 
 
 def scope_query(task_id: UUID | None = None, team_id: UUID | None = None) -> Scope:

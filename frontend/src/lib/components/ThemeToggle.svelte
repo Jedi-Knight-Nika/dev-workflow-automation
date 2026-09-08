@@ -1,11 +1,6 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
   import { t } from '$lib/i18n/index.svelte';
-  import { getTheme, setTheme, initTheme } from '$lib/theme.svelte';
-
-  onMount(() => {
-    initTheme();
-  });
+  import { getTheme, setTheme } from '$lib/theme.svelte';
 
   function toggle() {
     setTheme(getTheme() === 'dark' ? 'light' : 'dark');
@@ -13,6 +8,7 @@
 </script>
 
 <button
+  type="button"
   class="border-line text-muted hover:border-brand hover:text-brand grid size-9 place-items-center rounded-lg border transition-transform motion-safe:active:scale-90"
   onclick={toggle}
   aria-label={getTheme() === 'dark' ? t('theme.toLight') : t('theme.toDark')}

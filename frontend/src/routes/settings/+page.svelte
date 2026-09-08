@@ -6,6 +6,7 @@
   import ObserverSettings from '$lib/observer/ObserverSettings.svelte';
   import AccentPicker from '$lib/components/AccentPicker.svelte';
   import DisplayModePicker from '$lib/components/DisplayModePicker.svelte';
+  import AppearanceSettings from '$lib/components/AppearanceSettings.svelte';
   import ErrorBanner from '$lib/components/ErrorBanner.svelte';
   import { t } from '$lib/i18n/index.svelte';
   import { getAccountSettings, updateAccountSettings } from '$lib/services/settings';
@@ -46,6 +47,7 @@
   description={t('settingsPage.description')}
 />
 <main class="max-w-4xl space-y-6 p-4 sm:p-6 md:p-10">
+  <AppearanceSettings />
   <DisplayModePicker />
   <AccentPicker />
   <MonitoringSettings />
@@ -87,8 +89,7 @@
       <label
         >{t('settingsPage.timeFormat')}<select
           class="input mt-1 w-full"
-          bind:value={settings.general.time_format}
-          ><option>24H</option><option>12H</option></select
+          bind:value={settings.general.time_format}><option>24H</option><option>12H</option></select
         ></label
       >
       <label
@@ -109,15 +110,6 @@
           ></select
         ></label
       >
-      <label
-        >{t('settingsPage.appearance')}<select
-          class="input mt-1 w-full"
-          bind:value={settings.general.appearance}
-          ><option value="system">{t('settingsPage.appearanceSystem')}</option><option
-            value="light">{t('settingsPage.appearanceLight')}</option
-          ><option value="dark">{t('settingsPage.appearanceDark')}</option></select
-        ></label
-      >
       <label class="flex items-center gap-2"
         ><input type="checkbox" bind:checked={settings.general.compact_dashboard} />{t(
           'settingsPage.compactDashboard'
@@ -131,10 +123,12 @@
       <h2 class="font-semibold">{t('settingsPage.executionConfiguration')}</h2>
       <p class="text-muted">
         {t('settingsPage.executionConfigIntroBefore')}
-        <a class="text-brand" href={resolve('/teams')}>{t('nav.teams')}</a
-        >{t('settingsPage.executionConfigIntroMid')}
-        <a class="text-brand" href={resolve('/integrations')}>{t('nav.integrations')}</a
-        >{t('settingsPage.executionConfigIntroTail')}
+        <a class="text-brand" href={resolve('/teams')}>{t('nav.teams')}</a>{t(
+          'settingsPage.executionConfigIntroMid'
+        )}
+        <a class="text-brand" href={resolve('/integrations')}>{t('nav.integrations')}</a>{t(
+          'settingsPage.executionConfigIntroTail'
+        )}
       </p>
       <p class="text-sm">
         {t('settingsPage.executionConfigDetail')}

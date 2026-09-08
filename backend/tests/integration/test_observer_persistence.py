@@ -5,8 +5,40 @@ import pytest
 from sqlalchemy import delete
 
 from app.observability.observer.domain import Attention, Scope
-from app.observability.observer.models import ObserverConversation, ObserverEvent
+from app.observability.observer.models import (
+    ObserverConversation,
+    ObserverEvent,
+    ObserverPreference,
+)
 from app.observability.observer.persistence import SqlObserverStore
+
+
+async def test_preference_reads_do_not_write_and_rename_preserves_disabled_state(
+    postgres_session_factory,
+):
+    store = SqlObserverStore(postgres_session_factory)
+    owner = uuid4().hex
+    try:
+        assert await store.preference(owner) == {"focus": "normal", "last_seen_at": None}
+        async with postgres_session_factory() as session:
+            assert await session.get(ObserverPreference, owner) is None
+        await store.preference(owner, {"enabled": False})
+        await store.preference(owner, {"display_name": "Friday"})
+        value = await store.preference(owner)
+        assert value["enabled"] is False
+        assert value["display_name"] == "Friday"
+        # The read works even inside a genuinely read-only PostgreSQL transaction.
+        async with postgres_session_factory() as session:
+            from sqlalchemy import text
+
+            await session.execute(text("SET TRANSACTION READ ONLY"))
+            row = await session.get(ObserverPreference, owner)
+            assert row.values["display_name"] == "Friday"
+    finally:
+        async with postgres_session_factory() as session, session.begin():
+            await session.execute(
+                delete(ObserverPreference).where(ObserverPreference.owner == owner)
+            )
 
 
 async def test_observer_hold_dedupe_snooze_resolution_and_conversation_scope(

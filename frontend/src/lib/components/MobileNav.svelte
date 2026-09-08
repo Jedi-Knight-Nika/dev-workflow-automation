@@ -2,8 +2,6 @@
   import { page } from '$app/state';
   import { resolve } from '$app/paths';
   import { NAV_ITEMS, isActiveNavItem } from '$lib/nav';
-  import ThemeToggle from '$lib/components/ThemeToggle.svelte';
-  import LanguageToggle from '$lib/components/LanguageToggle.svelte';
   import { t } from '$lib/i18n/index.svelte';
 
   let open = $state(false);
@@ -35,8 +33,6 @@
     <strong class="text-heading text-sm">{t('nav.brandName')}</strong>
   </a>
   <div class="flex items-center gap-2">
-    <LanguageToggle />
-    <ThemeToggle />
     <button
       class="border-line text-muted grid size-9 place-items-center rounded-lg border transition-transform motion-safe:active:scale-[.92]"
       aria-label={open ? t('nav.closeMenu') : t('nav.openMenu')}
@@ -98,5 +94,8 @@
         {t(item.labelKey)}
       </a>
     {/each}
+    <footer class="border-line text-muted mt-auto border-t px-3 pt-4 text-xs">
+      <small>© Nikolla_L</small>
+    </footer>
   </nav>
 {/if}

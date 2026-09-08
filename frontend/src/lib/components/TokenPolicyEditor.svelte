@@ -100,7 +100,7 @@
       ></textarea>
     </details>
     <button
-      class="rounded bg-accent px-4 py-2 text-sm text-white disabled:opacity-50"
+      class="accent-action rounded bg-accent px-4 py-2 text-sm text-on-accent disabled:opacity-50"
       disabled={busy}
       onclick={save}>Save token policy</button
     >

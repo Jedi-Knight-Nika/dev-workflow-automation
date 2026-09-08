@@ -132,3 +132,22 @@ def test_uptime_uses_raw_full_window_not_graph_downsampling():
         promql(MetricQuery(Metric.PROBE_SAMPLES, window_seconds=86400))
         == "count_over_time(probe_success[86400s])"
     )
+
+
+@pytest.mark.parametrize("samples", [[], [["NaN", "1"]], [["Infinity", "1"]], None])
+async def test_invalid_sample_timestamps_and_empty_series_degrade_without_invalid_json(samples):
+    def response(request):
+        return httpx.Response(
+            200,
+            json={
+                "status": "success",
+                "data": {"result": [{"metric": {"name": "backend"}, "values": samples}]},
+            },
+        )
+
+    async with httpx.AsyncClient(
+        base_url="http://prometheus", transport=httpx.MockTransport(response)
+    ) as client:
+        result = await PrometheusQueryAdapter(client, enabled=True).instant(MetricQuery(Metric.CPU))
+    assert result.status == "unavailable"
+    assert result.series == []

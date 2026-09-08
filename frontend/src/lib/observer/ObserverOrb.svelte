@@ -65,7 +65,7 @@
     display: inline-grid;
     place-items: center;
     position: relative;
-    color: var(--color-brand, #65e5d4);
+    color: var(--color-brand-2, #65e5d4);
     flex-shrink: 0;
   }
   canvas,

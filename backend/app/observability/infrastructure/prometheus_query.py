@@ -146,12 +146,15 @@ class PrometheusQueryAdapter:
                 if not isinstance(row, dict) or not isinstance(row.get("metric"), dict):
                     raise TypeError("Invalid metric series")
                 samples = row.get("values", [row["value"]] if "value" in row else [])
-                if len(samples) > 3001:
+                if not isinstance(samples, list) or not samples or len(samples) > 3001:
                     raise ValueError("Metric samples exceeded bound")
                 values = []
                 for stamp, value in samples:
+                    timestamp = float(stamp)
+                    if not math.isfinite(timestamp):
+                        raise ValueError("Invalid metric timestamp")
                     number = float(value)
-                    values.append((float(stamp), number if math.isfinite(number) else None))
+                    values.append((timestamp, number if math.isfinite(number) else None))
                 # Never forward arbitrary exporter labels or secret-bearing target URLs.
                 labels = {
                     k: str(v)[:255]

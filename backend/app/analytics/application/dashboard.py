@@ -24,14 +24,14 @@ class BuildDashboard:
         month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
         tasks = await self.facts.tasks(min(since, now - timedelta(days=30), month_start), team_id)
         all_runs = [r for t in tasks for r in t.runs if r.started_at <= now]
-        runs = [r for t in tasks for r in t.runs if r.started_at >= since]
+        runs = [r for r in all_runs if r.started_at >= since]
         groups: dict[str, dict[str, list[RunFact]]] = {
             name: defaultdict(list)
             for name in ("models", "agents", "daily", "run_kinds", "repositories")
         }
         for task in tasks:
             for run in task.runs:
-                if run.started_at < since:
+                if not since <= run.started_at <= now:
                     continue
                 groups["models"][f"{run.provider}/{run.model}"].append(run)
                 groups["agents"][run.profile_id or f"{run.role}:unattributed"].append(run)
@@ -41,7 +41,7 @@ class BuildDashboard:
         merged = [
             task_metrics(t)
             for t in tasks
-            if t.status == "MERGED" and t.completed_at and t.completed_at >= since
+            if t.status == "MERGED" and t.completed_at and since <= t.completed_at <= now
         ]
         complete = [t for t in merged if t["cost_complete"]]
         agents = []
@@ -113,7 +113,7 @@ class BuildDashboard:
                 r
                 for t in tasks
                 for r in t.local_runs
-                if datetime.fromisoformat(r["started_at"]) >= since
+                if since <= datetime.fromisoformat(r["started_at"]) <= now
             ],
             "agents": agents,
             "period_costs": {

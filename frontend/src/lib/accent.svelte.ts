@@ -1,12 +1,14 @@
 import { getTheme } from './theme.svelte';
+import { actionColors } from './color-contrast';
 
 export type AccentId = 'purple' | 'blue' | 'green' | 'yellow' | 'pink' | 'teal';
-type AccentSelection = AccentId | 'custom';
+type AccentSelection = AccentId | 'custom' | 'cycle';
 
 type AccentColors = { brand: string; brand2: string };
 type AccentPair = { dark: AccentColors; light: AccentColors };
 
 export const ACCENT_ORDER: AccentId[] = ['purple', 'blue', 'green', 'yellow', 'pink', 'teal'];
+export const ACCENT_CYCLE_MS = 8_000;
 
 const PRESETS: Record<AccentId, AccentPair> = {
   purple: {
@@ -50,6 +52,9 @@ const DEFAULT_HUE = 266;
 
 let accentId = $state<AccentSelection>('purple');
 let customHue = $state(DEFAULT_HUE);
+let cycleIndex = $state(0);
+let syncCycle: (() => void) | undefined;
+let disposeCycle: (() => void) | undefined;
 
 export function getAccentId(): AccentSelection {
   return accentId;
@@ -89,7 +94,8 @@ function customColors(hue: number): AccentColors {
 }
 
 function currentColors(): AccentColors {
-  return accentId === 'custom' ? customColors(customHue) : PRESETS[accentId][getTheme()];
+  if (accentId === 'custom') return customColors(customHue);
+  return PRESETS[accentId === 'cycle' ? ACCENT_ORDER[cycleIndex] : accentId][getTheme()];
 }
 
 function applyAccent(): void {
@@ -97,9 +103,16 @@ function applyAccent(): void {
   const colors = currentColors();
   document.documentElement.style.setProperty('--color-brand', colors.brand);
   document.documentElement.style.setProperty('--color-brand-2', colors.brand2);
+  const action = actionColors(colors.brand, colors.brand2);
+  document.documentElement.style.setProperty('--color-on-brand', action.foreground);
+  document.documentElement.style.setProperty('--color-action-start', action.start);
+  document.documentElement.style.setProperty('--color-action-end', action.end);
 }
 
-export function setAccentId(next: AccentId): void {
+export function setAccentId(next: AccentId | 'cycle'): void {
+  if (next === 'cycle' && ACCENT_ORDER.includes(accentId as AccentId)) {
+    cycleIndex = ACCENT_ORDER.indexOf(accentId as AccentId);
+  }
   accentId = next;
   try {
     localStorage.setItem(STORAGE_KEY, next);
@@ -107,9 +120,11 @@ export function setAccentId(next: AccentId): void {
     /* storage unavailable, choice just won't persist */
   }
   applyAccent();
+  syncCycle?.();
 }
 
 export function setCustomHue(hue: number): void {
+  if (!Number.isFinite(hue)) return;
   customHue = Math.max(0, Math.min(360, hue));
   accentId = 'custom';
   try {
@@ -119,9 +134,12 @@ export function setCustomHue(hue: number): void {
     /* storage unavailable, choice just won't persist */
   }
   applyAccent();
+  syncCycle?.();
 }
 
-export function initAccent(): void {
+/** One shell-owned timer; no work while hidden, reduced-motion, or fixed-color. */
+export function initAccent(): () => void {
+  disposeCycle?.();
   let storedId: string | null = null;
   let storedHue: string | null = null;
   try {
@@ -133,11 +151,40 @@ export function initAccent(): void {
   if (storedId === 'custom') {
     accentId = 'custom';
     const hue = Number(storedHue);
-    if (Number.isFinite(hue)) customHue = Math.max(0, Math.min(360, hue));
+    if (storedHue !== null && storedHue.trim() && Number.isFinite(hue)) {
+      customHue = Math.max(0, Math.min(360, hue));
+    }
+  } else if (storedId === 'cycle') {
+    accentId = 'cycle';
   } else if (storedId && ACCENT_ORDER.includes(storedId as AccentId)) {
     accentId = storedId as AccentId;
   }
   applyAccent();
+  const motion = window.matchMedia('(prefers-reduced-motion: reduce)');
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const sync = () => {
+    clearTimeout(timer);
+    timer = undefined;
+    if (accentId !== 'cycle' || document.hidden || motion.matches) return;
+    timer = setTimeout(() => {
+      cycleIndex = (cycleIndex + 1) % ACCENT_ORDER.length;
+      applyAccent();
+      sync();
+    }, ACCENT_CYCLE_MS);
+  };
+  syncCycle = sync;
+  document.addEventListener('visibilitychange', sync);
+  motion.addEventListener('change', sync);
+  sync();
+  const dispose = () => {
+    clearTimeout(timer);
+    document.removeEventListener('visibilitychange', sync);
+    motion.removeEventListener('change', sync);
+    if (syncCycle === sync) syncCycle = undefined;
+    if (disposeCycle === dispose) disposeCycle = undefined;
+  };
+  disposeCycle = dispose;
+  return dispose;
 }
 
 export function reapplyAccentForTheme(): void {

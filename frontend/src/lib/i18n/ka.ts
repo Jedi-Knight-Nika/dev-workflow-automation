@@ -555,7 +555,8 @@ export const ka: Record<TranslationKey, string> = {
   'cockpit.pageTitle': 'ინჟინერიის მართვის ცენტრი',
   'cockpit.eyebrow': 'AI საინჟინრო ოპერაციები',
   'cockpit.title': 'მართვის ცენტრი',
-  'cockpit.description': 'სამუშაო პროცესის, გუნდის, გამოყენების, რეპოზიტორიისა და ინფრასტრუქტურის მდგომარეობა რეალურ დროში.',
+  'cockpit.description':
+    'სამუშაო პროცესის, გუნდის, გამოყენების, რეპოზიტორიისა და ინფრასტრუქტურის მდგომარეობა რეალურ დროში.',
   'cockpit.live': 'LIVE',
   'cockpit.reconnecting': 'ხელახლა უკავშირდება',
   'cockpit.loadingLiveState': 'იტვირთება მიმდინარე მდგომარეობა…',
@@ -625,7 +626,8 @@ export const ka: Record<TranslationKey, string> = {
 
   'settingsPage.eyebrow': 'პლატფორმა',
   'settingsPage.title': 'პარამეტრები',
-  'settingsPage.description': 'ჩვენების პარამეტრები და პლატფორმის მიერ დაწესებული შესრულების საზღვრები.',
+  'settingsPage.description':
+    'ჩვენების პარამეტრები და პლატფორმის მიერ დაწესებული შესრულების საზღვრები.',
   'settingsPage.preferencesSaved': 'პარამეტრები შენახულია.',
   'settingsPage.displayName': 'სახელი',
   'settingsPage.timezone': 'დროის სარტყელი',
@@ -675,6 +677,12 @@ export const ka: Record<TranslationKey, string> = {
   'monitoring.saving': 'ინახება…',
   'monitoring.save': 'მონიტორინგის პარამეტრების შენახვა',
 
+  'appearance.title': 'იერსახე და ენა',
+  'appearance.description':
+    'ავტომატურად ინახება ამ ბრაუზერში. ეს პარამეტრები მხოლოდ ინტერფეისს ცვლის.',
+  'accent.cycle': 'ფერების ცვლა',
+  'accent.cycleHint':
+    'ფერები ყოველ 8 წამში იცვლება. ცვლა ჩერდება დამალულ ჩანართში და შემცირებული მოძრაობის რეჟიმში. გასაჩერებლად აირჩიეთ ფერი.',
   'accent.title': 'აქცენტის ფერი',
   'accent.description':
     'აირჩიეთ ბრენდის ტონი გრადიენტების, ნათების და გამოკვეთისთვის მთელ აპლიკაციაში. ღია და მუქი თემა უცვლელი რჩება.',

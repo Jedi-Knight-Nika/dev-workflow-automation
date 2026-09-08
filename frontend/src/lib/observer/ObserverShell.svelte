@@ -16,6 +16,7 @@
     type Viewport
   } from './position';
   import { observerApi, streamAnswer } from './api';
+  import { getAssistantName, setAssistantName } from './identity.svelte';
   import type {
     AttentionEvent,
     Briefing,
@@ -29,6 +30,7 @@
   } from './types';
 
   let enabled = $state(false);
+  const assistantName = $derived(getAssistantName());
   let currentStatus = $state<ObserverStatus | null>(null);
   let briefing = $state<Briefing | null>(null);
   let open = $state(false);
@@ -166,6 +168,7 @@
   async function configuration() {
     try {
       const response = await observerApi.configuration();
+      setAssistantName(response.display_name);
       enabled = response.enabled;
       if (enabled) await refresh(true);
       else stop();
@@ -295,7 +298,8 @@
                 ? 'Local Ollama · verified facts'
                 : 'Deterministic · no model call';
           }
-          if (event.type === 'observer.failed') error = event.message || 'Observer unavailable.';
+          if (event.type === 'observer.failed')
+            error = event.message || `${assistantName} unavailable.`;
           void tick().then(() => {
             if (log) log.scrollTop = log.scrollHeight;
           });
@@ -304,7 +308,7 @@
       );
     } catch {
       if (!controller.signal.aborted)
-        error = 'Observer could not finish this answer. Saved conversations remain in History.';
+        error = `${assistantName} could not finish this answer. Saved conversations remain in History.`;
     } finally {
       if (request === controller) busy = false;
     }
@@ -459,7 +463,7 @@
           onclick={() => {
             bubble = '';
           }}
-          aria-label="Dismiss Observer notice">×</button
+          aria-label="Dismiss {assistantName} notice">×</button
         >
       </div>{/if}
     <button
@@ -470,8 +474,8 @@
       aria-expanded={open}
       aria-controls="observer-panel"
       aria-describedby="observer-move-help"
-      aria-label="Open Observer assistant"
-      title="Observer · {offline
+      aria-label="Open {assistantName} assistant"
+      title="{assistantName} · {offline
         ? 'offline'
         : currentStatus?.ai_available
           ? 'local AI available'
@@ -483,7 +487,7 @@
           class:critical={currentStatus.highest_severity === 'CRITICAL'}
           >{currentStatus.open_attention_count}</span
         >{/if}
-      <span class="dock-label">OBSERVER</span>
+      <span class="dock-label">{assistantName}</span>
     </button>
     <span id="observer-move-help" class="sr-only"
       >Drag to move, or use arrow keys when focused. Shift moves faster. Home resets the position.</span
@@ -515,16 +519,18 @@
       <button
         class="panel-drag"
         use:draggable={dragOptions}
-        aria-label="Move Observer panel"
+        aria-label="Move {assistantName} panel"
         aria-describedby="observer-move-help"
         title="Drag to move · Arrow keys to adjust"
       >
         <ObserverOrb {mode} {displayMode} size={82} />
         <span class="header-copy">
           <span class="eyebrow"
-            >{displayMode === 'jarvis' ? 'OBSERVER / OPERATIONS LINK' : 'AMBIENT OPERATIONS'}</span
+            >{displayMode === 'jarvis' ? 'ASSISTANT / OPERATIONS LINK' : 'AMBIENT OPERATIONS'}</span
           >
-          <span id="observer-panel-title" class="panel-title">Observer</span>
+          <span id="observer-panel-title" class="panel-title" title={assistantName}
+            >{assistantName}</span
+          >
           <span class="subtext">Read-only companion · {scopeName}</span>
         </span>
         <span class="grip" aria-hidden="true">⠿</span>
@@ -533,10 +539,11 @@
         <button
           class="reset-position"
           onclick={resetPosition}
-          aria-label="Reset Observer position"
+          aria-label="Reset {assistantName} position"
           title="Reset position">↘</button
         >
-        <button class="icon-button close" onclick={closePanel} aria-label="Close Observer">×</button
+        <button class="icon-button close" onclick={closePanel} aria-label="Close {assistantName}"
+          >×</button
         >
       </div>
     </header>
@@ -553,7 +560,7 @@
             : 'Deterministic mode'}</span
       ><span class="status-cost">NO CLOUD SPEND</span>
     </div>
-    <nav class="panel-actions" aria-label="Observer views">
+    <nav class="panel-actions" aria-label="{assistantName} views">
       <button
         onclick={() => {
           request?.abort();
@@ -643,13 +650,13 @@
         role="log"
         aria-live="polite"
         aria-relevant="additions text"
-        aria-label="Observer conversation"
+        aria-label="{assistantName} conversation"
       >
         {#each messages as message (message.id)}<article
             class="message"
             class:user={message.role === 'user'}
           >
-            <div class="message-label">{message.role === 'user' ? 'YOU' : 'OBSERVER'}</div>
+            <div class="message-label">{message.role === 'user' ? 'YOU' : assistantName}</div>
             <p>{message.content || (busy ? 'Reading verified facts…' : 'No answer received.')}</p>
             {#if message.sources.length}<div class="sources">
                 {#each uniqueSources(message.sources) as source (source.source + source.complete)}<span
@@ -678,7 +685,7 @@
         void send();
       }}
     >
-      <label for="observer-question" class="sr-only">Ask Observer</label><textarea
+      <label for="observer-question" class="sr-only">Ask {assistantName}</label><textarea
         id="observer-question"
         bind:this={textarea}
         bind:value={input}
@@ -695,16 +702,17 @@
       ></textarea>
       <div class="composer-footer">
         <span>{busy ? activity : activity || 'No source access. No write authority.'}</span><button
+          class="accent-action"
           type="submit"
           disabled={busy || !input.trim()}
-          aria-label="Send Observer question">{busy ? 'Reading…' : 'Send ↑'}</button
+          aria-label="Send {assistantName} question">{busy ? 'Reading…' : 'Send ↑'}</button
         >
       </div>
     </form>
     <footer class="panel-footer">
       <span>Engineering always has priority.</span><a
         href={resolve('/settings')}
-        onclick={closePanel}>Observer settings</a
+        onclick={closePanel}>{assistantName} settings</a
       >
     </footer>
   {/if}
@@ -744,6 +752,11 @@
     font: 7px monospace;
     letter-spacing: 0.16em;
     color: var(--color-muted);
+    max-width: 80%;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    text-transform: uppercase;
   }
   .observer-badge {
     position: absolute;
@@ -865,6 +878,9 @@
     font-size: 25px;
     font-weight: 500;
     letter-spacing: -0.03em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .subtext {
     color: var(--color-muted);
@@ -1110,7 +1126,7 @@
     font-size: 10px;
     padding: 6px 10px;
     background: var(--color-brand);
-    color: var(--color-panel);
+    color: var(--color-on-brand);
     border-radius: 7px;
   }
   .composer-footer button:disabled {

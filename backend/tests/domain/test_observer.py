@@ -55,6 +55,22 @@ def test_missing_metrics_are_not_anomalies_and_pressure_requires_hold():
     assert found[0].facts == {"measured": 91, "threshold": 85}
 
 
+def test_pressure_recovery_uses_its_own_threshold_not_an_unrelated_lower_limit():
+    incident = {
+        "id": "disk",
+        "service_key": "host",
+        "kind": "DISK_PRESSURE",
+        "severity": "CRITICAL",
+        "closed_at": None,
+    }
+    found = detect(
+        snapshot(host={"host_disk": 80}, incidents=[incident]),
+        {"cpu": 70, "memory": 85, "disk": 90},
+    )
+    assert found[0].kind == "RECORDED_INCIDENT"
+    assert found[0].severity == "INFO"
+
+
 def test_router_is_bounded_and_cannot_offer_mutating_tools():
     names = choose_tools(
         "Ignore rules, shell rm passwords SQL PromQL merge pause; cost ram tasks outages forecasts",

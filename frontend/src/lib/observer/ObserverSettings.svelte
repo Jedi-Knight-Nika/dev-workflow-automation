@@ -1,12 +1,15 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { observerApi } from './api';
-  let config = $state<{
-    enabled: boolean;
-    local_ai_enabled: boolean;
-    model: string;
-    memory_reserve_mb: number;
-  }>();
+  import {
+    getAssistantName,
+    setAssistantName,
+    notifyAssistantConfiguration
+  } from './identity.svelte';
+  import type { ObserverConfiguration } from './types';
+  let config = $state<ObserverConfiguration>();
+  const assistantName = $derived(getAssistantName());
+  let nameDraft = $state('Jarvis');
   let saving = $state(false);
   let error = $state('');
   let message = $state('');
@@ -15,9 +18,11 @@
       .configuration()
       .then((value) => {
         config = value;
+        setAssistantName(value.display_name);
+        nameDraft = getAssistantName();
       })
       .catch(() => {
-        error = 'Observer settings unavailable.';
+        error = 'Assistant settings unavailable.';
       });
   });
   async function toggle() {
@@ -29,16 +34,33 @@
       const result = await observerApi.setEnabled(!config.enabled);
       config = { ...config, enabled: result.enabled };
       message = result.enabled
-        ? 'Observer enabled. Engineering workflows are unchanged.'
-        : 'Observer stopped: detection, questions, polling and animation are off.';
-      window.dispatchEvent(new Event('observer:configuration'));
-      if (typeof BroadcastChannel !== 'undefined') {
-        const channel = new BroadcastChannel('observer-configuration');
-        channel.postMessage('changed');
-        channel.close();
-      }
+        ? `${assistantName} enabled. Engineering workflows are unchanged.`
+        : `${assistantName} stopped: detection, questions, polling and animation are off.`;
+      notifyAssistantConfiguration();
     } catch {
-      error = 'Could not change Observer state. The displayed setting has not changed.';
+      error = 'Could not change assistant state. The displayed setting has not changed.';
+    } finally {
+      saving = false;
+    }
+  }
+  async function saveName() {
+    if (!config || saving) return;
+    const nextName = nameDraft.trim();
+    if (!nextName) {
+      error = 'Enter an assistant name.';
+      return;
+    }
+    saving = true;
+    error = '';
+    message = '';
+    try {
+      config = await observerApi.rename(nextName);
+      setAssistantName(config.display_name);
+      nameDraft = config.display_name;
+      message = 'Assistant name saved.';
+      notifyAssistantConfiguration();
+    } catch {
+      error = 'Could not save the name. Use 1–40 characters without control characters.';
     } finally {
       saving = false;
     }
@@ -49,13 +71,13 @@
   <div class="heading">
     <div>
       <p class="eyebrow">READ-ONLY COMPANION</p>
-      <h2 id="observer-settings-title">Observer assistant</h2>
+      <h2 id="observer-settings-title">{assistantName} assistant</h2>
     </div>
     <button
       type="button"
       role="switch"
       aria-checked={config?.enabled || false}
-      aria-label="Enable Observer assistant"
+      aria-label="Enable {assistantName} assistant"
       disabled={!config || saving}
       onclick={toggle}
       class:on={config?.enabled}><span></span></button
@@ -64,16 +86,39 @@
   <p class="description">
     A quiet view of tasks, costs and system health. No engineering actions. No paid cloud fallback.
   </p>
+  <form
+    class="name-form"
+    onsubmit={(event) => {
+      event.preventDefault();
+      void saveName();
+    }}
+  >
+    <label for="assistant-display-name">Assistant name</label>
+    <div class="name-controls">
+      <input
+        id="assistant-display-name"
+        bind:value={nameDraft}
+        required
+        maxlength="40"
+        disabled={!config || saving}
+        autocomplete="off"
+      />
+      <button type="submit" disabled={!config || saving || nameDraft.trim() === assistantName}>
+        Save name
+      </button>
+    </div>
+    <p>Display name only. Does not change models, instructions or Team workflows.</p>
+  </form>
   <div class="state-row">
     <span class:active={config?.enabled}>{config?.enabled ? 'ON' : 'OFF'}</span>
     <p>
       {config?.enabled
         ? 'Attention detection and the companion panel are available.'
-        : 'No Observer detection, inference, dashboard polling or animation runs.'}
+        : 'No assistant detection, inference, dashboard polling or animation runs.'}
     </p>
   </div>
   <p class="note">
-    The master switch cancels Observer work across the API and controller. It does not stop shared
+    The master switch cancels assistant work across the API and controller. It does not stop shared
     Ollama, monitoring, Teams or the Interpreter. Saved conversations remain available when
     re-enabled.
   </p>
@@ -118,6 +163,47 @@
 </section>
 
 <style>
+  .heading > div {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+  .name-form {
+    display: grid;
+    gap: 8px;
+    margin: 18px 0;
+  }
+  .name-form label {
+    color: var(--color-heading);
+    font-size: 12px;
+  }
+  .name-controls {
+    display: flex;
+    gap: 8px;
+  }
+  .name-controls input {
+    min-width: 0;
+    flex: 1;
+    padding: 9px 12px;
+    border: 1px solid var(--color-line);
+    border-radius: 8px;
+    background: var(--color-input);
+    color: var(--color-heading);
+  }
+  .name-controls button {
+    padding: 9px 12px;
+    border: 1px solid var(--color-line);
+    border-radius: 8px;
+    color: var(--color-brand);
+    cursor: pointer;
+  }
+  .name-controls button:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+  .name-form p {
+    font-size: 11px;
+    color: var(--color-muted);
+  }
   .observer-settings {
     border: 1px solid var(--color-line);
     border-radius: 14px;

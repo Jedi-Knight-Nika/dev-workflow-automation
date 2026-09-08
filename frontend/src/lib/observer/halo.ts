@@ -129,9 +129,11 @@ export function createHalo(
     }
   }
   function theme() {
-    // Accent system uses hex color inputs. Use a safe cyan when theme tokens are oklch.
+    // Match the accent hue the rest of the HUD chrome (brackets, radar, grid)
+    // settled on - brand-2, not the primary brand color - so the orb reads as
+    // part of the same system instead of a mismatched hue.
     const token = getComputedStyle(document.documentElement)
-      .getPropertyValue('--color-brand')
+      .getPropertyValue('--color-brand-2')
       .trim();
     accent = /^#[\da-f]{6}$/i.test(token) ? token : '#65e5d4';
     resume();

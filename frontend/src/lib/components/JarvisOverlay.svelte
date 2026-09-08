@@ -17,6 +17,24 @@
     [4, 6],
     [1, 3]
   ];
+
+  function polygonPoints(sides: number, r: number): string {
+    return Array.from({ length: sides }, (_, i) => {
+      const angle = (i / sides) * Math.PI * 2 - Math.PI / 2;
+      return `${(Math.cos(angle) * r).toFixed(2)},${(Math.sin(angle) * r).toFixed(2)}`;
+    }).join(' ');
+  }
+
+  // Slow-drifting geometric outlines that cross the whole viewport and loop
+  // forever. Negative delays start each one mid-flight so they don't all
+  // enter at once.
+  const shapes = [
+    { top: 14, sides: 6, r: 30, duration: 62, delay: -8 },
+    { top: 70, sides: 3, r: 22, duration: 74, delay: -40 },
+    { top: 42, sides: 4, r: 18, duration: 54, delay: -22 },
+    { top: 85, sides: 6, r: 24, duration: 68, delay: -55 },
+    { top: 26, sides: 5, r: 20, duration: 80, delay: -10 }
+  ];
 </script>
 
 <div class="jarvis-root" aria-hidden="true">
@@ -39,6 +57,17 @@
       class="node"
       style={`left: ${node.left}%; top: ${node.top}%; animation-duration: ${node.duration}s; animation-delay: ${node.delay}s;`}
     ></span>
+  {/each}
+  {#each shapes as shape, index (index)}
+    <svg
+      class="shape"
+      style={`top: ${shape.top}%; animation-duration: ${shape.duration}s; animation-delay: ${shape.delay}s;`}
+      viewBox={`-${shape.r} -${shape.r} ${shape.r * 2} ${shape.r * 2}`}
+      width={shape.r * 2}
+      height={shape.r * 2}
+    >
+      <polygon points={polygonPoints(shape.sides, shape.r - 1)} />
+    </svg>
   {/each}
   <div class="scan-beam"></div>
   <span class="bracket tl"></span>
@@ -123,6 +152,22 @@
     animation-name: -global-jarvis-float;
     animation-timing-function: ease-in-out;
     animation-iteration-count: infinite;
+  }
+  .shape {
+    position: absolute;
+    left: 0;
+    overflow: visible;
+    opacity: 0.22;
+    mix-blend-mode: screen;
+    animation-name: -global-jarvis-drift;
+    animation-timing-function: linear;
+    animation-iteration-count: infinite;
+  }
+  .shape polygon {
+    fill: none;
+    stroke: var(--color-brand-2);
+    stroke-width: 1;
+    vector-effect: non-scaling-stroke;
   }
   .scan-beam {
     position: absolute;
@@ -250,10 +295,12 @@
     .dial-sweep,
     .grid,
     .node,
-    .link {
+    .link,
+    .shape {
       animation: none;
     }
-    .node {
+    .node,
+    .shape {
       display: none;
     }
   }
@@ -273,7 +320,8 @@
   :root[data-theme='light'] .jarvis-root .links,
   :root[data-theme='light'] .jarvis-root .scan-beam,
   :root[data-theme='light'] .jarvis-root .dial-sweep,
-  :root[data-theme='light'] .jarvis-root .node {
+  :root[data-theme='light'] .jarvis-root .node,
+  :root[data-theme='light'] .jarvis-root .shape {
     mix-blend-mode: multiply;
   }
   :root[data-theme='light'] .jarvis-root .texture {
@@ -290,7 +338,8 @@
     :root:not([data-theme='dark']) .jarvis-root .links,
     :root:not([data-theme='dark']) .jarvis-root .scan-beam,
     :root:not([data-theme='dark']) .jarvis-root .dial-sweep,
-    :root:not([data-theme='dark']) .jarvis-root .node {
+    :root:not([data-theme='dark']) .jarvis-root .node,
+    :root:not([data-theme='dark']) .jarvis-root .shape {
       mix-blend-mode: multiply;
     }
     :root:not([data-theme='dark']) .jarvis-root .texture {
@@ -374,6 +423,14 @@
     }
     50% {
       background: color-mix(in srgb, var(--color-brand-2) 95%, transparent);
+    }
+  }
+  @keyframes -global-jarvis-drift {
+    from {
+      transform: translateX(-15vw) rotate(0deg);
+    }
+    to {
+      transform: translateX(115vw) rotate(360deg);
     }
   }
 </style>

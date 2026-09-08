@@ -23,8 +23,7 @@
   } = $props();
 
   const variantClass: Record<Variant, string> = {
-    primary:
-      'bg-[linear-gradient(120deg,var(--color-brand),var(--color-brand-2))] text-white font-bold neon-glow motion-safe:hover:animate-glow-pulse',
+    primary: 'button-accent-gradient font-bold neon-glow motion-safe:hover:animate-glow-pulse',
     outline: 'border-line border text-muted hover:text-brand-2 hover:border-brand-2',
     ghost: 'border-line border bg-transparent text-muted hover:text-brand-2 hover:border-brand-2',
     danger: 'border border-danger/40 text-danger hover:bg-danger/10',
@@ -43,7 +42,7 @@
   {type}
   {disabled}
   {onclick}
-  class="ease-smooth cursor-pointer rounded-lg transition-all duration-200 disabled:cursor-not-allowed disabled:opacity-30 motion-safe:enabled:hover:-translate-y-0.5 motion-safe:enabled:active:scale-[.96] motion-safe:enabled:active:translate-y-0 {variantClass[
+  class="ease-smooth cursor-pointer rounded-lg transition-[transform,box-shadow,border-color] duration-200 disabled:cursor-not-allowed disabled:opacity-50 motion-safe:enabled:hover:-translate-y-0.5 motion-safe:enabled:active:scale-[.96] motion-safe:enabled:active:translate-y-0 {variantClass[
     variant
   ]} {sizeClass[size]} {extraClass}"
 >
