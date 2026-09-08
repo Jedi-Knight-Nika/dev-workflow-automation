@@ -47,6 +47,12 @@ class GitHubDelivery:
             raise ValueError("Ambiguous PR for task branch")
         if found:
             pull = await self.get(f"/pulls/{found[0]['number']}")
+            if pull.get("title") != title[:250]:
+                response = await self.client.patch(
+                    self.root + f"/pulls/{pull['number']}", json={"title": title[:250]}
+                )
+                response.raise_for_status()
+                pull = response.json()
         else:
             response = await self.client.post(
                 self.root + "/pulls",

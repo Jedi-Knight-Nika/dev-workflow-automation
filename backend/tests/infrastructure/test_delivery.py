@@ -126,6 +126,39 @@ async def test_merge_sends_expected_sha_and_never_retries_a_write() -> None:
     assert len(requests) == 1
 
 
+@pytest.mark.asyncio
+async def test_publish_recovers_a_pull_request_with_the_conventional_commit_title() -> None:
+    requests: list[httpx.Request] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.method == "GET" and request.url.path.endswith("/pulls"):
+            return httpx.Response(200, json=[{"number": 1}])
+        if request.method == "GET":
+            return httpx.Response(200, json={"number": 1, "title": "Work item", "head": {"sha": SHA}})
+        assert request.method == "PATCH"
+        assert json.loads(request.content) == {"title": "fix(api): handle timeout"}
+        return httpx.Response(
+            200,
+            json={"number": 1, "title": "fix(api): handle timeout", "head": {"sha": SHA}},
+        )
+
+    async with httpx.AsyncClient(
+        base_url="https://api.github.com", transport=httpx.MockTransport(respond)
+    ) as client:
+        pull = await GitHubDelivery(client, "acme", "repo").publish(
+            branch="agent/task-1",
+            base="main",
+            title="fix(api): handle timeout",
+            body="Task: API-1",
+            owner="acme",
+            expected_sha=SHA,
+        )
+
+    assert pull["title"] == "fix(api): handle timeout"
+    assert [request.method for request in requests] == ["GET", "GET", "PATCH"]
+
+
 def test_git_transfer_excludes_alternates_and_rejects_symlinks(tmp_path: Path) -> None:
     source, target = tmp_path / "objects", tmp_path / "clean-objects"
     (source / "info").mkdir(parents=True)
