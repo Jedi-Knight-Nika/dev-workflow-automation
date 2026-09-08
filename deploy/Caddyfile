@@ -1,7 +1,17 @@
 {$DOMAIN} {
 	encode zstd gzip
 
+	# Provider callbacks authenticate their original body signatures in the API.
+	handle /webhooks/* {
+		reverse_proxy backend:8000
+	}
+	handle {
+		basic_auth {
+			{$OPERATOR_USER} {$OPERATOR_PASSWORD_HASH}
+		}
+
 	@backend path /api/* /health/* /webhooks/* /docs* /openapi.json
 	reverse_proxy @backend backend:8000
 	reverse_proxy frontend:3000
+	}
 }

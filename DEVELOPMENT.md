@@ -1,216 +1,72 @@
-# Development Guide
+# Development and verification
 
 ## Requirements
 
-- Docker with Docker Compose
-- Python 3.12 and `uv` for host-based backend development
-- Node.js 22 LTS for host-based frontend development
+Python 3.12 with uv, Node.js 22+, PostgreSQL and Docker Compose. Dependencies are locked in backend/uv.lock and frontend/package-lock.json.
 
-Dependencies are pinned in `backend/uv.lock` and `frontend/package-lock.json`.
+Read [initial setup](docs/initial-setup.md) before enabling execution. Local API/UI work does not require paid workers.
 
-## Setup
+## Host development
 
-```bash
-cp .env.example .env
-make setup
+```sh
+cd backend
+uv sync --frozen --extra dev
+uv run alembic upgrade head
+uv run uvicorn app.main:app --reload
 ```
 
-For host-based backend development, PostgreSQL must be reachable separately and the
-database URLs must use `localhost` instead of the Compose service hostname `postgres`.
-The Compose database is intentionally not published to a host port because the
-containerized backend accesses it through Docker's internal network.
+Point DATABASE_URL and DATABASE_URL_SYNC at a new development database. For frontend work:
 
-Compose runs four services: PostgreSQL, the API, a dedicated scheduler/agent worker,
-and the frontend. The API applies migrations and does not execute agent jobs. The worker
-has the shared workspace volume, Git, process/memory limits, a read-only root filesystem,
-and graceful shutdown handling.
-
-```bash
-make dev-backend
-make dev-frontend
-```
-
-## Quality commands
-
-```bash
-make check
-make lint
-make typecheck
-make test
-make format-check
-make format
-```
-
-Application-owned commands:
-
-```bash
-make -C backend lint
-make -C backend format
-make -C backend format-check
-make -C backend typecheck
-make -C backend test
-make -C backend check
-
+```sh
 cd frontend
-npm run lint
-npm run lint:fix
-npm run format
-npm run format:check
-npm run typecheck
-npm run build
+npm ci
+npm run dev
+```
+
+## Quality gates
+
+```sh
+make -C backend check
+cd frontend
 npm run check
+npm run test:e2e
 ```
 
-## Configuration
+Backend check covers Ruff, formatting, mypy and pytest. Database integration tests require TEST_DATABASE_URL targeting an isolated initialized PostgreSQL database; without it those tests skip. Do not confuse skipped integration tests with verified persistence.
 
-The annotated `.env.example` is the source of truth for local configuration. Never
-commit `.env` or real integration credentials.
+Browser tests start a local development server and mock control-plane responses. They check task creation/start consent, zero estimates, concurrent-worker refresh, ticket receipts/status history, and fullscreen queue visibility without provider calls.
 
-## Backend architecture
+CI additionally type-checks the operator scripts. The observer is read-only:
 
-New backend behavior follows an inward dependency rule:
-
-```text
-API / worker entrypoints -> application use cases -> domain
-                              ^
-                              |
-                  infrastructure implements ports
+```sh
+python scripts/validate_real_workflow.py TRELLO-example --poll-seconds 15
 ```
 
-- `app/domain` contains framework-free entities, value types, and business policies.
-- `app/application` contains use cases and `Protocol` ports; it may depend on the domain
-  but not FastAPI, SQLAlchemy, provider SDKs, Docker, or concrete integrations.
-- `app/infrastructure` contains SQLAlchemy repositories/unit-of-work implementations and
-  replaceable external adapters.
-- `app/api` and workers are delivery adapters that validate transport data, resolve
-  dependencies through `app/bootstrap`, invoke use cases, and translate results.
+It waits for the fixed lifecycle and emits JSON evidence. It never performs merge or resume.
 
-Prefer composition and constructor injection. Do not introduce generic base repositories,
-service locators, framework imports in the domain, or inheritance solely to share code.
-Legacy behavior is migrated one vertical workflow at a time under existing regression tests;
-new business logic must not be added directly to route handlers.
+## Architecture rules
 
-### GitHub App installation
+Business behavior belongs to its owning context: intake, engineering, agent_runtime, delivery, teams or repositories. Framework-free domain rules are consumed by application use cases and ports. Infrastructure implements persistence/container/provider boundaries. interfaces/http translates requests; bootstrap constructs adapters.
 
-Create a GitHub App and set its Setup URL to the public backend callback:
+Do not add a parallel application-wide domain/application/infrastructure hierarchy. Do not make HTTP schemas the model for domain or adapter code. Do not add generic repositories or empty layers without a consumer. Existing architecture tests enforce forbidden dependency directions.
 
-```text
-https://YOUR_DOMAIN/api/v1/github/app/callback
-```
+## Test levels and claims
 
-For local development, use a tunnel to port 8000 because GitHub must reach the callback.
-In Integrations, select **GitHub App installation**, enter the App slug, numeric App ID,
-and generated private key, then save. Select **Install app** to choose the account and
-repositories on GitHub. The signed callback stores the returned installation ID in the
-existing encrypted credential and verifies repository access before marking the
-integration connected. `GITHUB_APP_RETURN_URL` controls the browser destination after
-that callback; it is the frontend Integrations URL, not the GitHub callback URL.
+1. Pure domain/application tests: transitions, admission, usage, classification and merge policies.
+2. Adapter tests: HTTP/SDK/Docker protocol fakes, filesystem/Git checks, bounded output.
+3. PostgreSQL tests: initial schema/defaults, lifecycle/audit, leases, costs, helpers, session changes, source dedup and outbox.
+4. Frontend unit/build/browser tests: current contracts and operator actions.
+5. Deployment acceptance: real container isolation, dependency image, native SDK start/resume/compaction/cancel and offline restore.
+6. Authorized task benchmark: real source → code → tests → PR → review correction → merge, with actual cost and completion evidence.
 
-## Real workflow validation
+Levels 5–6 require the deployment host and explicit spending authorization. Local passing tests do not establish provider invoice accuracy or an autonomous completion rate.
 
-After configuring GitHub, Linear, all four agent models, and a real low-risk repository,
-apply the configured Linear trigger to an issue and observe its complete persisted workflow:
+## Configuration and operational safety
 
-```bash
-make validate-real TASK_KEY=CIT-531
-```
+Examples contain no valid credentials or prices. Do not commit .env, PEM files, native sessions or receipts containing sensitive data. Base Compose binds loopback only. Production proxy authentication protects console APIs; webhooks verify provider signatures.
 
-The default command stops safely at `READY_TO_MERGE`. To exercise the guarded merge and
-verify the final Linear transition, opt in explicitly:
+Application startup creates the frozen initial schema only in an empty compatible database. Never stamp an incompatible schema or reset usage to evade budgets.
 
-```bash
-make validate-real TASK_KEY=CIT-531 VALIDATE_ARGS="--merge --require-repair"
-```
+Build dependency images deliberately. Native coding has provider egress but no GitHub/DB credentials. Validation is offline. Git publication is deterministic and separate. Review waits and scheduler polling must not create inference requests.
 
-`--require-repair` additionally proves that at least one internal, CI, or external-review
-repair job occurred. The validator fails on human/context/failure terminal states, missing
-agent roles, missing PR evidence, timeout, or a merged task without a persisted Linear
-Ready for Testing confirmation.
-
-## Continuous integration
-
-`.github/workflows/ci.yml` runs backend and frontend quality checks. Protect `main`
-with a GitHub branch ruleset that requires pull requests and the **Quality gate**
-status check, and blocks force pushes and branch deletion.
-
-## Server deployment
-
-The production stack keeps PostgreSQL, FastAPI, and SvelteKit off public host ports.
-Caddy is the only ingress and obtains HTTPS certificates for `DOMAIN` automatically.
-The scheduler uses the Docker Engine socket to launch a fresh constrained container for
-each agent job. Job containers receive only their job ID as launch data, the database
-and encryption settings required to load durable state, and the workspace volume. The
-unused synchronous database URL and all webhook signing secrets are excluded. Set
-`WORKER_DATABASE_URL` to a dedicated PostgreSQL login whose grants are limited to the
-tables and operations required by agent jobs; production Compose requires this value.
-They
-run with a read-only root filesystem, dropped Linux capabilities, no-new-privileges,
-explicit open-file, CPU, memory, PID, and temporary-filesystem limits, and privileged
-mode disabled, then are removed.
-Create a deployment environment file with strong, unique production values, then run
-from the repository root:
-
-```bash
-cp deploy/.env.example deploy/.env
-docker compose --env-file deploy/.env -f deploy/compose.production.yaml up -d postgres backend
-make provision-worker-db
-docker compose --env-file deploy/.env -f deploy/compose.production.yaml up -d --build
-```
-
-Production startup rejects blank, short, placeholder, or reused application/webhook
-secrets. The three values must each be at least 32 characters and different from one
-another. It also rejects placeholder database URLs and requires an absolute HTTPS
-`GITHUB_APP_RETURN_URL`; `deploy/.env.example` is intentionally not runnable unchanged.
-
-The first command starts PostgreSQL and applies Alembic migrations through the backend.
-The second idempotently creates or rotates the disposable-job login and grants table
-reads plus only the task/repository updates and worker-run inserts used by job code.
-Run `make provision-worker-db` again after migrations that introduce tables workers
-must read. Existing installations can adopt the restricted login with the same command.
-
-DNS for `DOMAIN` must point to the server, and inbound TCP ports 80/443 plus UDP 443
-must be allowed.
-
-Create an on-host PostgreSQL/workspace backup set with:
-
-```bash
-make backup-production
-```
-
-Each timestamped directory contains a PostgreSQL custom-format dump, compressed
-workspace archive, and SHA-256 manifest. The backup job validates both archives before
-publishing the directory and deletes sets older than `BACKUP_RETENTION_DAYS`. Copy these
-sets to separate storage; an on-host copy does not protect against server loss.
-
-Restoration is destructive and requires an exact backup-set name plus an explicit
-confirmation. Stop all application writers, restore, and restart the stack:
-
-```bash
-docker compose --env-file deploy/.env -f deploy/compose.production.yaml stop proxy frontend worker backend
-make restore-production BACKUP_SET=20260905T120000Z CONFIRM_RESTORE=RESTORE
-docker compose --env-file deploy/.env -f deploy/compose.production.yaml up -d
-```
-
-The restore tool rejects paths, verifies `SHA256SUMS`, validates both archives, replaces
-the database, and replaces workspace contents. Take a fresh backup before restoring.
-
-Rotate the application credential-encryption key with API and worker processes stopped.
-The first command is a rollback-only dry run; the second requires explicit confirmation:
-
-```bash
-docker compose --env-file deploy/.env -f deploy/compose.production.yaml stop proxy frontend worker backend
-make rotate-credentials NEW_APP_SECRET_KEY='new-long-random-secret'
-make rotate-credentials NEW_APP_SECRET_KEY='new-long-random-secret' ROTATE_ARGS=--apply CONFIRM_CREDENTIAL_ROTATION=ROTATE
-```
-
-Immediately replace `APP_SECRET_KEY` in `deploy/.env` with the same new value and restart
-the stack. Rotation locks all credential rows, decrypts every record before changing any
-record, and commits all replacements in one transaction. If the command fails, the old
-key remains authoritative. Take a database backup before an applied rotation.
-
-The scheduler is trusted infrastructure because access to the Docker socket is
-host-level authority. Do not expose that socket to the API, frontend, or job containers.
-Docker network isolation cannot provide provider-domain allowlists by itself; enforce
-outbound domain policy at the host firewall. `WORKER_EGRESS_PROXY` configures HTTP(S)
-proxy use inside disposable jobs, but the firewall must also prevent direct proxy
-bypass. Keep PostgreSQL in `WORKER_NO_PROXY` so database traffic stays private.
+See [PRODUCT.md](PRODUCT.md) for entity/feature ownership and [execution logic](docs/v2-implementation.md) for token accounting and recovery.

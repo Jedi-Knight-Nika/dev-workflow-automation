@@ -2,8 +2,8 @@ from datetime import UTC, datetime
 
 import pytest
 
-from app.application.operations import QueryOperations
-from app.application.ports.operations_queries import ActivityView, WebhookHealthView
+from app.platform.scheduling.operations import QueryOperations
+from app.platform.scheduling.ports.operations_queries import ActivityView, WebhookHealthView
 
 
 class FakeOperationsQueries:

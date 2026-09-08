@@ -1,81 +1,60 @@
 <script lang="ts">
   import Button from '$lib/components/Button.svelte';
   import type { Task } from '$lib/types';
-  import { t } from '$lib/i18n/index.svelte';
+  import type { TaskCommand } from '$lib/services/tasks';
 
   let {
     task,
     commanding,
-    onEnqueue,
-    onTaskCommand,
-    onPublishPullRequest,
-    onMergePullRequest,
-    onRetryLinearSync
+    onTaskCommand
   }: {
     task: Task;
     commanding: boolean;
-    onEnqueue: (role: 'THINKER' | 'EXECUTOR' | 'REVIEWER', action: string) => void;
-    onTaskCommand: (command: 'pause' | 'cancel' | 'takeover' | 'resume') => void;
-    onPublishPullRequest: () => void;
-    onMergePullRequest: () => void;
-    onRetryLinearSync: () => void;
+    onTaskCommand: (command: TaskCommand) => void;
   } = $props();
+  const terminal = $derived(['MERGED', 'CANCELLED', 'FAILED'].includes(task.status));
+  const suspended = $derived(['NEW', 'PAUSED', 'WAITING_HUMAN'].includes(task.status));
 </script>
 
-<section class="border-line flex flex-wrap items-center gap-2 rounded-xl border p-5 xl:col-span-2">
-  <strong class="mr-auto">{t('taskDetail.controls')}</strong>
-  {#if task.manual_takeover}<span
-      class="rounded-full border border-warning/40 px-2.5 py-1 font-mono text-[10px] text-warning"
-      >{t('taskDetail.manualControl')}</span
-    >{/if}
-  <Button
-    disabled={commanding || task.manual_takeover}
-    onclick={() => onEnqueue('THINKER', 'CREATE_PLAN')}>{t('taskDetail.plan')}</Button
-  >
-  <Button
-    disabled={commanding || task.manual_takeover || !task.repository_id}
-    onclick={() => onEnqueue('EXECUTOR', 'IMPLEMENT_PLAN')}>{t('taskDetail.implement')}</Button
-  >
-  <Button
-    disabled={commanding || task.manual_takeover || !task.workspace_path}
-    onclick={() => onEnqueue('REVIEWER', 'REVIEW_CHANGES')}>{t('taskDetail.review')}</Button
-  >
-  <Button
-    disabled={commanding || task.manual_takeover || !task.workspace_path}
-    onclick={onPublishPullRequest}
-    >{task.pull_request_number ? t('taskDetail.updatePr') : t('taskDetail.publishPr')}</Button
-  >
-  <Button
-    variant="success"
-    disabled={commanding ||
-      task.manual_takeover ||
-      !task.pull_request_number ||
-      task.state === 'MERGED'}
-    onclick={onMergePullRequest}>{t('taskDetail.merge')}</Button
-  >
-  {#if task.state === 'MERGED' && task.external_key}<Button
+<section
+  class="flex flex-wrap items-center gap-3 rounded-xl border border-line p-4 xl:col-span-2"
+  aria-label="Task controls"
+>
+  {#if !terminal}
+    {#if suspended}
+      <Button disabled={commanding} onclick={() => onTaskCommand('resume')}>
+        {task.status === 'NEW'
+          ? 'Start work'
+          : task.manual_takeover
+            ? 'Release takeover and resume'
+            : 'Resume work'}
+      </Button>
+    {:else}
+      <Button disabled={commanding} onclick={() => onTaskCommand('pause')}>Pause work</Button>
+    {/if}
+    {#if !task.manual_takeover}
+      <Button variant="warning" disabled={commanding} onclick={() => onTaskCommand('takeover')}
+        >Take over manually</Button
+      >
+    {/if}
+    <Button
+      variant="danger"
       disabled={commanding}
-      onclick={onRetryLinearSync}>{t('taskDetail.retryLinearSync')}</Button
-    >{/if}
-  {#if task.manual_takeover}<Button
-      variant="warning"
+      onclick={() => {
+        if (confirm('Cancel this task? Work stops; its files and evidence remain available.'))
+          onTaskCommand('cancel');
+      }}>Cancel task</Button
+    >
+  {:else}
+    <Button
       disabled={commanding}
-      onclick={() => onTaskCommand('resume')}>{t('taskDetail.resumeAutomation')}</Button
-    >{:else}<Button
-      variant="warning"
-      disabled={commanding || task.state === 'MERGED' || task.state === 'CANCELLED'}
-      onclick={() => onTaskCommand('takeover')}>{t('taskDetail.takeOverManually')}</Button
-    >{/if}
-  <Button disabled={commanding || task.manual_takeover} onclick={() => onTaskCommand('pause')}
-    >{t('taskDetail.pause')}</Button
-  >
-  <Button
-    variant="danger"
-    disabled={commanding}
-    onclick={() => {
-      if (confirm('Cancel this task? This stops all work and cannot be undone.')) {
-        onTaskCommand('cancel');
-      }
-    }}>{t('taskDetail.cancel')}</Button
-  >
+      onclick={() => {
+        if (confirm('Archive this completed or cancelled task?')) onTaskCommand('archive');
+      }}>Archive</Button
+    >
+  {/if}
+  <p class="w-full text-xs text-muted">
+    Resume keeps the current phase, native session and budget usage. Publication and merge follow
+    the Team policy.
+  </p>
 </section>

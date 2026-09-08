@@ -1,11 +1,9 @@
 import { api } from '$lib/api';
 import type {
-  AgentCheckpoint,
   Job,
-  ReviewFinding,
+  NativeRun,
   Task,
   TaskEvent,
-  TaskMemory,
   TaskMetrics,
   TaskMessage,
   TaskMessagePage,
@@ -17,26 +15,17 @@ export type CreateTaskInput = {
   description: string;
   priority: number;
   repository_id?: string | null;
-  enqueue_planning: boolean;
+  start_work: boolean;
   external_key?: string | null;
   project_name?: string | null;
   labels?: string[];
   estimate?: number | null;
   due_at?: string | null;
 };
-
-export type CreateJobInput = {
-  role: 'THINKER' | 'EXECUTOR' | 'REVIEWER';
-  action: string;
-  priority: number;
-  payload: Record<string, unknown>;
-};
-
-export type TaskCommand = 'pause' | 'cancel' | 'takeover' | 'resume' | 'reopen';
-
+export type TaskCommand = 'pause' | 'cancel' | 'takeover' | 'resume' | 'archive';
 export type TaskFilters = {
   search?: string;
-  state?: string[];
+  status?: string[];
   provider?: string;
   repository_id?: string;
   priority?: number[];
@@ -54,7 +43,6 @@ export type TaskFilters = {
   sort?: 'priority' | 'created' | 'updated' | 'due';
   direction?: 'asc' | 'desc';
 };
-
 export function listTasks(filters: TaskFilters = {}): Promise<Task[]> {
   const query = new URLSearchParams({ limit: '500' });
   for (const [key, value] of Object.entries(filters)) {
@@ -63,108 +51,26 @@ export function listTasks(filters: TaskFilters = {}): Promise<Task[]> {
     if (Array.isArray(value)) value.forEach((item) => query.append(key, String(item)));
     else query.set(key, String(value));
   }
-  return api<Task[]>(`/tasks?${query.toString()}`);
+  return api<Task[]>('/tasks?' + query.toString());
 }
-
-export function getTask(taskId: string): Promise<Task> {
-  return api<Task>(`/tasks/${taskId}`);
-}
-
-export function createTask(input: CreateTaskInput): Promise<Task> {
-  return api<Task>('/tasks', { method: 'POST', body: JSON.stringify(input) });
-}
-
-export function listTaskJobs(taskId: string): Promise<Job[]> {
-  return api<Job[]>(`/tasks/${taskId}/jobs`);
-}
-
-export function getTaskMetrics(taskId: string): Promise<TaskMetrics> {
-  return api<TaskMetrics>(`/tasks/${taskId}/metrics`);
-}
-
-export function createTaskJob(taskId: string, input: CreateJobInput): Promise<Job> {
-  return api<Job>(`/tasks/${taskId}/jobs`, { method: 'POST', body: JSON.stringify(input) });
-}
-
-export function listTaskEvents(taskId: string): Promise<TaskEvent[]> {
-  return api<TaskEvent[]>(`/tasks/${taskId}/events`);
-}
-
-export function listTaskMessages(taskId: string, beforeId?: number): Promise<TaskMessagePage> {
+export const getTask = (id: string) => api<Task>('/tasks/' + id);
+export const createTask = (input: CreateTaskInput) =>
+  api<Task>('/tasks', { method: 'POST', body: JSON.stringify(input) });
+export const listTaskJobs = (id: string) => api<Job[]>('/tasks/' + id + '/jobs');
+export const listTaskRuns = (id: string) => api<NativeRun[]>('/tasks/' + id + '/runs');
+export const listTaskEvents = (id: string) => api<TaskEvent[]>('/tasks/' + id + '/events');
+export const listTaskValidations = (id: string) =>
+  api<ValidationRecord[]>('/tasks/' + id + '/validations');
+export const getTaskMetrics = (id: string) => api<TaskMetrics>('/tasks/' + id + '/metrics');
+export function listTaskMessages(id: string, beforeId?: number): Promise<TaskMessagePage> {
   const query = new URLSearchParams({ limit: '50' });
   if (beforeId) query.set('before_id', String(beforeId));
-  return api<TaskMessagePage>(`/tasks/${taskId}/messages?${query.toString()}`);
+  return api<TaskMessagePage>('/tasks/' + id + '/messages?' + query.toString());
 }
-
-export function addTaskMessage(
-  taskId: string,
-  body: string,
-  replyToId?: number
-): Promise<TaskMessage> {
-  return api<TaskMessage>(`/tasks/${taskId}/messages`, {
+export const addTaskMessage = (id: string, body: string, replyToId?: number) =>
+  api<TaskMessage>('/tasks/' + id + '/messages', {
     method: 'POST',
     body: JSON.stringify({ body, reply_to_id: replyToId ?? null })
   });
-}
-
-export function reactToTaskMessage(
-  taskId: string,
-  messageId: number,
-  reaction: string
-): Promise<TaskMessage> {
-  return api<TaskMessage>(`/tasks/${taskId}/messages/${messageId}/reactions`, {
-    method: 'POST',
-    body: JSON.stringify({ reaction })
-  });
-}
-
-export function editTaskMessage(
-  taskId: string,
-  messageId: number,
-  body: string
-): Promise<TaskMessage> {
-  return api<TaskMessage>(`/tasks/${taskId}/messages/${messageId}`, {
-    method: 'PATCH',
-    body: JSON.stringify({ body })
-  });
-}
-
-export function deleteTaskMessage(taskId: string, messageId: number): Promise<void> {
-  return api<void>(`/tasks/${taskId}/messages/${messageId}`, { method: 'DELETE' });
-}
-
-export function listTaskValidations(taskId: string): Promise<ValidationRecord[]> {
-  return api<ValidationRecord[]>(`/tasks/${taskId}/validations`);
-}
-
-export function listTaskFindings(taskId: string): Promise<ReviewFinding[]> {
-  return api<ReviewFinding[]>(`/tasks/${taskId}/findings`);
-}
-
-export function getTaskMemory(taskId: string): Promise<TaskMemory> {
-  return api<TaskMemory>(`/tasks/${taskId}/memory`);
-}
-
-export function listTaskCheckpoints(taskId: string): Promise<AgentCheckpoint[]> {
-  return api<AgentCheckpoint[]>(`/tasks/${taskId}/checkpoints`);
-}
-
-export function prepareTaskWorkspace(taskId: string): Promise<Task> {
-  return api<Task>(`/tasks/${taskId}/workspace`, { method: 'POST' });
-}
-
-export function publishTaskPullRequest(taskId: string): Promise<unknown> {
-  return api(`/tasks/${taskId}/pull-request`, { method: 'POST' });
-}
-
-export function mergeTaskPullRequest(taskId: string): Promise<unknown> {
-  return api(`/tasks/${taskId}/merge`, { method: 'POST' });
-}
-
-export function retryTaskLinearSync(taskId: string): Promise<{ synchronized: boolean }> {
-  return api<{ synchronized: boolean }>(`/tasks/${taskId}/linear-sync`, { method: 'POST' });
-}
-
-export function runTaskCommand(taskId: string, command: TaskCommand): Promise<Task> {
-  return api<Task>(`/tasks/${taskId}/${command}`, { method: 'POST' });
-}
+export const runTaskCommand = (id: string, command: TaskCommand) =>
+  api<Task>('/tasks/' + id + '/' + command, { method: 'POST' });

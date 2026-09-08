@@ -35,17 +35,12 @@
     { name: 'trello', type: 'task_management', label: 'Trello', active: true },
     { name: 'openai', type: 'ai', label: 'OpenAI', active: true },
     { name: 'anthropic', type: 'ai', label: 'Anthropic', active: true },
-    { name: 'google', type: 'ai', label: 'Google', active: true },
-    { name: 'npm_registry', type: 'package_registry', label: 'npm Registry', active: true },
-    { name: 'pypi_registry', type: 'package_registry', label: 'PyPI Registry', active: true },
-    { name: 'gitlab', type: 'source_control', label: 'GitLab', active: false },
-    { name: 'jira', type: 'task_management', label: 'Jira', active: false }
+    { name: 'deepseek', type: 'ai', label: 'DeepSeek', active: true }
   ];
   const groups = [
     { type: 'source_control', label: 'Source control' },
     { type: 'task_management', label: 'Task management' },
-    { type: 'ai', label: 'AI providers' },
-    { type: 'package_registry', label: 'Package registries' }
+    { type: 'ai', label: 'AI providers' }
   ];
   const credentialHelp: Record<
     string,
@@ -69,23 +64,11 @@
       url: 'https://console.anthropic.com/settings/keys',
       action: 'Open Anthropic API keys'
     },
-    google: {
-      label: 'Google Gemini API key',
-      description: 'Create a Gemini API key in Google AI Studio.',
-      url: 'https://aistudio.google.com/apikey',
-      action: 'Open Google AI Studio'
-    },
-    npm_registry: {
-      label: 'npm access token',
-      description: 'Use a granular access token that can read the packages your workers need.',
-      url: 'https://www.npmjs.com/settings/~/tokens',
-      action: 'Open npm access tokens'
-    },
-    pypi_registry: {
-      label: 'PyPI API token',
-      description: 'Use a scoped PyPI API token for the required project or account.',
-      url: 'https://pypi.org/manage/account/token/',
-      action: 'Open PyPI API tokens'
+    deepseek: {
+      label: 'DeepSeek API key',
+      description: 'Used only for an explicitly configured interpreter fallback.',
+      url: 'https://platform.deepseek.com/api_keys',
+      action: 'Open DeepSeek API keys'
     }
   };
   let error = '';
@@ -117,7 +100,6 @@
   let loadingTrello = false;
   let refreshingStatuses = false;
   let statusesRefreshedAt: Date | null = null;
-  let registryUrl = '';
   let githubAccount: GitHubInstallationAccount | null = null;
   async function loadGithubAccount() {
     try {
@@ -186,11 +168,7 @@
                   sync_enabled: true,
                   poll_interval_seconds: 60
                 }
-              : provider.name === 'npm_registry'
-                ? { registry_url: registryUrl || null }
-                : provider.name === 'pypi_registry'
-                  ? { index_url: registryUrl || null }
-                  : {},
+              : {},
         credential:
           provider.name === 'trello'
             ? trelloApiKey && trelloToken
@@ -689,20 +667,6 @@
                         onDiscoverStates={discoverLinearStates}
                       />
                     {/if}
-                    {#if provider.name === 'npm_registry' || provider.name === 'pypi_registry'}
-                      <TextField
-                        id={`registry-url-${provider.name}`}
-                        label={provider.name === 'npm_registry'
-                          ? t('integrations.registryUrl')
-                          : t('integrations.packageIndexUrl')}
-                        type="url"
-                        bind:value={registryUrl}
-                        placeholder={provider.name === 'npm_registry'
-                          ? 'https://npm.pkg.github.com'
-                          : 'https://pypi.example.com/simple'}
-                        class="mt-3"
-                      />
-                    {/if}
                     <p class="text-muted mt-2 text-[10px]">
                       {t('integrations.storedEncrypted')}
                     </p>
@@ -810,7 +774,6 @@
                         trelloDoneListId = String(existing?.done_list_id || '');
                         trelloApiKey = '';
                         trelloToken = '';
-                        registryUrl = String(existing?.registry_url || existing?.index_url || '');
                       }}
                       >{provider.name === 'github' && status(provider.name) === 'DISCONNECTED'
                         ? t('integrations.connectGithub')

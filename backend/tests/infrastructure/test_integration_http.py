@@ -1,7 +1,7 @@
 import httpx
 import pytest
 
-from app.integrations.http import IntegrationHttpPool, request_with_retry
+from app.platform.integrations.http import IntegrationHttpPool, request_with_retry
 
 
 @pytest.mark.asyncio
@@ -37,7 +37,7 @@ async def test_transient_status_is_retried(monkeypatch: pytest.MonkeyPatch) -> N
     async def fake_sleep(delay: float) -> None:
         sleeps.append(delay)
 
-    monkeypatch.setattr("app.integrations.http.asyncio.sleep", fake_sleep)
+    monkeypatch.setattr("app.platform.integrations.http.asyncio.sleep", fake_sleep)
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         response = await request_with_retry(client, "GET", "https://example.test")
 
@@ -58,7 +58,7 @@ async def test_retry_after_header_controls_delay(monkeypatch: pytest.MonkeyPatch
     async def fake_sleep(delay: float) -> None:
         sleeps.append(delay)
 
-    monkeypatch.setattr("app.integrations.http.asyncio.sleep", fake_sleep)
+    monkeypatch.setattr("app.platform.integrations.http.asyncio.sleep", fake_sleep)
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         response = await request_with_retry(client, "GET", "https://example.test")
 

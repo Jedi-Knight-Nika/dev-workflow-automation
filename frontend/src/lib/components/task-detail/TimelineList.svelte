@@ -1,76 +1,56 @@
 <script lang="ts">
   import ShowMore from '$lib/components/ShowMore.svelte';
   import type { TaskEvent } from '$lib/types';
-  import { t } from '$lib/i18n/index.svelte';
-
   let { events }: { events: TaskEvent[] } = $props();
-
-  function typeClass(eventType: string): string {
-    if (/FAIL|ERROR|CANCEL|BLOCK/.test(eventType)) return 'text-danger';
-    if (/SUCCEED|MERGED|COMPLETE|READY/.test(eventType)) return 'text-accent';
-    if (/RETRY|WAIT|PAUSE|NEEDS_HUMAN/.test(eventType)) return 'text-warning';
-    return 'text-heading';
+  const changes = $derived(events.filter((event) => event.event_type === 'TASK_LIFECYCLE_CHANGED'));
+  function actor(event: TaskEvent) {
+    return String(event.payload.actor ?? event.source);
   }
-
-  function isStatusEvent(event: TaskEvent): boolean {
-    return /TASK_|STATE|NEEDS_HUMAN|PLANNING|IMPLEMENT|REVIEW|WAITING|READY|MERGED|PAUSED|CANCELLED|REOPENED|DONE/.test(
-      event.event_type
-    );
-  }
-
-  function actor(event: TaskEvent): string {
-    const payload = event.payload ?? {};
-    return String(
-      payload.actor_name ?? payload.changed_by ?? payload.user_name ?? event.source ?? 'system'
-    );
-  }
-
-  const statusEvents = $derived(events.filter(isStatusEvent));
 </script>
 
-<section class="border-line rounded-xl border p-5">
-  <h2 class="mb-4 font-semibold">{t('taskDetail.timeline')}</h2>
-  {#if events.length === 0}
-    <p class="text-muted text-sm">{t('taskDetail.noEventsRecorded')}</p>
-  {:else}
-    {#if statusEvents.length > 0}
-      <div class="border-line mb-5 rounded-lg border bg-panel-alt/30 p-3">
-        <h3 class="mb-3 text-xs font-semibold uppercase tracking-wider text-muted">
-          {t('taskDetail.statusHistory')}
-        </h3>
-        <div class="space-y-3">
-          {#each statusEvents as event (event.id)}
-            <div class="flex items-start justify-between gap-3 text-sm">
-              <div>
-                <strong class={typeClass(event.event_type)}
-                  >{event.event_type.replaceAll('_', ' ')}</strong
-                >
-                <p class="text-muted text-xs">{t('taskDetail.changedBy')} {actor(event)}</p>
-              </div>
-              <time class="text-muted shrink-0 text-xs" datetime={event.created_at}>
-                {new Date(event.created_at).toLocaleString()}
-              </time>
-            </div>
-          {/each}
-        </div>
-      </div>
-    {/if}
-    <ShowMore items={events}>
-      {#snippet children(visibleEvents: TaskEvent[])}
-        {#each visibleEvents as event, index (event.id)}
-          <div
-            class="border-line border-l pb-5 pl-4 motion-safe:animate-fade-in-up"
-            style="animation-delay: {Math.min(index, 10) * 30}ms"
-          >
-            <strong class="text-sm {typeClass(event.event_type)}"
-              >{event.event_type.replaceAll('_', ' ')}</strong
+<section class="border-line space-y-5 rounded-xl border p-5">
+  <h2 class="font-semibold">Status history</h2>
+  {#if !changes.length}<p class="text-muted text-sm">No status transitions recorded.</p>{/if}
+  <ShowMore items={changes}>
+    {#snippet children(visible: TaskEvent[])}
+      {#each visible as event (event.id)}
+        <article class="border-line border-l-2 pb-4 pl-4 text-sm">
+          <p>
+            {event.payload.from_status} / {event.payload.from_stage} →
+            <strong>{event.payload.to_status} / {event.payload.to_stage}</strong>
+          </p>
+          <p class="text-muted text-xs">
+            Changed by {actor(event)} ·
+            <time datetime={event.created_at}>{new Date(event.created_at).toLocaleString()}</time>
+          </p>
+          {#if event.payload.wait_reason && event.payload.wait_reason !== 'NONE'}<p
+              class="text-warning text-xs"
             >
+              {String(event.payload.wait_reason).replaceAll('_', ' ')}
+            </p>{/if}
+        </article>
+      {/each}
+    {/snippet}
+  </ShowMore>
+  <details>
+    <summary class="cursor-pointer font-medium">All events ({events.length})</summary>
+    <ShowMore items={events}>
+      {#snippet children(visible: TaskEvent[])}
+        {#each visible as event (event.id)}
+          <article class="border-line border-b py-3 text-sm">
+            <p>{event.event_type.replaceAll('_', ' ')}</p>
+            {#if event.payload.reason || event.payload.message}
+              <p class="mt-1 whitespace-pre-wrap break-words">
+                {String(event.payload.reason ?? event.payload.message)}
+              </p>
+            {/if}
             <p class="text-muted text-xs">
-              {event.source} · {new Date(event.created_at).toLocaleString()}
+              {actor(event)} ·
+              <time datetime={event.created_at}>{new Date(event.created_at).toLocaleString()}</time>
             </p>
-          </div>
+          </article>
         {/each}
       {/snippet}
     </ShowMore>
-  {/if}
+  </details>
 </section>

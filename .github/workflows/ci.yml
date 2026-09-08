@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: pgvector/pgvector:pg16
+        image: postgres:16
         env:
           POSTGRES_DB: engineering_worker
           POSTGRES_USER: engineering_worker
@@ -47,7 +47,7 @@ jobs:
         run: uv run ruff format --check app migrations tests ../scripts
       - name: Type check
         run: uv run mypy app ../scripts/validate_real_workflow.py ../scripts/rotate_credentials.py
-      - name: Apply database migrations
+      - name: Initialize empty V2 database
         env:
           DATABASE_URL_SYNC: postgresql+psycopg://engineering_worker:ci-password@localhost:5432/engineering_worker
         run: uv run alembic upgrade head

@@ -1,7 +1,7 @@
 import pytest
 
-from app.application.discover_integrations import DiscoverIntegrations
-from app.application.ports.integration_discovery import (
+from app.platform.integrations.application.discover_integrations import DiscoverIntegrations
+from app.platform.integrations.application.ports.integration_discovery import (
     RepositoryDiscoveryView,
     TrelloBoardView,
     TrelloListView,

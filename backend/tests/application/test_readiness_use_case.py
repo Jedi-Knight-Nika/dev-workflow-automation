@@ -1,6 +1,6 @@
 import pytest
 
-from app.application.check_readiness import CheckReadiness, ServiceUnavailableError
+from app.platform.persistence.check_readiness import CheckReadiness, ServiceUnavailableError
 
 
 class FakeProbe:

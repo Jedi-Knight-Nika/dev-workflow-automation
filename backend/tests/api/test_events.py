@@ -5,7 +5,7 @@ from typing import cast
 import pytest
 from fastapi import Request
 
-from app.api.events import sse_messages
+from app.interfaces.http.routes.events import sse_messages
 
 
 class ConnectedRequest:
@@ -21,8 +21,8 @@ async def test_sse_survives_repeated_heartbeats(monkeypatch: pytest.MonkeyPatch)
     async def zero_cursor() -> int:
         return 0
 
-    monkeypatch.setattr("app.api.events.events_after", empty_events)
-    monkeypatch.setattr("app.api.events.latest_event_id", zero_cursor)
+    monkeypatch.setattr("app.interfaces.http.routes.events.events_after", empty_events)
+    monkeypatch.setattr("app.interfaces.http.routes.events.latest_event_id", zero_cursor)
     messages = sse_messages(
         cast(Request, ConnectedRequest()), heartbeat_seconds=0.001, poll_seconds=0.001
     )
@@ -43,8 +43,8 @@ async def test_sse_replays_durable_event_with_id(monkeypatch: pytest.MonkeyPatch
     async def latest_cursor() -> int:
         return 12
 
-    monkeypatch.setattr("app.api.events.events_after", durable_events)
-    monkeypatch.setattr("app.api.events.latest_event_id", latest_cursor)
+    monkeypatch.setattr("app.interfaces.http.routes.events.events_after", durable_events)
+    monkeypatch.setattr("app.interfaces.http.routes.events.latest_event_id", latest_cursor)
     messages = sse_messages(cast(Request, ConnectedRequest()))
     try:
         message = await anext(messages)

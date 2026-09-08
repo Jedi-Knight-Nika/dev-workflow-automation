@@ -1,7 +1,7 @@
 import pytest
 
-from app.infrastructure.security.credential_rotation import reencrypt_credentials
-from app.infrastructure.security.crypto import CredentialCipher
+from app.platform.security.credential_rotation import reencrypt_credentials
+from app.platform.security.crypto import CredentialCipher
 
 
 def test_credential_rotation_reencrypts_every_value() -> None:

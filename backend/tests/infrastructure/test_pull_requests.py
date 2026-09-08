@@ -3,7 +3,7 @@ from typing import Any
 import httpx
 import pytest
 
-from app.integrations.github import GitHubClient, decode_actions_log
+from app.delivery.infrastructure.github_client import GitHubClient, decode_actions_log
 
 
 @pytest.mark.asyncio

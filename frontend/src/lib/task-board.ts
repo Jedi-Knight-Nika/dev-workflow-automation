@@ -1,31 +1,30 @@
 import type { Task } from '$lib/types';
 
 export const TASK_COLUMNS = [
-  { id: 'backlog', label: 'To do', states: ['NEW', 'CONTEXT_PENDING', 'PLANNING', 'PLAN_READY'] },
-  {
-    id: 'progress',
-    label: 'In progress',
-    states: ['QUEUED_FOR_EXECUTION', 'IMPLEMENTING', 'LOCAL_VALIDATION']
-  },
-  { id: 'review', label: 'Review', states: ['INTERNAL_REVIEW', 'WAITING_GITHUB'] },
-  { id: 'ready', label: 'Ready', states: ['READY_TO_MERGE'] },
-  { id: 'done', label: 'Done', states: ['MERGED'] },
-  { id: 'attention', label: 'Attention', states: ['NEEDS_HUMAN', 'FAILED', 'PAUSED', 'CANCELLED'] }
+  { id: 'backlog', label: 'To do', statuses: ['NEW'] },
+  { id: 'progress', label: 'In progress', statuses: ['ACTIVE'] },
+  { id: 'review', label: 'Waiting externally', statuses: ['WAITING_EXTERNAL'] },
+  { id: 'attention', label: 'Needs attention', statuses: ['WAITING_HUMAN', 'PAUSED', 'FAILED'] },
+  { id: 'done', label: 'Merged', statuses: ['MERGED'] },
+  { id: 'cancelled', label: 'Cancelled', statuses: ['CANCELLED'] }
 ] as const;
-
-const KNOWN_STATES = new Set<string>(TASK_COLUMNS.flatMap((column) => column.states));
 
 export function tasksByColumn(tasks: Task[]) {
   return TASK_COLUMNS.map((column) => ({
     ...column,
-    tasks: tasks.filter((task) =>
-      column.id === 'attention'
-        ? (column.states as readonly string[]).includes(task.state) || !KNOWN_STATES.has(task.state)
-        : (column.states as readonly string[]).includes(task.state)
-    )
+    tasks: tasks.filter((task) => (column.statuses as readonly string[]).includes(task.status))
   }));
 }
-
 export function priorityLabel(priority: number): string {
-  return ['Urgent', 'Critical', 'High', 'Medium', 'Low', 'No priority'][priority] ?? `P${priority}`;
+  return ['Urgent', 'Critical', 'High', 'Medium', 'Low', 'No priority'][priority] ?? 'P' + priority;
+}
+export function formatEstimate(value: number | null | undefined): string {
+  return value == null ? 'Unestimated' : value + (value === 1 ? ' story point' : ' story points');
+}
+export function parseEstimate(value: string): number | null {
+  if (!value.trim()) return null;
+  const number = Number(value);
+  if (!Number.isFinite(number) || number < 0)
+    throw new Error('Story points must be a non-negative number.');
+  return number;
 }

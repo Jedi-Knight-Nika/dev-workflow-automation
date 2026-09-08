@@ -9,7 +9,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 COPY pyproject.toml uv.lock ./
-RUN uv sync --frozen --all-extras --no-install-project
+RUN uv sync --frozen --extra dev --no-install-project
 
 FROM base AS api-system
 RUN apt-get update \
@@ -18,7 +18,7 @@ RUN apt-get update \
 
 FROM api-system AS api
 COPY . .
-RUN uv sync --frozen --all-extras
+RUN uv sync --frozen --extra dev
 EXPOSE 8000
 CMD ["sh", "-c", ".venv/bin/alembic upgrade head && exec .venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000"]
 
@@ -32,5 +32,17 @@ RUN apt-get update \
 
 FROM worker-system AS worker
 COPY . .
-RUN uv sync --frozen --all-extras
+RUN uv sync --frozen --extra dev
 CMD [".venv/bin/python", "-m", "app.scheduler_runner"]
+
+# Built separately; never started as a long-running Compose service.
+FROM worker-system AS developer-runner
+COPY . .
+RUN uv sync --frozen --extra harness \
+    && groupadd --gid 10001 runner \
+    && useradd --uid 10001 --gid 10001 --create-home runner \
+    && mkdir /workspace \
+    && chown runner:runner /workspace
+USER 10001:10001
+WORKDIR /workspace
+CMD ["/app/.venv/bin/python", "-m", "app.agent_runtime.infrastructure.runner", "/run/control/task.json"]

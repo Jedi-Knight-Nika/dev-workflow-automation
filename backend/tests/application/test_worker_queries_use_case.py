@@ -2,8 +2,8 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from app.application.ports.worker_queries import WorkerSnapshot
-from app.application.query_workers import QueryWorkers
+from app.platform.scheduling.ports.worker_queries import WorkerSnapshot
+from app.platform.scheduling.query_workers import QueryWorkers
 
 
 class FakeWorkerQueries:

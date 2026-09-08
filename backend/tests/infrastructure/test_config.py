@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from app.config import Settings
+from app.platform.configuration.settings import Settings
 
 
 def production_settings(**overrides: str) -> Settings:

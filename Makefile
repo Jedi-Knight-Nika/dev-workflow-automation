@@ -1,4 +1,4 @@
-.PHONY: setup dev-backend dev-frontend up down logs validate-real backup-production restore-production provision-worker-db rotate-credentials operational-check backend-lint backend-typecheck backend-test frontend-lint frontend-typecheck frontend-build frontend-e2e test lint typecheck format format-check check migrate lock
+.PHONY: setup dev-backend dev-frontend up down logs validate-real backup-production restore-production rotate-credentials operational-check backend-lint backend-typecheck backend-test frontend-lint frontend-typecheck frontend-build frontend-e2e test lint typecheck format format-check check migrate lock
 
 setup:
 	cd backend && uv sync --all-extras --locked
@@ -24,7 +24,7 @@ validate-real:
 	python3 scripts/validate_real_workflow.py "$(TASK_KEY)" $(VALIDATE_ARGS)
 
 operational-check:
-	sh -n deploy/backup.sh deploy/restore.sh deploy/provision-worker-db.sh
+	sh -n deploy/backup.sh deploy/restore.sh
 	python3 -m py_compile scripts/validate_real_workflow.py scripts/rotate_credentials.py
 
 rotate-credentials:
@@ -37,9 +37,6 @@ backup-production:
 restore-production:
 	@test -n "$(BACKUP_SET)" || (echo "BACKUP_SET is required" >&2; exit 1)
 	BACKUP_SET="$(BACKUP_SET)" CONFIRM_RESTORE="$(CONFIRM_RESTORE)" docker compose --env-file deploy/.env -f deploy/compose.production.yaml --profile tools run --rm restore
-
-provision-worker-db:
-	docker compose --env-file deploy/.env -f deploy/compose.production.yaml --profile tools run --rm provision-worker-db
 
 test:
 	$(MAKE) backend-test

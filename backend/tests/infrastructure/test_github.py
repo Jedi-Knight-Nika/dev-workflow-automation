@@ -7,8 +7,8 @@ import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 
-from app.integrations.github import verify_signature
-from app.integrations.github_auth import (
+from app.delivery.infrastructure.github_client import verify_signature
+from app.platform.integrations.github_auth import (
     create_app_jwt,
     create_install_state,
     github_app_install_url,

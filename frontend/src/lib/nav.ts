@@ -10,18 +10,6 @@ export const NAV_ITEMS = [
     labelKey: 'nav.teams' satisfies TranslationKey
   },
   {
-    href: '/agents',
-    label: 'Workflow',
-    group: 'Workforce',
-    labelKey: 'nav.workflow' satisfies TranslationKey
-  },
-  {
-    href: '/roles',
-    label: 'Roles',
-    group: 'Workforce',
-    labelKey: 'nav.roles' satisfies TranslationKey
-  },
-  {
     href: '/repositories',
     label: 'Repositories',
     group: 'Resources',

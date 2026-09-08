@@ -2,8 +2,11 @@ import uuid
 
 import pytest
 
-from app.application.manage_repositories import ManageRepositories
-from app.application.ports.repository_management import CreateRepositoryCommand, RepositoryView
+from app.repositories.application.manage_repositories import ManageRepositories
+from app.repositories.application.ports.repository_management import (
+    CreateRepositoryCommand,
+    RepositoryView,
+)
 
 
 class FakeRepositoryWorkflow:

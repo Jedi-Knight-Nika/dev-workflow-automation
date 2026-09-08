@@ -1,47 +1,24 @@
 # Autonomous Engineering Worker
 
-<p align="center">
-  <img src="docs/logo.png" alt="Autonomous Engineering Worker logo" width="220" />
-</p>
+A single-operator engineering control center: scoped tasks become code through a persistent native coding session, isolated validation, pull requests, review feedback and guarded merge.
 
-> Automate the nine-to-five job hell. As one wise man said, if they don't give you a salary raise, promote yourself by working less.
+The workflow is fixed. Models write and reason; deterministic application code owns authorization, scheduling, cost admission, publication and merge.
 
-An AI engineering workflow orchestrator that turns external or manually created tasks into
-planned, implemented, tested, reviewed, and delivered code while deterministic software retains
-control of routing, permissions, budgets, retries, and state.
+## Start here
 
-The project is designed around durable jobs, isolated workers, auditable events, and
-human control. AI models assist with reasoning and implementation; the application
-controls scheduling, permissions, retries, and lifecycle decisions.
+- [Architecture and feature reference](PRODUCT.md)
+- [How task execution and token accounting work](docs/v2-implementation.md)
+- [Fresh database and deployment setup](docs/initial-setup.md)
+- [Development, tests and operational checks](DEVELOPMENT.md)
+- [Refactor verification and remaining acceptance checks](docs/refactor-verification.md)
+- [Design specification](autonomous_engineering_worker_v2_technical_architecture.md)
 
-## Development
+For local API/UI development, copy `.env.example`, configure secrets and use a new PostgreSQL database:
 
-The application is containerized and can be started with:
-
-```bash
-cp .env.example .env
-docker compose up --build
+```sh
+docker compose up --build postgres backend frontend
 ```
 
-Read [PRODUCT.md](PRODUCT.md) for the complete product and architecture reference, and
-[DEVELOPMENT.md](DEVELOPMENT.md) for setup, operations, and validation commands.
+This does not enable paid execution. Native runners require the deployment overlay, configured dependency image, provider access, validated pricing and explicit Team budgets.
 
-See [How AI task execution currently works](docs/ai-task-lifecycle-current.md) for an
-English, source-backed walkthrough from task creation to merge, including role handoffs,
-workspace tools, context, token budgets, and known completion limitations.
-
-See [Project architecture and detailed feature inventory](docs/project-architecture-and-features.md)
-for the technology stack, deployment, domain/data model, UI and API features,
-integrations, security boundaries, operations, and current limitations.
-
-See [Role-by-role efficiency research](docs/role-efficiency-research.md) for the latest
-Planner, Executor, routing, review, and validation optimizations and their test evidence.
-
-See [Token efficiency and execution budgets](docs/token-efficiency.md) for cost controls,
-source-reading limits, plan reuse, and verification details.
-
-See [Executor workspace tools](docs/executor-workspace-tools.md) for direct editing,
-same-run test correction, permissions, and rollout instructions.
-
-See [Token-cost research and recovery](docs/token-cost-research-and-recovery.md) for
-the research-backed source-access, caching, and reimport/worktree fixes.
+The implementation is covered by local backend/PostgreSQL/frontend/browser tests. Real Docker/native-model acceptance and representative paid-task benchmarks must be performed on the deployment host before unattended use. No percentage cost saving is claimed without those measurements.

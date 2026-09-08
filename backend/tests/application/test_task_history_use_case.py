@@ -2,7 +2,7 @@ import uuid
 
 import pytest
 
-from app.application.tasks import QueryTaskHistory
+from app.engineering.application.query_history import QueryTaskHistory
 
 
 class FakeTaskHistoryQueries:
@@ -35,10 +35,8 @@ async def test_task_history_delegates_every_read_to_query_port() -> None:
     assert await history.jobs(task_id) == []
     assert await history.events(task_id) == []
     assert await history.validations(task_id) == []
-    assert await history.findings(task_id) == []
     assert queries.calls == [
         ("jobs", task_id),
         ("events", task_id),
         ("validations", task_id),
-        ("findings", task_id),
     ]

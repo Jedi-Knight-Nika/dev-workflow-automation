@@ -1,33 +1,22 @@
 #!/bin/sh
+# Run only after stopping API/controller and every managed task runner.
 set -eu
-
-timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
-destination="/backups/${timestamp}"
-temporary="${destination}.incomplete"
-
-mkdir -p "$temporary"
-trap 'rm -rf "$temporary"' EXIT INT TERM
-
+[ "${CONFIRM_QUIESCENT:-}" = YES ] || {
+  echo "Stop API, worker and native runners, then set CONFIRM_QUIESCENT=YES." >&2
+  exit 1
+}
+for directory in workspaces native control; do
+  [ -d "/engineering-data/$directory" ] || { echo "Missing data directory: $directory" >&2; exit 1; }
+done
+umask 077
+temporary="$(mktemp -d /backups/incomplete.XXXXXXXX)"
+# Failed sets are kept for inspection, never silently deleted.
 pg_dump --format=custom --file="$temporary/database.dump"
-tar -C /workspaces -czf "$temporary/workspaces.tar.gz" .
-
+tar -C /engineering-data -czf "$temporary/runtime.tar.gz" workspaces native control
 pg_restore --list "$temporary/database.dump" >/dev/null
-tar -tzf "$temporary/workspaces.tar.gz" >/dev/null
-sha256sum "$temporary/database.dump" "$temporary/workspaces.tar.gz" \
-  | sed "s#${temporary}/##" >"$temporary/SHA256SUMS"
-
+tar -tzf "$temporary/runtime.tar.gz" >/dev/null
+(cd "$temporary" && sha256sum database.dump runtime.tar.gz >SHA256SUMS)
+stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+destination="/backups/${stamp}-${temporary##*.}"
 mv "$temporary" "$destination"
-trap - EXIT INT TERM
-
-case "${BACKUP_RETENTION_DAYS}" in
-  ''|*[!0-9]*)
-    echo "BACKUP_RETENTION_DAYS must be a non-negative integer" >&2
-    exit 1
-    ;;
-  *)
-    find /backups -mindepth 1 -maxdepth 1 -type d \
-      -mtime "+${BACKUP_RETENTION_DAYS}" -exec rm -rf -- {} +
-    ;;
-esac
-
-echo "Backup created: ${destination}"
+echo "Verified backup: $destination. Protect it as credentials; retention is operator-managed."
