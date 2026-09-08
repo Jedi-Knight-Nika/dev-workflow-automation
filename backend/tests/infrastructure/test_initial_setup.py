@@ -12,14 +12,15 @@ def test_initial_and_additive_revisions_can_generate_sql_without_a_database() ->
     output = StringIO()
     config = Config("alembic.ini", output_buffer=output)
     revisions = ScriptDirectory.from_config(config)
-    assert revisions.get_heads() == ["0003_operational_configuration"]
-    assert len(list(revisions.walk_revisions())) == 3
+    assert revisions.get_heads() == ["0004_token_efficiency"]
+    assert len(list(revisions.walk_revisions())) == 4
     command.upgrade(config, "head", sql=True)
     sql = output.getvalue()
     assert "CREATE TABLE developer_sessions" in sql
     assert "CREATE TABLE team_agent_profiles" in sql
     assert "INSERT INTO teams" in sql
-    assert "ALTER TABLE" not in sql
+    assert "ALTER TABLE ai_runs" in sql
+    assert "CREATE TABLE developer_context_generations" in sql
     assert "CREATE EXTENSION" not in sql
     assert "DROP TABLE" not in sql
     assert "CREATE TABLE runner_resource_bindings" in sql

@@ -131,6 +131,7 @@
 
 <style>
   .metrics-panel {
+    min-width: 0;
     grid-column: 1 / -1;
     border: 1px solid var(--color-line);
     border-radius: 0.75rem;

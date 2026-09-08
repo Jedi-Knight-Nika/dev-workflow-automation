@@ -3,7 +3,9 @@
 import asyncio
 import json
 import os
+from collections.abc import Awaitable, Callable
 from pathlib import Path
+from time import monotonic
 from typing import Any
 from uuid import UUID
 
@@ -76,11 +78,14 @@ class DockerHarness:
         environment: dict[str, str],
         job_id: UUID,
         lease_token: UUID,
+        on_progress: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
     ) -> None:
         self.client, self.mounts, self.manifest = client, mounts, manifest
         self.image, self.network, self.environment = image, network, environment
         self.name = f"developer-{job_id}-{lease_token}"
         self.job_id = job_id
+        self.on_progress = on_progress
+        self.last_progress_at = 0.0
         self.container_id: str | None = None
         self.create_requested = False
         self.reader: asyncio.Task[None] | None = None
@@ -107,7 +112,8 @@ class DockerHarness:
             image=self.image,
             network=self.network,
             provider_environment=self.environment,
-            read_only=self.manifest.role_kind != "DEVELOPER",
+            read_only=self.manifest.role_kind != "DEVELOPER"
+            or self.manifest.operation == "continuity",
         )
         spec["Labels"].update({"job_id": str(self.job_id), "execution_name": self.name})
         loop = asyncio.get_running_loop()
@@ -148,6 +154,13 @@ class DockerHarness:
                             ):
                                 raise RunnerProtocolError("Invalid native session event")
                             self.started.set_result(value)
+                        elif event.get("event") == "developer_progress":
+                            snapshot = event.get("snapshot")
+                            if not isinstance(snapshot, dict) or len(json.dumps(snapshot)) > 8000:
+                                raise RunnerProtocolError("Invalid progress snapshot")
+                            if self.on_progress and monotonic() - self.last_progress_at >= 5:
+                                await self.on_progress(snapshot)
+                                self.last_progress_at = monotonic()
                         elif event.get("event") == "turn_completed":
                             if not self.started.done() or self.completed.done():
                                 raise RunnerProtocolError("Receipt received out of order")

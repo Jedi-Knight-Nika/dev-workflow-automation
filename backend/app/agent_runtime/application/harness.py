@@ -1,8 +1,10 @@
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, Protocol
 
+from app.agent_runtime.domain.token_efficiency_policy import TokenEfficiencyPolicy
 from app.agent_runtime.domain.usage import Pricing, Usage
 
 
@@ -21,6 +23,9 @@ class HarnessSettings:
     timeout_seconds: int = 1200
     pricing: Pricing | None = None
     read_only: bool = False
+    token_policy: TokenEfficiencyPolicy = field(default_factory=TokenEfficiencyPolicy)
+    progress_callback: Callable[[dict[str, Any]], None] | None = None
+    progress_baseline: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not self.workspace.is_absolute() or not self.model.strip():
@@ -42,6 +47,7 @@ class TurnReceipt:
     provider_duration_ms: int | None = None
     cumulative_usage: dict[str, int | None] | None = None
     failure_code: str | None = None
+    token_efficiency: dict[str, Any] = field(default_factory=dict)
 
 
 class DeveloperHarness(Protocol):

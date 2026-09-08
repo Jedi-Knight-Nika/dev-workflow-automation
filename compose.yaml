@@ -3,6 +3,7 @@ name: autonomous-engineering-worker
 services:
   postgres:
     image: postgres:16
+    restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-engineering_worker}
       POSTGRES_USER: ${POSTGRES_USER:-engineering_worker}
@@ -16,6 +17,7 @@ services:
       - postgres_data:/var/lib/postgresql/data
 
   backend:
+    restart: unless-stopped
     build:
       context: ./backend
       target: api
@@ -80,6 +82,7 @@ services:
     restart: unless-stopped
 
   frontend:
+    restart: unless-stopped
     build:
       context: ./frontend
     environment:

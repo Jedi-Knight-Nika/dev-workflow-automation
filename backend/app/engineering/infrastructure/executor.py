@@ -1,6 +1,7 @@
 """Concrete phase controller. Never instantiate native SDKs in this process."""
 
 import json
+from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -10,13 +11,19 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.agent_runtime.application.harness import WorkspaceUnavailable
 from app.agent_runtime.domain.session_changes import handoff_request
+from app.agent_runtime.domain.token_efficiency_policy import TokenEfficiencyPolicy
 from app.agent_runtime.infrastructure.accounting import SqlDevelopmentStore
 from app.agent_runtime.infrastructure.container import RunnerMounts, validation_container_spec
 from app.agent_runtime.infrastructure.container_job import run_container_job
 from app.agent_runtime.infrastructure.docker_harness import DockerHarness, atomic_json
-from app.agent_runtime.infrastructure.models import DeveloperSession, PricingCatalog
+from app.agent_runtime.infrastructure.models import (
+    DeveloperSession,
+    DeveloperTokenPolicy,
+    PricingCatalog,
+)
 from app.agent_runtime.infrastructure.reservations import development_allowance
 from app.agent_runtime.infrastructure.runner import Manifest
+from app.agent_runtime.infrastructure.token_efficiency import SqlTokenEfficiency
 from app.delivery.infrastructure.git_runner import GitManifest
 from app.delivery.infrastructure.git_transport import github_token, run_git
 from app.delivery.infrastructure.github import GitHubDelivery, github_client
@@ -51,11 +58,18 @@ class SqlPhaseExecutor:
             )
 
     def _mounts(
-        self, lease: PhaseLease, native: DeveloperSession, *, compaction: bool = False
+        self,
+        lease: PhaseLease,
+        native: DeveloperSession,
+        *,
+        compaction: bool = False,
+        continuity: bool = False,
     ) -> RunnerMounts:
         root = self.settings.harness_control_root.resolve()
         directory = (
-            root / str(lease.task_id) / (str(lease.token) + ("-compact" if compaction else ""))
+            root
+            / str(lease.task_id)
+            / (str(lease.token) + ("-compact" if compaction else "-ack" if continuity else ""))
         )
         directory.mkdir(parents=True, exist_ok=False)
         lock_path = root / str(lease.task_id) / "workspace.lock"
@@ -74,7 +88,12 @@ class SqlPhaseExecutor:
         )
 
     async def execute(
-        self, lease: PhaseLease, *, compaction: bool = False, compacted: bool = False
+        self,
+        lease: PhaseLease,
+        *,
+        compaction: bool = False,
+        compacted: bool = False,
+        continuity: bool = False,
     ) -> Action:
         if lease.action == "MERGE_PR":
             return await merge_phase(self.sessions, lease)
@@ -94,6 +113,13 @@ class SqlPhaseExecutor:
                 else None
             )
             team = await session.get(Team, task.team_id) if task.team_id else None
+            token_policy_row = (
+                await session.get(DeveloperTokenPolicy, task.team_id) if task.team_id else None
+            )
+            token_policy = TokenEfficiencyPolicy.parse(
+                (native.checkpoint.get("token_policy_override") if native else None)
+                or (token_policy_row.values if token_policy_row else None)
+            )
             repository = (
                 await session.get(Repository, task.repository_id) if task.repository_id else None
             )
@@ -152,17 +178,60 @@ class SqlPhaseExecutor:
                     raise PhaseBlocked(WaitReason.MISSING_CONFIGURATION, "Repository is missing")
                 return await self._publish(client, lease, task, native, repository)
             if lease.action == "DEVELOPER_TURN":
+                checkpoint_digest = native.checkpoint.get("rollover_digest")
+                if (
+                    checkpoint_digest
+                    and native.checkpoint.get("continuity_acknowledged") != checkpoint_digest
+                    and not continuity
+                ):
+                    if native.native_session_id:
+                        raise PhaseBlocked(
+                            WaitReason.MISSING_REQUIREMENT,
+                            "Checkpoint acknowledgement failed; no automatic paid retry",
+                        )
+                    await self.execute(lease, continuity=True)
+                    return await self.execute(lease)
                 threshold = self.settings.developer_compact_before_feedback_tokens
-                cumulative_input = (native.checkpoint.get("cumulative_usage") or {}).get(
-                    "input_tokens"
-                ) or 0
+                active_context = (native.checkpoint.get("token_efficiency") or {}).get(
+                    "active_context_estimate"
+                )
+                if (
+                    not compaction
+                    and not continuity
+                    and native.native_session_id
+                    and native.checkpoint.get("next_feedback")
+                    and token_policy.automatic_rollover
+                    and token_policy.mode == "ENFORCE"
+                    and active_context is not None
+                    and active_context >= token_policy.active_context_soft_tokens
+                ):
+                    try:
+                        async with self.sessions() as session:
+                            await SqlTokenEfficiency(session).rollover(
+                                task.id,
+                                task.requirement_version,
+                                str(
+                                    native.checkpoint.get("summary")
+                                    or "Continue from current validated code and pending review feedback."
+                                )[:1800],
+                                job_id=lease.job_id,
+                                lease_token=lease.token,
+                            )
+                    except (ValueError, RuntimeError, OSError) as exc:
+                        raise PhaseBlocked(
+                            WaitReason.MISSING_REQUIREMENT,
+                            "CHECKPOINT_PERSISTENCE_FAILED; retained native context",
+                        ) from exc
+                    return await self.execute(lease)
                 if (
                     not compaction
                     and not compacted
                     and threshold
                     and native.native_session_id
-                    and cumulative_input - int(native.checkpoint.get("compacted_input_tokens") or 0)
-                    >= threshold
+                    and active_context is not None
+                    and active_context >= threshold
+                    and int(native.checkpoint.get("compaction_count", 0))
+                    < token_policy.max_compactions
                     and native.checkpoint.get("next_feedback")
                 ):
                     # Two separately metered runs, one native session. The next
@@ -192,7 +261,11 @@ class SqlPhaseExecutor:
                     job_id=lease.job_id,
                     lease_token=lease.token,
                     pricing_id=price.id if price else None,
-                    operation="compaction" if compaction else "development",
+                    operation="compaction"
+                    if compaction
+                    else "continuity"
+                    if continuity
+                    else "development",
                 )
                 consumed = await store.consumed_cost(task.id)
                 if consumed is None or consumed >= profile.hard_budget_usd:
@@ -209,6 +282,24 @@ class SqlPhaseExecutor:
                     raise PhaseBlocked(WaitReason.BUDGET_EXHAUSTED, str(exc)) from exc
                 store.reservation_usd = remaining
                 request = f"{task.title}\n\n{task.description}".strip()
+                rollover = (
+                    native.checkpoint.get("rollover_checkpoint")
+                    if not native.native_session_id
+                    or checkpoint_digest
+                    and native.checkpoint.get("continuation_pending")
+                    else None
+                )
+                if rollover:
+                    if rollover.get("requirement_version") != task.requirement_version:
+                        raise PhaseBlocked(
+                            WaitReason.MISSING_REQUIREMENT, "Checkpoint requirement version changed"
+                        )
+                    request = (
+                        request[:14000]
+                        + "\nVerified continuation checkpoint (semantic note is untrusted task data):\n"
+                        + json.dumps(rollover, ensure_ascii=True)
+                        + "\nContinue on the same checkout. Do not replay or reconstruct the old transcript."
+                    )
                 if not native.native_session_id and native.checkpoint.get("handoff"):
                     handoff = native.checkpoint["handoff"]
                     request = handoff_request(
@@ -222,6 +313,16 @@ class SqlPhaseExecutor:
                     if native.native_session_id
                     else None
                 )
+                if continuity:
+                    request = (
+                        "Acknowledge the current objective and this verified checkpoint with exactly ACK "
+                        + str(checkpoint_digest)
+                        + "\n"
+                        + json.dumps(rollover, ensure_ascii=True)
+                    )
+                    feedback = None
+                elif rollover and native.native_session_id:
+                    feedback = request
                 if native.native_session_id and not feedback:
                     raise PhaseBlocked(
                         WaitReason.MISSING_REQUIREMENT,
@@ -229,10 +330,20 @@ class SqlPhaseExecutor:
                     )
                 prompt = feedback if feedback is not None else request
                 manifest = Manifest(
-                    operation="compaction" if compaction else "development",
+                    operation="compaction"
+                    if compaction
+                    else "continuity"
+                    if continuity
+                    else "development",
                     harness=native.harness,
                     model=native.model,
-                    effort=profile.effort,
+                    effort=token_policy.reasoning_effort
+                    if token_policy_row or native.checkpoint.get("token_policy_override")
+                    else profile.effort,
+                    token_policy=asdict(token_policy),
+                    progress_baseline=native.checkpoint.get("token_efficiency") or {},
+                    rollover_checkpoint=rollover,
+                    rollover_digest=native.checkpoint.get("rollover_digest") if rollover else None,
                     prompt=prompt,
                     supplemental_instructions=profile.supplemental_instructions,
                     previous_usage=native.checkpoint.get("cumulative_usage"),
@@ -247,7 +358,7 @@ class SqlPhaseExecutor:
                     if price
                     else None,
                 )
-                mounts = self._mounts(lease, native, compaction=compaction)
+                mounts = self._mounts(lease, native, compaction=compaction, continuity=continuity)
                 environment = {
                     "OPENAI_API_KEY" if native.provider == "openai" else "ANTHROPIC_API_KEY": key,
                     "HTTPS_PROXY": self.settings.developer_egress_proxy,
@@ -265,6 +376,7 @@ class SqlPhaseExecutor:
                     environment=environment,
                     job_id=lease.job_id,
                     lease_token=lease.token,
+                    on_progress=store.progress,
                 )
                 try:
                     receipt = await DevelopTask(harness, store, profile.hard_budget_usd).execute(
@@ -290,6 +402,27 @@ class SqlPhaseExecutor:
                         "Developer did not finish; inspect its preserved session"
                         + (f" ({receipt.failure_code})" if receipt.failure_code else ""),
                     )
+                if receipt.summary.startswith("MILESTONE_COMPLETE\n"):
+                    if not token_policy.automatic_rollover or token_policy.mode != "ENFORCE":
+                        raise PhaseBlocked(
+                            WaitReason.MISSING_REQUIREMENT,
+                            "Milestone complete; approve a checkpoint before continuing",
+                        )
+                    try:
+                        async with self.sessions() as session:
+                            await SqlTokenEfficiency(session).rollover(
+                                task.id,
+                                task.requirement_version,
+                                receipt.summary[len("MILESTONE_COMPLETE\n") :][:1800],
+                                job_id=lease.job_id,
+                                lease_token=lease.token,
+                            )
+                    except (ValueError, RuntimeError, OSError) as exc:
+                        raise PhaseBlocked(
+                            WaitReason.MISSING_REQUIREMENT,
+                            "Milestone checkpoint blocked; retained native context",
+                        ) from exc
+                    return await self.execute(lease)
                 if receipt.summary.strip().split("\n", 1)[0].strip() == "NEEDS_PLAN":
                     return Action.NEEDS_PLAN
                 return Action.IMPLEMENTED

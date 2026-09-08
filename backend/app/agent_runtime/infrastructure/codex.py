@@ -1,9 +1,16 @@
 import asyncio
+import hashlib
 import os
+from dataclasses import asdict
+from pathlib import Path
 from typing import Any
 
+from app.agent_runtime.application.developer_progress_governor import DeveloperProgressGovernor
 from app.agent_runtime.application.harness import HarnessSettings, TurnReceipt
+from app.agent_runtime.domain.context_generation import CODEX_CAPABILITIES
+from app.agent_runtime.infrastructure.checkpoints import workspace_facts
 from app.agent_runtime.infrastructure.normalization import codex_usage
+from app.agent_runtime.infrastructure.tool_logs import ToolLogs
 
 
 class CodexHarness:
@@ -29,6 +36,27 @@ class CodexHarness:
         self.thread: Any = None
         self.turn: Any = None
         self.previous_usage = previous_usage
+        self.governor = DeveloperProgressGovernor(settings.token_policy)
+        self.governor.restore(settings.progress_baseline)
+        self.progress_offset = self.governor.total
+        self.logs = ToolLogs(Path.home() / ".aew" / "tool-logs")
+        self.compacting = False
+
+    def _emit_progress(self) -> None:
+        if self.settings.progress_callback:
+            self.settings.progress_callback(self.governor.snapshot())
+
+    async def _diff_progress(self) -> None:
+        try:
+            facts = await workspace_facts(self.settings.workspace, self.settings.workspace)
+        except (OSError, ValueError, RuntimeError):
+            return  # Missing observations never manufacture progress.
+        if facts["changed_files"]:
+            self.governor.progress(facts["diff_fingerprint"])
+
+    @property
+    def capabilities(self) -> dict[str, bool]:
+        return asdict(CODEX_CAPABILITIES)
 
     def _options(self) -> dict[str, Any]:
         from openai_codex import ApprovalMode, Sandbox
@@ -43,6 +71,7 @@ class CodexHarness:
                 "features.multi_agent": False,
                 "sandbox_workspace_write.network_access": False,
                 "shell_environment_policy.inherit": "none",
+                "tool_output_token_limit": self.settings.token_policy.max_model_visible_tool_result_tokens,
             },
         }
 
@@ -80,15 +109,25 @@ class CodexHarness:
 
         if self.thread is None:
             raise RuntimeError("Start or resume a thread before running")
+        if self.governor.diff_fingerprint is None:
+            try:
+                facts = await workspace_facts(self.settings.workspace, self.settings.workspace)
+                self.governor.diff_fingerprint = facts["diff_fingerprint"]
+            except (RuntimeError, OSError, ValueError):
+                pass
         self.turn = await self.thread.turn(prompt, effort=ReasoningEffort(self.settings.effort))
         return await self._collect()
 
     async def _collect(self) -> TurnReceipt:
         from openai_codex.generated.v2_all import (
             AgentMessageThreadItem,
+            CommandExecutionOutputDeltaNotification,
+            CommandExecutionThreadItem,
+            FileChangeThreadItem,
             ItemCompletedNotification,
             ThreadTokenUsageUpdatedNotification,
             TurnCompletedNotification,
+            TurnDiffUpdatedNotification,
         )
 
         total: dict[str, Any] = {}
@@ -99,11 +138,33 @@ class CodexHarness:
             async with asyncio.timeout(self.settings.timeout_seconds):
                 async for event in self.turn.stream():
                     payload = event.payload
-                    if isinstance(payload, ThreadTokenUsageUpdatedNotification):
+                    if isinstance(payload, CommandExecutionOutputDeltaNotification):
+                        self.logs.append(f"{payload.turn_id}:{payload.item_id}", payload.delta)
+                    elif isinstance(payload, ThreadTokenUsageUpdatedNotification):
                         # The pinned SDK specifies cache writes as zero when absent.
                         # Preserve that schema default; explicit null still means unknown.
                         total = payload.token_usage.total.model_dump()
                         usage = codex_usage(total, self.previous_usage)
+                        warnings, stop = self.governor.observe(
+                            self.progress_offset + (usage.input_tokens or 0),
+                            payload.token_usage.last.input_tokens,
+                        )
+                        self._emit_progress()
+                        if stop and not interrupted_for_budget:
+                            await self.turn.interrupt()
+                        elif warnings and not self.compacting:
+                            await self.turn.steer(
+                                "Developer policy: "
+                                + ", ".join(warnings)
+                                + ". Use current evidence for a concrete edit or a bounded blocked result. "
+                                "Do not repeat unchanged failed commands or broad reads."
+                                + (
+                                    " At the next safe boundary, finish with MILESTONE_COMPLETE on its own line, followed by completed work, decisions, remaining work and next action."
+                                    if "CONTEXT_WARNING" in warnings
+                                    and self.settings.token_policy.automatic_rollover
+                                    else ""
+                                )
+                            )
                         cost = (
                             self.settings.pricing.calculate(usage)
                             if self.settings.pricing
@@ -118,6 +179,56 @@ class CodexHarness:
                         item = payload.item.root
                         if isinstance(item, AgentMessageThreadItem):
                             summary = item.text[:8000]
+                        elif getattr(item, "type", "") == "contextCompaction":
+                            self.governor.compaction_count += 1
+                            self.governor.phase = "COMPACTION"
+                        elif (
+                            isinstance(item, FileChangeThreadItem)
+                            and item.status.value == "completed"
+                        ):
+                            await self._diff_progress()
+                        elif isinstance(item, CommandExecutionThreadItem):
+                            self.logs.finish(
+                                f"{self.turn.id}:{item.id}",
+                                {
+                                    "source": "native-output-deltas",
+                                    "exit_code": item.exit_code,
+                                    "duration_ms": item.duration_ms,
+                                    "command_sha256": hashlib.sha256(
+                                        item.command.encode()
+                                    ).hexdigest(),
+                                },
+                            )
+                            fingerprint = hashlib.sha256(
+                                (
+                                    item.command
+                                    + "\0"
+                                    + str(item.exit_code)
+                                    + "\0"
+                                    + (item.aggregated_output or "")
+                                ).encode()
+                            ).hexdigest()
+                            self.governor.command(
+                                fingerprint,
+                                failed=item.exit_code not in {None, 0},
+                                expensive=(item.duration_ms or 0) >= 1000,
+                            )
+                            output_size = len((item.aggregated_output or "").encode())
+                            if any(
+                                word in item.command
+                                for word in ("pytest", "test", "check", "build", "mypy", "ruff")
+                            ):
+                                self.governor.check(
+                                    hashlib.sha256(item.command.encode()).hexdigest(),
+                                    "passed" if item.exit_code == 0 else fingerprint,
+                                )
+                            self.governor.shell_output_bytes += output_size
+                            for action in item.command_actions:
+                                if action.root.type == "read":
+                                    self.governor.read(fingerprint, output_size)
+                            await self._diff_progress()
+                    elif isinstance(payload, TurnDiffUpdatedNotification) and payload.diff:
+                        await self._diff_progress()
                     elif isinstance(payload, TurnCompletedNotification):
                         completed = payload.turn
         except (TimeoutError, asyncio.CancelledError):
@@ -132,12 +243,15 @@ class CodexHarness:
             native_session_id=str(self.thread.id),
             native_turn_id=str(completed.id),
             summary=summary or (failure_code or ""),
-            status="interrupted" if interrupted_for_budget else completed.status.value,
+            status="interrupted"
+            if interrupted_for_budget or self.governor.stop_reason
+            else completed.status.value,
             usage=usage,
             raw_usage=total,
             cumulative_usage=total or None,
             provider_duration_ms=completed.duration_ms,
-            failure_code=failure_code,
+            failure_code=self.governor.stop_reason or failure_code,
+            token_efficiency=self.governor.snapshot(),
         )
 
     async def compact(self) -> TurnReceipt:
@@ -146,6 +260,7 @@ class CodexHarness:
 
         if self.thread is None:
             raise RuntimeError("Compaction requires an existing thread")
+        self.compacting = True
         async with asyncio.timeout(self.settings.timeout_seconds):
             await self.thread.compact()
             # The pinned high-level SDK returns only the start acknowledgement.

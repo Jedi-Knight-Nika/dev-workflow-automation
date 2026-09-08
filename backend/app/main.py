@@ -52,7 +52,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             await integration_http_pool.aclose()
 
 
-app = FastAPI(title=settings.app_name, version="2.0.0", lifespan=lifespan)
+app = FastAPI(title=settings.app_name, version="2.2.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3000"],
@@ -68,6 +68,7 @@ app.include_router(control_plane_router, prefix="/api/v1")
 app.include_router(events_router, prefix="/api/v1")
 app.include_router(webhooks_router)
 app.include_router(v2_router, prefix="/api/v1")
+app.include_router(v2_router, prefix="/api", include_in_schema=False)
 app.include_router(observability_router, prefix="/api/v1")
 app.include_router(analytics_router, prefix="/api/v1")
 app.include_router(metrics_router)

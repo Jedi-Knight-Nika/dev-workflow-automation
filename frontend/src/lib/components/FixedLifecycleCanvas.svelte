@@ -284,18 +284,25 @@
     --xy-node-background-color: var(--color-panel);
     --xy-node-color: var(--color-text);
     --xy-node-border-radius: 10px;
-    --xy-node-boxshadow-hover: 0 0 16px -4px color-mix(in srgb, var(--color-brand-2) 50%, transparent);
-    --xy-node-boxshadow-selected: 0 0 0 1.5px var(--color-brand), 0 0 20px -2px
-      color-mix(in srgb, var(--color-brand) 65%, transparent);
+    --xy-node-boxshadow-hover: 0 0 16px -4px
+      color-mix(in srgb, var(--color-brand-2) 50%, transparent);
+    --xy-node-boxshadow-selected:
+      0 0 0 1.5px var(--color-brand),
+      0 0 20px -2px color-mix(in srgb, var(--color-brand) 65%, transparent);
     --xy-edge-stroke: var(--color-brand-2);
     --xy-edge-stroke-width: 1.6;
     --xy-edge-stroke-selected: var(--color-brand);
     --xy-controls-button-background-color: var(--color-panel);
-    --xy-controls-button-background-color-hover: color-mix(in srgb, var(--color-brand-2) 20%, var(--color-panel));
+    --xy-controls-button-background-color-hover: color-mix(
+      in srgb,
+      var(--color-brand-2) 20%,
+      var(--color-panel)
+    );
     --xy-controls-button-color: var(--color-text);
     --xy-controls-button-color-hover: var(--color-brand-2);
     --xy-controls-button-border-color: var(--color-line);
-    --xy-controls-box-shadow: 0 0 14px -4px color-mix(in srgb, var(--color-brand-2) 40%, transparent);
+    --xy-controls-box-shadow: 0 0 14px -4px
+      color-mix(in srgb, var(--color-brand-2) 40%, transparent);
     --xy-minimap-background-color: var(--color-panel);
   }
   .flow :global(.svelte-flow__node) {

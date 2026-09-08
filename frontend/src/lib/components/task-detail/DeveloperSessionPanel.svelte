@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import Button from '$lib/components/Button.svelte';
   import ErrorBanner from '$lib/components/ErrorBanner.svelte';
+  import TokenEfficiencyPanel from './TokenEfficiencyPanel.svelte';
   import {
     getDeveloperSession,
     changeDeveloperSession,
@@ -60,6 +61,8 @@
     void reload();
   });
 </script>
+
+<TokenEfficiencyPanel {taskId} />
 
 {#if session || error}
   <details class="min-w-0 rounded-xl border border-line bg-panel p-5 xl:col-span-2">

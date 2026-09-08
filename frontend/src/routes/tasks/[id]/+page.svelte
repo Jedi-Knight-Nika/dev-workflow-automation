@@ -170,7 +170,7 @@
   title={task?.title || 'Loading task'}
   description="One coding session, deterministic validation and delivery, auditable controls."
 />
-<main class="grid min-w-0 gap-5 p-4 sm:p-6 md:p-10 xl:grid-cols-2">
+<main class="grid min-w-0 grid-cols-1 gap-5 p-4 sm:p-6 md:p-10 xl:grid-cols-2">
   <ErrorBanner message={error} class="xl:col-span-2" />
   {#if task}
     <section class="flex flex-wrap items-center gap-3 xl:col-span-2" aria-label="Task summary">

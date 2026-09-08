@@ -114,3 +114,61 @@ class AIRun(Base):
     failure_code: Mapped[str | None] = mapped_column(String(100))
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    context_generation_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("developer_context_generations.id", ondelete="SET NULL")
+    )
+    active_context_estimate: Mapped[int | None]
+    active_context_estimate_source: Mapped[str | None] = mapped_column(String(80))
+    token_efficiency: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+
+
+class DeveloperContextGeneration(Base):
+    __tablename__ = "developer_context_generations"
+    __table_args__ = (
+        UniqueConstraint("developer_session_id", "sequence", name="uq_context_sequence"),
+    )
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    developer_session_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("developer_sessions.id", ondelete="CASCADE")
+    )
+    sequence: Mapped[int]
+    native_thread_id: Mapped[str | None] = mapped_column(String(255))
+    status: Mapped[str] = mapped_column(String(24), default="ACTIVE")
+    provider: Mapped[str] = mapped_column(String(40))
+    model: Mapped[str] = mapped_column(String(255))
+    harness: Mapped[str] = mapped_column(String(24))
+    requirement_version: Mapped[int]
+    policy: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    end_reason: Mapped[str | None] = mapped_column(String(80))
+
+
+class DeveloperCheckpoint(Base):
+    __tablename__ = "developer_checkpoints"
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    task_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tasks.id", ondelete="CASCADE"))
+    developer_session_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("developer_sessions.id", ondelete="CASCADE")
+    )
+    context_generation_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("developer_context_generations.id", ondelete="CASCADE")
+    )
+    requirement_version: Mapped[int]
+    checkpoint_json: Mapped[dict[str, Any]] = mapped_column(JSON)
+    checkpoint_digest: Mapped[str] = mapped_column(String(64))
+    validated: Mapped[bool] = mapped_column(default=False)
+    created_by: Mapped[str] = mapped_column(String(40))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class DeveloperTokenPolicy(Base):
+    __tablename__ = "developer_token_policies"
+    team_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("teams.id", ondelete="CASCADE"), primary_key=True
+    )
+    version: Mapped[int] = mapped_column(default=1)
+    values: Mapped[dict[str, Any]] = mapped_column(JSON)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )

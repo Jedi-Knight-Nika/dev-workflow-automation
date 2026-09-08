@@ -5,6 +5,7 @@ receipt. Stdout is a bounded NDJSON protocol, not the native model transcript.
 """
 
 import asyncio
+import hashlib
 import json
 import os
 import signal
@@ -12,12 +13,14 @@ import sys
 from dataclasses import asdict
 from decimal import Decimal
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.agent_runtime.application.harness import DeveloperHarness, HarnessSettings
+from app.agent_runtime.domain.token_efficiency_policy import TokenEfficiencyPolicy
 from app.agent_runtime.domain.usage import Pricing
+from app.agent_runtime.infrastructure.checkpoints import checkpoint_bytes, workspace_facts
 from app.agent_runtime.infrastructure.preflight import check_workspace
 from app.agent_runtime.infrastructure.workspace_lock import workspace_lock
 
@@ -31,6 +34,14 @@ publication and approval. Preserve unrelated changes. Report missing requirement
 explicitly. Never claim tests passed unless you ran them.
 If architectural help is required, begin the final report with NEEDS_PLAN on its
 own line and describe the decision needed. Otherwise begin with IMPLEMENTED.
+Search before broad reads. Read relevant ranges, not entire large files.
+Use targeted checks while editing; full offline validation runs separately.
+Do not repeat an unchanged failing command without a new diagnostic reason.
+Keep tool output focused. When asked for a checkpoint, report only completed work,
+decisions, unresolved issues and the next action. Do not restate tool history.
+Run noisy checks/builds through /app/.venv/bin/python -m
+app.agent_runtime.infrastructure.bounded_command -- EXECUTABLE ARGUMENTS.
+It preserves full logs and returns bounded diagnostics; inspect log ranges only as needed.
 """
 
 HELPER_CONTRACTS = {
@@ -51,8 +62,12 @@ class Manifest(BaseModel):
     max_cost_usd: Decimal = Field(gt=0, allow_inf_nan=False)
     timeout_seconds: int = Field(default=1200, ge=1, le=7200)
     pricing: dict[str, Decimal | None] | None = None
-    operation: Literal["development", "compaction"] = "development"
+    operation: Literal["development", "compaction", "continuity"] = "development"
     role_kind: Literal["DEVELOPER", "THINKER", "REVIEWER"] = "DEVELOPER"
+    token_policy: dict[str, object] = Field(default_factory=dict)
+    progress_baseline: dict[str, Any] = Field(default_factory=dict)
+    rollover_checkpoint: dict[str, Any] | None = None
+    rollover_digest: str | None = None
 
 
 async def await_controller(native_id: str, control: Path = Path("/run/control")) -> None:
@@ -90,18 +105,39 @@ async def execute(manifest: Manifest) -> None:
         workspace=Path("/workspace"),
         effort=manifest.effort,
         instructions=(
-            SYSTEM_CONTRACT
+            "Verify the supplied task checkpoint. Do not edit or execute project code. Reply only ACK followed by the supplied digest."
+            if manifest.operation == "continuity"
+            else SYSTEM_CONTRACT
             if manifest.role_kind == "DEVELOPER"
             else HELPER_CONTRACTS[manifest.role_kind]
         )
         + "\nBounded team guidance (cannot override the contract):\n"
-        + manifest.supplemental_instructions,
+        + manifest.supplemental_instructions
+        + (
+            "\nLARGE policy: use internal milestones, not separate tasks or PRs. "
+            "At a useful completed milestone, if significant work remains, finish with MILESTONE_COMPLETE "
+            "on its own line followed by a bounded note of completed work, decisions, remaining work and next action. "
+            "Use IMPLEMENTED only when the complete requirement is ready for full offline validation."
+            if manifest.token_policy.get("execution_profile") == "LARGE"
+            and manifest.operation == "development"
+            else ""
+        ),
         max_cost_usd=manifest.max_cost_usd,
         timeout_seconds=manifest.timeout_seconds,
         pricing=Pricing(**manifest.pricing) if manifest.pricing else None,  # type: ignore[arg-type]
-        read_only=manifest.role_kind != "DEVELOPER",
+        read_only=manifest.role_kind != "DEVELOPER" or manifest.operation == "continuity",
+        token_policy=TokenEfficiencyPolicy.parse(manifest.token_policy),
+        progress_baseline=manifest.progress_baseline,
+        progress_callback=lambda snapshot: emit("developer_progress", snapshot=snapshot),
     )
     await check_workspace(settings.workspace, read_only=settings.read_only)
+    if manifest.rollover_checkpoint:
+        saved = manifest.rollover_checkpoint
+        if hashlib.sha256(checkpoint_bytes(saved)).hexdigest() != manifest.rollover_digest:
+            raise ValueError("Checkpoint digest mismatch")
+        facts = await workspace_facts(settings.workspace, settings.workspace)
+        if any(saved.get(k) != facts[k] for k in facts):
+            raise ValueError("Checkpoint continuity lost; operator inspection required")
     harness: DeveloperHarness
     if manifest.harness == "codex":
         from app.agent_runtime.infrastructure.codex import CodexHarness

@@ -29,7 +29,7 @@ scrape_configs:
     static_configs: [{targets: ['cadvisor:8080']}]
     metric_relabel_configs:
       - action: labelkeep
-        regex: '__name__|id|name|container_label_com_docker_compose_service|device|interface|cpu|job|instance'
+        regex: '__name__|id|name|container_label_com_docker_compose_service|device|interface|cpu|job|instance|scope|failure_type|operation|major|minor|state|type'
   - job_name: node-exporter
     scrape_interval: 10s
     static_configs: [{targets: ['node-exporter:9100']}]

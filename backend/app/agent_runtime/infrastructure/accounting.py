@@ -1,14 +1,21 @@
 from datetime import UTC, datetime
 from decimal import Decimal
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.agent_runtime.application.harness import TurnReceipt
-from app.agent_runtime.infrastructure.models import AIRun, DeveloperSession, PricingCatalog
+from app.agent_runtime.infrastructure.models import (
+    AIRun,
+    DeveloperSession,
+    DeveloperTokenPolicy,
+    PricingCatalog,
+)
 from app.agent_runtime.infrastructure.receipts import apply_receipt, known_no_inference
 from app.agent_runtime.infrastructure.reservations import reserve_budget
+from app.agent_runtime.infrastructure.token_efficiency import ensure_generation
 from app.engineering.application.develop import checkpoint_payload
 from app.engineering.infrastructure.task_models import Job, Task
 from app.platform.scheduling.states import JobState
@@ -38,6 +45,23 @@ class SqlDevelopmentStore:
         self.lease_token, self.pricing_id = lease_token, pricing_id
         self.reservation_usd = reservation_usd
         self.operation = operation
+
+    async def progress(self, snapshot: dict[str, Any]) -> None:
+        async with self.sessions.begin() as session:
+            row = await session.scalar(
+                select(AIRun)
+                .where(
+                    AIRun.job_id == self.job_id,
+                    AIRun.session_id == self.session_id,
+                    AIRun.status == "RUNNING",
+                )
+                .with_for_update()
+            )
+            if row:
+                row.token_efficiency = snapshot
+                # Operational signal only. Provider receipts own all invoice fields.
+                row.active_context_estimate = snapshot.get("active_context_estimate")
+                row.active_context_estimate_source = "last-inference-input-estimate"
 
     async def _assert_runnable(self, session: AsyncSession, task_id: UUID) -> None:
         job = await session.get(Job, self.job_id)
@@ -88,6 +112,8 @@ class SqlDevelopmentStore:
             if row.native_session_id and row.native_session_id != native_id:
                 raise ValueError("Cannot replace an existing native session implicitly")
             row.native_session_id = native_id
+            generation = await ensure_generation(session, row, {})
+            generation.native_thread_id = native_id
 
     async def begin_run(self, task_id: UUID, requirement_version: int) -> UUID:
         async with self.sessions.begin() as session:
@@ -107,6 +133,12 @@ class SqlDevelopmentStore:
                 raise ValueError("Another run already owns this task")
             native.state = "RUNNING"
             native.requirement_version = requirement_version
+            policy = await session.get(DeveloperTokenPolicy, task.team_id) if task.team_id else None
+            generation = await ensure_generation(
+                session,
+                native,
+                native.checkpoint.get("token_policy_override") or (policy.values if policy else {}),
+            )
             row = AIRun(
                 task_id=task_id,
                 session_id=native.id,
@@ -120,6 +152,7 @@ class SqlDevelopmentStore:
                 status="RUNNING",
                 reserved_cost_usd=self.reservation_usd,
                 pricing_id=self.pricing_id,
+                context_generation_id=generation.id,
             )
             session.add(row)
             await session.flush()
@@ -147,6 +180,11 @@ class SqlDevelopmentStore:
                 raise ValueError("Receipt belongs to a different native session")
             price = await session.get(PricingCatalog, self.pricing_id) if self.pricing_id else None
             apply_receipt(row, receipt, price)
+            row.token_efficiency = receipt.token_efficiency or None
+            row.active_context_estimate = receipt.token_efficiency.get("active_context_estimate")
+            row.active_context_estimate_source = (
+                receipt.token_efficiency.get("measurement_quality") or {}
+            ).get("active_context")
             if late_receipt:
                 # Accept genuine billing that raced orphan recovery. This does
                 # not revive work, consume feedback, or change task/phase state.
@@ -162,6 +200,21 @@ class SqlDevelopmentStore:
                 **native.checkpoint,
                 **checkpoint_payload(receipt, native.requirement_version),
             }
+            checkpoint["token_efficiency"] = receipt.token_efficiency
+            if self.operation == "continuity":
+                digest = native.checkpoint.get("rollover_digest")
+                checkpoint["summary"] = native.checkpoint.get("summary", "")
+                if (
+                    receipt.status == "completed"
+                    and digest
+                    and receipt.summary.strip() == "ACK " + digest
+                ):
+                    checkpoint["continuity_acknowledged"] = digest
+                    checkpoint["continuation_pending"] = True
+                else:
+                    native.state = "BLOCKED"
+            elif self.operation == "development" and receipt.status == "completed":
+                checkpoint["continuation_pending"] = False
             if self.operation == "compaction":
                 assert row.finished_at is not None
                 checkpoint["summary"] = native.checkpoint.get("summary", "")
@@ -177,7 +230,7 @@ class SqlDevelopmentStore:
             # A tracker edit can revoke this turn while its final receipt is in
             # flight. Account the receipt, but do not consume the newer delta.
             if (
-                self.operation != "compaction"
+                self.operation == "development"
                 and task
                 and task.requirement_version == native.requirement_version
             ):

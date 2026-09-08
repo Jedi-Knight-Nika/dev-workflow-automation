@@ -54,6 +54,7 @@ def exercise_fresh_setup(connection: Connection) -> None:
         ).all()
         supporting_revision().upgrade()
         supporting_revision("0003_operational_configuration").upgrade()
+        supporting_revision("0004_token_efficiency").upgrade()
         assert (
             connection.execute(text("SELECT * FROM team_agent_profiles ORDER BY id")).all()
             == baseline_profiles

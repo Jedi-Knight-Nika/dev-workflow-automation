@@ -12,8 +12,14 @@ from app.agent_runtime.application.sessions import (
     SessionConflict,
     SessionView,
 )
+from app.agent_runtime.application.token_efficiency import TokenEfficiencyQueries
 from app.agent_runtime.domain.session_changes import SessionChangeMode
-from app.bootstrap.v2 import automation_admin, session_administration, team_profiles
+from app.bootstrap.v2 import (
+    automation_admin,
+    session_administration,
+    team_profiles,
+    token_efficiency,
+)
 from app.platform.configuration.settings import get_settings
 from app.teams.application.automation import AutomationAdmin
 from app.teams.application.profiles import (
@@ -26,6 +32,113 @@ from app.teams.domain.automation import AutomationPolicy
 from app.teams.domain.profiles import AgentProfile, RoleKind
 
 router = APIRouter(prefix="/v2", tags=["engineering-v2"])
+
+
+class TokenPolicyWrite(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    version: int = Field(ge=0)
+    values: dict[str, Any]
+
+
+class ContextRolloverWrite(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    requirement_version: int = Field(ge=1)
+    note: str = Field(min_length=3, max_length=2000)
+
+
+@router.get("/tasks/{task_id}/token-efficiency-policy")
+async def read_task_token_policy(
+    task_id: UUID, store: TokenEfficiencyQueries = Depends(token_efficiency)
+) -> dict[str, Any]:
+    try:
+        return await store.task_policy(task_id)
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@router.put("/tasks/{task_id}/token-efficiency-policy")
+async def write_task_token_policy(
+    task_id: UUID, body: TokenPolicyWrite, store: TokenEfficiencyQueries = Depends(token_efficiency)
+) -> dict[str, Any]:
+    try:
+        return await store.save_task_policy(task_id, body.version, body.values)
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(
+            409, "Invalid/stale task policy or task is not safely suspended"
+        ) from exc
+
+
+@router.post("/tasks/{task_id}/context-rollover")
+async def rollover_context(
+    task_id: UUID,
+    body: ContextRolloverWrite,
+    store: TokenEfficiencyQueries = Depends(token_efficiency),
+) -> dict[str, Any]:
+    try:
+        return await store.rollover(task_id, body.requirement_version, body.note)
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except (ValueError, RuntimeError, OSError) as exc:
+        raise HTTPException(
+            409,
+            "Rollover blocked: verify suspended state, reconciled billing, workspace and bounded note",
+        ) from exc
+
+
+@router.get("/teams/{team_id}/token-efficiency-policy")
+async def read_token_policy(
+    team_id: UUID, store: TokenEfficiencyQueries = Depends(token_efficiency)
+) -> dict[str, Any]:
+    try:
+        return await store.policy(team_id)
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+@router.put("/teams/{team_id}/token-efficiency-policy")
+async def write_token_policy(
+    team_id: UUID, body: TokenPolicyWrite, store: TokenEfficiencyQueries = Depends(token_efficiency)
+) -> dict[str, Any]:
+    try:
+        return await store.save_policy(team_id, body.version, body.values)
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(422, "Invalid or stale token policy; reload and check limits") from exc
+
+
+@router.get("/tasks/{task_id}/token-efficiency")
+async def task_token_efficiency(
+    task_id: UUID, store: TokenEfficiencyQueries = Depends(token_efficiency)
+) -> dict[str, Any]:
+    try:
+        return await store.task(task_id)
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+@router.get("/tasks/{task_id}/context-generations")
+async def context_generations(
+    task_id: UUID, store: TokenEfficiencyQueries = Depends(token_efficiency)
+) -> list[dict[str, Any]]:
+    try:
+        return await store.generations(task_id)
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+@router.get("/tasks/{task_id}/checkpoints")
+async def developer_checkpoints(
+    task_id: UUID, store: TokenEfficiencyQueries = Depends(token_efficiency)
+) -> list[dict[str, Any]]:
+    try:
+        return await store.checkpoints(task_id)
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
 
 
 class SessionChangeWrite(BaseModel):
