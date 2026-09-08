@@ -256,7 +256,9 @@
   {:else if view === 'board'}
     <div class="grid grid-cols-1 gap-4 xl:grid-cols-3 2xl:grid-cols-6">
       {#each columns as column (column.id)}
-        <section class="border-line flex max-h-[75vh] flex-col rounded-xl border bg-panel-alt/30 p-3">
+        <section
+          class="border-line flex max-h-[75vh] flex-col rounded-xl border bg-panel-alt/30 p-3"
+        >
           <h2 class="mb-3 flex shrink-0 justify-between font-semibold">
             {column.label}<span class="text-muted">{column.tasks.length}</span>
           </h2>

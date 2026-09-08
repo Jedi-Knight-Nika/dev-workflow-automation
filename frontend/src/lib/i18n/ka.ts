@@ -697,6 +697,11 @@ export const ka: Record<TranslationKey, string> = {
   'accent.customLabel': 'საკუთარი',
   'accent.customHint': 'გადაათრიეთ ნებისმიერი ტონის ასარჩევად',
   'accent.hueSlider': 'აქცენტის ტონი',
+  'fontSize.title': 'ფონტის ზომა',
+  'fontSize.description': 'შეცვალეთ ტექსტის ზომა მთელ ინტერფეისში.',
+  'fontSize.slider': 'ფონტის ზომა',
+  'fontSize.value': 'ფონტის ზომა {size}px',
+  'fontSize.defaultHint': 'ნაგულისხმევი: {size}px',
 
   'display.title': 'ჩვენების რეჟიმი',
   'display.description':

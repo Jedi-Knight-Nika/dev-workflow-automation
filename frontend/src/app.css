@@ -82,6 +82,7 @@
 
 :root {
   color-scheme: dark;
+  font-size: var(--app-font-size, 16px);
 }
 
 @keyframes fade-in-up {
