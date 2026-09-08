@@ -15,6 +15,7 @@ from app.platform.integrations.application.ports.integration_management import (
     ManagedIntegrationNotConfigured,
 )
 from app.platform.integrations.github_auth import resolve_github_auth
+from app.platform.integrations.infrastructure.errors import connection_error
 from app.platform.integrations.models import Integration
 from app.platform.scheduling.states import IntegrationStatus, JobState
 from app.platform.security.crypto import cipher
@@ -188,7 +189,10 @@ class EncryptedIntegrationManagementWorkflow:
             else:
                 raise ValueError(f"Unsupported integration: {provider_name}")
         except (httpx.HTTPError, RuntimeError, TypeError, ValueError) as exc:
-            item.status, item.last_error = IntegrationStatus.ERROR, str(exc)[:2000]
+            item.status, item.last_error = (
+                IntegrationStatus.ERROR,
+                connection_error(provider_name, exc),
+            )
         else:
             item.status, item.last_error = IntegrationStatus.CONNECTED, None
         await self._session.commit()

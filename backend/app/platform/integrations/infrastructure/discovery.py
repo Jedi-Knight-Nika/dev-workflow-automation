@@ -1,3 +1,4 @@
+import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,6 +14,7 @@ from app.platform.integrations.application.ports.integration_discovery import (
     WorkflowStateView,
 )
 from app.platform.integrations.github_auth import resolve_github_auth
+from app.platform.integrations.infrastructure.errors import connection_error
 from app.platform.integrations.models import Integration
 from app.platform.security.crypto import cipher
 
@@ -67,9 +69,15 @@ class EncryptedIntegrationDiscoveryWorkflow:
         ]
 
     async def trello_boards(self) -> list[TrelloBoardView]:
-        boards = await TrelloClient(await self._credential("trello")).list_boards()
+        try:
+            boards = await TrelloClient(await self._credential("trello")).list_boards()
+        except (httpx.HTTPError, TypeError, ValueError) as exc:
+            raise IntegrationNotConfigured(connection_error("trello", exc)) from exc
         return [TrelloBoardView(item["id"], item["name"], item["url"]) for item in boards]
 
     async def trello_lists(self, board_id: str) -> list[TrelloListView]:
-        lists = await TrelloClient(await self._credential("trello")).list_lists(board_id)
+        try:
+            lists = await TrelloClient(await self._credential("trello")).list_lists(board_id)
+        except (httpx.HTTPError, TypeError, ValueError) as exc:
+            raise IntegrationNotConfigured(connection_error("trello", exc)) from exc
         return [TrelloListView(item["id"], item["name"], item["closed"]) for item in lists]

@@ -29,6 +29,7 @@
     TrelloList
   } from '$lib/types';
   import { t } from '$lib/i18n/index.svelte';
+  import { integrationError } from '$lib/integration-errors';
   const providers = [
     { name: 'github', type: 'source_control', label: 'GitHub', active: true },
     { name: 'linear', type: 'task_management', label: 'Linear', active: true },
@@ -72,6 +73,10 @@
     }
   };
   let error = '';
+  let formError = '';
+  let formNotice = '';
+  let notice = '';
+  let verifying = false;
   let editing = '';
   let credential = '';
   let saving = false;
@@ -114,7 +119,7 @@
       const result = await getGithubAppInstallUrl();
       window.location.assign(result.url);
     } catch (cause) {
-      error = String(cause);
+      error = integrationError(cause, 'GitHub');
     }
   }
   onMount(() => {
@@ -135,7 +140,32 @@
   function deliveryHealth(name: string) {
     return webhookHealthResource.data.find((item) => item.provider === name);
   }
+  async function verifyConnection(name: string, label: string) {
+    verifying = true;
+    try {
+      const result = await testIntegration(name);
+      if (result.status !== 'CONNECTED') {
+        formError = integrationError(result.last_error || 'Verification failed', label);
+        await integrationsResource.refresh();
+        return false;
+      }
+      await integrationsResource.refresh();
+      return true;
+    } finally {
+      verifying = false;
+    }
+  }
   async function save(provider: (typeof providers)[number]) {
+    formError = '';
+    formNotice = '';
+    notice = '';
+    if (
+      provider.name === 'trello' &&
+      Boolean(trelloApiKey.trim()) !== Boolean(trelloToken.trim())
+    ) {
+      formError = t('integrations.trelloPairRequired');
+      return;
+    }
     saving = true;
     error = '';
     try {
@@ -165,25 +195,30 @@
                   ready_for_testing_list_id: trelloReadyForTestingListId || null,
                   done_list_id: trelloDoneListId || null,
                   repository_id: repositoryId || null,
-                  sync_enabled: true,
+                  sync_enabled: Boolean(trelloBoardId),
                   poll_interval_seconds: 60
                 }
               : {},
         credential:
           provider.name === 'trello'
             ? trelloApiKey && trelloToken
-              ? JSON.stringify({ api_key: trelloApiKey, token: trelloToken })
+              ? JSON.stringify({ api_key: trelloApiKey.trim(), token: trelloToken.trim() })
               : null
             : credential || null
       });
-      await testIntegration(provider.name);
+      if (!(await verifyConnection(provider.name, provider.label))) return;
       credential = '';
       trelloApiKey = '';
       trelloToken = '';
+      if (provider.name === 'trello' && !trelloBoardId) {
+        formNotice = t('integrations.trelloVerified');
+        await discoverTrelloBoards();
+        return;
+      }
       editing = '';
-      await integrationsResource.refresh();
+      notice = t('integrations.connectionSaved', { provider: provider.label });
     } catch (cause) {
-      error = String(cause);
+      formError = integrationError(cause, provider.label);
     } finally {
       saving = false;
     }
@@ -191,7 +226,7 @@
 
   async function discoverLinearStates() {
     loadingLinearStates = true;
-    error = '';
+    formError = '';
     try {
       linearStates = await listLinearWorkflowStates();
       if (!todoStateId) {
@@ -217,53 +252,59 @@
         doneStateId = linearStates.find((state) => state.name.toLowerCase() === 'done')?.id || '';
       }
     } catch (cause) {
-      error = String(cause);
+      formError = integrationError(cause, 'Linear');
     } finally {
       loadingLinearStates = false;
     }
   }
   async function discoverTrelloBoards() {
     loadingTrello = true;
-    error = '';
+    formError = '';
     try {
       trelloBoards = await listTrelloBoards();
       if (trelloBoardId) await discoverTrelloLists();
     } catch (cause) {
-      error = String(cause);
+      formError = integrationError(cause, 'Trello');
     } finally {
       loadingTrello = false;
     }
   }
   async function continueTrelloSetup() {
-    if (!trelloApiKey || !trelloToken) return;
+    formError = '';
+    formNotice = '';
+    if (Boolean(trelloApiKey.trim()) !== Boolean(trelloToken.trim())) {
+      formError = t('integrations.trelloPairRequired');
+      return;
+    }
     saving = true;
     error = '';
     try {
-      await saveIntegration('trello', {
-        provider_type: 'task_management',
-        status: 'CONFIGURED',
-        configuration: {
-          board_id: trelloBoardId || null,
-          list_ids: trelloListIds,
-          todo_list_id: trelloTodoListId || null,
-          in_progress_list_id: trelloInProgressListId || null,
-          in_review_list_id: trelloInReviewListId || null,
-          blocked_list_id: trelloBlockedListId || null,
-          ready_for_testing_list_id: trelloReadyForTestingListId || null,
-          done_list_id: trelloDoneListId || null,
-          repository_id: repositoryId || null,
-          sync_enabled: true,
-          poll_interval_seconds: 60
-        },
-        credential: JSON.stringify({ api_key: trelloApiKey, token: trelloToken })
-      });
-      await testIntegration('trello');
-      await integrationsResource.refresh();
+      if (trelloApiKey.trim() && trelloToken.trim())
+        await saveIntegration('trello', {
+          provider_type: 'task_management',
+          status: 'CONFIGURED',
+          configuration: {
+            board_id: trelloBoardId || null,
+            list_ids: trelloListIds,
+            todo_list_id: trelloTodoListId || null,
+            in_progress_list_id: trelloInProgressListId || null,
+            in_review_list_id: trelloInReviewListId || null,
+            blocked_list_id: trelloBlockedListId || null,
+            ready_for_testing_list_id: trelloReadyForTestingListId || null,
+            done_list_id: trelloDoneListId || null,
+            repository_id: repositoryId || null,
+            sync_enabled: Boolean(trelloBoardId),
+            poll_interval_seconds: 60
+          },
+          credential: JSON.stringify({ api_key: trelloApiKey.trim(), token: trelloToken.trim() })
+        });
+      if (!(await verifyConnection('trello', 'Trello'))) return;
       trelloApiKey = '';
       trelloToken = '';
+      formNotice = t('integrations.trelloVerified');
       await discoverTrelloBoards();
     } catch (cause) {
-      error = String(cause);
+      formError = integrationError(cause, 'Trello');
     } finally {
       saving = false;
     }
@@ -271,7 +312,7 @@
   async function discoverTrelloLists() {
     if (!trelloBoardId) return;
     loadingTrello = true;
-    error = '';
+    formError = '';
     try {
       trelloLists = await listTrelloLists(trelloBoardId);
       trelloListIds = trelloListIds.filter((id) => trelloLists.some((item) => item.id === id));
@@ -284,7 +325,7 @@
       trelloReadyForTestingListId ||= findList('ready for testing', 'testing', 'ready to test');
       trelloDoneListId ||= findList('done', 'complete', 'completed');
     } catch (cause) {
-      error = String(cause);
+      formError = integrationError(cause, 'Trello');
     } finally {
       loadingTrello = false;
     }
@@ -321,7 +362,10 @@
       await requestIntegrationSync(providerName);
       await integrationsResource.refresh();
     } catch (cause) {
-      error = String(cause);
+      error = integrationError(
+        cause,
+        providers.find((provider) => provider.name === providerName)?.label
+      );
     }
   }
 </script>
@@ -333,9 +377,15 @@
 />
 <main class="p-4 sm:p-6 md:p-10">
   <ErrorBanner
-    message={error || integrationsResource.error || webhookHealthResource.error}
+    message={error || integrationError(integrationsResource.error || webhookHealthResource.error)}
     class="mb-4"
   />
+  {#if notice}<p
+      role="status"
+      class="mb-4 rounded-lg border border-accent/30 p-3 text-sm text-accent"
+    >
+      {notice}
+    </p>{/if}
   <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
     <p class="text-muted text-xs">
       {t('integrations.autoTestedHint')}
@@ -375,7 +425,7 @@
                   state={provider.active
                     ? integration(provider.name)?.display_status || 'NOT_CONFIGURED'
                     : 'DISABLED'}
-                  detail={integration(provider.name)?.last_error || ''}
+                  detail={integrationError(integration(provider.name)?.last_error, provider.label)}
                 />
               </div>
               {#if integration(provider.name)?.usage}
@@ -430,6 +480,13 @@
                   description="Connection, health, and provider configuration"
                   onClose={() => (editing = '')}
                 >
+                  <div role="alert" aria-live="assertive"><ErrorBanner message={formError} /></div>
+                  {#if formNotice && !formError}<p role="status" class="mb-3 text-sm text-accent">
+                      {formNotice}
+                    </p>{/if}
+                  {#if verifying}<p role="status" class="my-3 text-sm text-muted">
+                      {t('integrations.verifyingCredentials')}
+                    </p>{/if}
                   <form
                     class="mt-4"
                     onsubmit={(event) => {
@@ -504,21 +561,28 @@
                           type="button"
                           size="sm"
                           onclick={discoverTrelloBoards}
-                          disabled={loadingTrello || !integration('trello')?.has_credentials}
+                          disabled={saving ||
+                            loadingTrello ||
+                            status('trello') !== 'CONNECTED' ||
+                            !!trelloApiKey ||
+                            !!trelloToken}
                         >
                           {loadingTrello
                             ? t('common.loading')
                             : t('integrations.trelloDiscoverBoards')}
                         </Button>
-                        {#if !integration('trello')?.has_credentials}
-                          <Button
-                            type="button"
-                            variant="primary"
-                            onclick={continueTrelloSetup}
-                            disabled={saving || !trelloApiKey || !trelloToken}
-                            >Continue to boards</Button
-                          >
-                        {/if}
+                        <Button
+                          type="button"
+                          variant="primary"
+                          onclick={continueTrelloSetup}
+                          disabled={saving ||
+                            loadingTrello ||
+                            (!integration('trello')?.has_credentials &&
+                              (!trelloApiKey || !trelloToken))}
+                          >{verifying
+                            ? t('integrations.verifyingCredentials')
+                            : t('integrations.verifyAndContinue')}</Button
+                        >
                         <label class="text-muted block text-xs" for="trello-board"
                           >{t('integrations.trelloBoard')}</label
                         >
@@ -671,10 +735,12 @@
                       {t('integrations.storedEncrypted')}
                     </p>
                     <div class="mt-3 flex flex-wrap gap-2">
-                      <Button variant="primary" type="submit" disabled={saving}
-                        >{saving
-                          ? t('integrations.saving')
-                          : t('integrations.saveSecurely')}</Button
+                      <Button variant="primary" type="submit" disabled={saving || loadingTrello}
+                        >{verifying
+                          ? t('integrations.verifyingCredentials')
+                          : saving
+                            ? t('integrations.saving')
+                            : t('integrations.saveAndVerify')}</Button
                       >
                       <Button
                         type="button"
@@ -689,8 +755,7 @@
               {/if}
               {#if integrationsResource.data.find((item) => item.provider_name === provider.name)?.last_error}
                 <p class="mt-3 text-xs text-danger">
-                  {integrationsResource.data.find((item) => item.provider_name === provider.name)
-                    ?.last_error}
+                  {integrationError(integration(provider.name)?.last_error, provider.label)}
                 </p>
               {/if}
               {#if integration(provider.name)?.has_credentials && status(provider.name) !== 'DISCONNECTED'}
@@ -748,6 +813,10 @@
                       disabled={!provider.active}
                       onclick={() => {
                         editing = provider.name;
+                        formError = '';
+                        formNotice = '';
+                        error = '';
+                        notice = '';
                         credential = '';
                         const existing = integrationsResource.data.find(
                           (item) => item.provider_name === provider.name

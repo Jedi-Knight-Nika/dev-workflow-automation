@@ -1,4 +1,26 @@
 export const en = {
+  'integrations.networkError':
+    'Cannot reach Engineering Worker. Check that the app is running and your connection is available, then try again.',
+  'integrations.trelloAuthError':
+    'Trello rejected the API key or token. Check both values and use a Trello user token, not an Atlassian account API token.',
+  'integrations.authError':
+    '{provider} rejected the credentials. Check the key or token and try again.',
+  'integrations.accessError':
+    '{provider} denied access. Check the account permissions and token access.',
+  'integrations.rateLimitError':
+    '{provider} is rate limiting requests. Wait a moment and try again.',
+  'integrations.timeoutError': '{provider} took too long to respond. Try again shortly.',
+  'integrations.unavailableError': 'Cannot reach {provider} right now. Try again shortly.',
+  'integrations.connectionError':
+    'Could not complete the {provider} connection request. Check the settings and try again.',
+  'integrations.trelloPairRequired':
+    'Enter both the Trello API key and its user token to replace the saved credentials.',
+  'integrations.verifyingCredentials': 'Checking credentials…',
+  'integrations.saveAndVerify': 'Save and verify connection',
+  'integrations.verifyAndContinue': 'Verify credentials and load boards',
+  'integrations.trelloVerified':
+    'Connected to Trello. Choose the board, lists and repository, then save to finish setup.',
+  'integrations.connectionSaved': '{provider} connected successfully. Settings saved.',
   'nav.dashboard': 'Dashboard',
   'nav.tasks': 'Tasks',
   'nav.teams': 'Teams',

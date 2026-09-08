@@ -1,6 +1,29 @@
 import type { TranslationKey } from './en';
 
 export const ka: Record<TranslationKey, string> = {
+  'integrations.networkError':
+    'Engineering Worker-თან დაკავშირება ვერ მოხერხდა. შეამოწმეთ, რომ აპლიკაცია მუშაობს და ქსელთან კავშირი გაქვთ, შემდეგ სცადეთ ხელახლა.',
+  'integrations.trelloAuthError':
+    'Trello-მ API გასაღები ან ტოკენი უარყო. შეამოწმეთ ორივე ველი და გამოიყენეთ Trello-ს მომხმარებლის ტოკენი, არა Atlassian-ის ანგარიშის API ტოკენი.',
+  'integrations.authError':
+    '{provider}-მა ავტორიზაციის მონაცემები უარყო. შეამოწმეთ გასაღები ან ტოკენი და სცადეთ ხელახლა.',
+  'integrations.accessError':
+    '{provider}-მა წვდომა უარყო. შეამოწმეთ ანგარიშისა და ტოკენის უფლებები.',
+  'integrations.rateLimitError':
+    '{provider}-ის მოთხოვნების ლიმიტი ამოიწურა. ცოტა ხანში სცადეთ ხელახლა.',
+  'integrations.timeoutError': '{provider}-ის პასუხის ლოდინის დრო ამოიწურა. სცადეთ ხელახლა.',
+  'integrations.unavailableError':
+    '{provider}-თან დაკავშირება ამჟამად ვერ ხერხდება. ცოტა ხანში სცადეთ ხელახლა.',
+  'integrations.connectionError':
+    '{provider}-თან კავშირის მოთხოვნა ვერ დასრულდა. შეამოწმეთ პარამეტრები და სცადეთ ხელახლა.',
+  'integrations.trelloPairRequired':
+    'შენახული მონაცემების შესაცვლელად შეიყვანეთ Trello-ს API გასაღებიც და მომხმარებლის ტოკენიც.',
+  'integrations.verifyingCredentials': 'მონაცემები მოწმდება…',
+  'integrations.saveAndVerify': 'კავშირის შენახვა და შემოწმება',
+  'integrations.verifyAndContinue': 'მონაცემების შემოწმება და დაფების ჩატვირთვა',
+  'integrations.trelloVerified':
+    'Trello დაკავშირებულია. აირჩიეთ დაფა, სიები და რეპოზიტორია, შემდეგ შეინახეთ პარამეტრები.',
+  'integrations.connectionSaved': '{provider} წარმატებით დაუკავშირდა. პარამეტრები შენახულია.',
   'nav.dashboard': 'დაშბორდი',
   'nav.tasks': 'დავალებები',
   'nav.teams': 'გუნდები',
