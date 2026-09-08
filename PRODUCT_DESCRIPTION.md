@@ -36,6 +36,7 @@ The application:
 - merges only after current-revision policy and evidence checks;
 - synchronizes source trackers through a durable outbox;
 - records usage, cost, time, recovery, review, and resource evidence;
+- shows task lists and historical evidence with the newest dated records first;
 - forecasts cost, tokens, time, and resources without paid forecasting calls.
 
 The product excludes arbitrary workflow graphs, user-defined role types, mandatory planning/testing/review model chains, repository retrieval as a coding prerequisite, model-controlled Git or merge authority, public monitoring interfaces, hosted monitoring requirements, and an extra custom service language without measured need.
