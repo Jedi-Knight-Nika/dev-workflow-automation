@@ -23,7 +23,7 @@ class SqlAlchemyLinearTaskReconciliation:
             return await self._reconcile_fixed(session, datetime.now(UTC))
 
     async def _reconcile_fixed(self, session: AsyncSession, now: datetime) -> ReconciliationResult:
-        """V2 polls configured source IDs, never a removed workflow node."""
+        """Poll configured source IDs, never a removed workflow node."""
         integration = await session.scalar(
             select(Integration)
             .where(Integration.provider_name == "linear")
@@ -32,8 +32,8 @@ class SqlAlchemyLinearTaskReconciliation:
         if integration is None or not integration.encrypted_credentials:
             return ReconciliationResult(processed=False)
         config = integration.configuration or {}
-        assignee = config.get("v2_assignee_id")
-        states = config.get("v2_source_state_ids")
+        assignee = config.get("assignee_id")
+        states = config.get("source_state_ids")
         if (
             not isinstance(assignee, str)
             or not assignee
@@ -60,7 +60,7 @@ class SqlAlchemyLinearTaskReconciliation:
         except Exception as exc:  # noqa: BLE001 -- durable integration boundary; preserve other providers
             integration.sync_status, integration.last_error = (
                 "FAILED",
-                f"V2 Linear poll failed: {type(exc).__name__}",
+                f"Linear poll failed: {type(exc).__name__}",
             )
             imported = updated = 0
         await session.commit()
@@ -91,7 +91,7 @@ class SqlAlchemyLinearTaskReconciliation:
                 source="linear",
             )
         else:
-            from app.intake.infrastructure.v2_events import requirements_changed
+            from app.intake.infrastructure.engineering_events import requirements_changed
 
             await requirements_changed(
                 session, task, issue["title"], issue["description"], source="linear"

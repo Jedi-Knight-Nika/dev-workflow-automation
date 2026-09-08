@@ -2,6 +2,7 @@
   import { resolve } from '$app/paths';
   import type { RunnerResource } from '$lib/types/observability';
   import { bytes, count, duration, money } from './format';
+  import { t } from '$lib/i18n/index.svelte';
   let { runner }: { runner: RunnerResource } = $props();
 </script>
 
@@ -12,38 +13,46 @@
   {#if runner.task_id}<a href={resolve('/tasks/[id]', { id: runner.task_id })}
       >{runner.task_key || runner.task_title || runner.task_id}</a
     >{/if}
-  <small>{runner.harness || 'System'} · {runner.model || runner.service_kind}</small>
+  <small>{runner.harness || t('operations.system')} · {runner.model || runner.service_kind}</small>
   <dl>
     <div>
-      <dt>Container / Developer elapsed</dt>
+      <dt>{t('operations.containerDevElapsed')}</dt>
       <dd>{duration(runner.wall_seconds)} / {duration(runner.developer_active_seconds)}</dd>
     </div>
     <div>
-      <dt>Provider-reported active</dt>
+      <dt>{t('operations.providerActive')}</dt>
       <dd>{duration(runner.ai_active_seconds)}</dd>
     </div>
     <div>
-      <dt>Input / output</dt>
+      <dt>{t('operations.inputOutput')}</dt>
       <dd>{count(runner.input_tokens)} / {count(runner.output_tokens)}</dd>
     </div>
     <div>
-      <dt>Known task cost</dt>
-      <dd>{money(runner.known_cost_usd)} · {runner.unknown_cost_runs ?? 0} unknown</dd>
+      <dt>{t('operations.knownTaskCost')}</dt>
+      <dd>
+        {money(runner.known_cost_usd)} · {t('operations.unknownCount', {
+          count: runner.unknown_cost_runs ?? 0
+        })}
+      </dd>
     </div>
     <div>
-      <dt>CPU</dt>
-      <dd>{runner.resources?.cpu?.toFixed(2) ?? 'Unavailable'} cores</dd>
+      <dt>{t('operations.cpu')}</dt>
+      <dd>
+        {t('operations.cores', {
+          count: runner.resources?.cpu?.toFixed(2) ?? t('operations.unavailable')
+        })}
+      </dd>
     </div>
     <div>
-      <dt>RAM / limit</dt>
+      <dt>{t('operations.ramLimit')}</dt>
       <dd>
         {bytes(runner.resources?.memory)} / {runner.resources?.memory_limit === 0
-          ? 'No limit'
+          ? t('operations.noLimit')
           : bytes(runner.resources?.memory_limit)}
       </dd>
     </div>
     <div>
-      <dt>Peak RAM · last 24h / retained</dt>
+      <dt>{t('operations.peakRam')}</dt>
       <dd>{bytes(runner.summary?.values.max_memory_bytes ?? runner.resources?.memory_peak)}</dd>
     </div>
   </dl>

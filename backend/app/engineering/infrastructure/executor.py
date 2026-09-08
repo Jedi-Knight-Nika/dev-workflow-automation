@@ -541,7 +541,7 @@ class SqlPhaseExecutor:
         commands = (
             runtime.validation_commands
             if runtime
-            else self.settings.v2_validation_commands.get(str(task.repository_id), [])
+            else self.settings.repository_validation_commands.get(str(task.repository_id), [])
         )
         if not commands or not task.branch_name:
             raise PhaseBlocked(

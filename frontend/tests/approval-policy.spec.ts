@@ -15,7 +15,7 @@ test('Team policy persists any-human and natural-language approval settings', as
     require_formal_approval: true
   };
   let writes = 0;
-  await page.route('**/api/v1/**', async (route) => {
+  await page.route('**/api/**', async (route) => {
     const path = new URL(route.request().url()).pathname;
     if (path.endsWith('/events/stream')) return route.abort();
     if (path.endsWith('/automation')) {

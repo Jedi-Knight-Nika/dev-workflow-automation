@@ -47,7 +47,7 @@ jobs:
         run: uv run ruff format --check app migrations tests ../scripts
       - name: Type check
         run: uv run mypy app ../scripts/validate_real_workflow.py ../scripts/rotate_credentials.py
-      - name: Initialize empty V2 database
+      - name: Initialize application database
         env:
           DATABASE_URL_SYNC: postgresql+psycopg://engineering_worker:ci-password@localhost:5432/engineering_worker
         run: uv run alembic upgrade head

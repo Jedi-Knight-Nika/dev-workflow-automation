@@ -9,7 +9,7 @@ from app.agent_runtime.infrastructure.models import AIRun
 from app.engineering.infrastructure.models import TaskPhaseRun
 from app.engineering.infrastructure.task_models import Task
 from app.intake.infrastructure.models import LocalModelRun
-from app.platform.telemetry.usage_query import complete_cost
+from app.platform.telemetry.usage_query import complete_sum
 
 
 async def statistics(session: AsyncSession, team_id: UUID | None, days: int = 30) -> dict[str, Any]:
@@ -22,12 +22,12 @@ async def statistics(session: AsyncSession, team_id: UUID | None, days: int = 30
                 AIRun.provider,
                 AIRun.model,
                 func.count(AIRun.id),
-                func.sum(AIRun.input_tokens),
-                func.sum(AIRun.output_tokens),
-                complete_cost(func.coalesce(AIRun.provider_cost_usd, AIRun.calculated_cost_usd)),
+                complete_sum(AIRun.input_tokens),
+                complete_sum(AIRun.output_tokens),
+                complete_sum(func.coalesce(AIRun.provider_cost_usd, AIRun.calculated_cost_usd)),
                 func.count(AIRun.id).filter(AIRun.usage_complete.is_(False)),
-                func.sum(AIRun.provider_duration_ms),
-                func.count(AIRun.id).filter(AIRun.prompt_version == "v2.compaction.1"),
+                complete_sum(AIRun.provider_duration_ms),
+                func.count(AIRun.id).filter(AIRun.prompt_version == "developer.compaction"),
             )
             .join(Task, Task.id == AIRun.task_id)
             .where(AIRun.started_at >= start, *scope)
@@ -61,7 +61,7 @@ async def statistics(session: AsyncSession, team_id: UUID | None, days: int = 30
         )
     ).all()
     return {
-        "scope": "v2-only",
+        "scope": "engineering",
         "team_id": str(team_id) if team_id else None,
         "from": start.isoformat(),
         "days": days,

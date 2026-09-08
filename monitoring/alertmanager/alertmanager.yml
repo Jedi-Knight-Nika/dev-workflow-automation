@@ -7,7 +7,7 @@ route:
 receivers:
   - name: product
     webhook_configs:
-      - url: http://backend:8000/api/v1/observability/alerts
+      - url: http://backend:8000/api/observability/alerts
         send_resolved: true
         max_alerts: 100
         http_config:

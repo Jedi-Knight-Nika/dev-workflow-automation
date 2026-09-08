@@ -1,10 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import {
-    getAutomation,
-    saveAutomation,
-    type AutomationPolicy
-  } from '$lib/services/engineering-v2';
+  import { getAutomation, saveAutomation, type AutomationPolicy } from '$lib/services/engineering';
   let { teamId }: { teamId: string } = $props();
   let policy = $state<AutomationPolicy | null>(null);
   let repositories = $state('');

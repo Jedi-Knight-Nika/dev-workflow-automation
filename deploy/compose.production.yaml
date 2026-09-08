@@ -76,7 +76,7 @@ services:
     image: autonomous-engineering-worker-runtime:latest
     environment:
       <<: *backend-environment
-      # Native execution is opt-in through compose.v2.yaml after configuration.
+      # Native execution is opt-in through compose.execution.yaml after configuration.
       SCHEDULER_ENABLED: "false"
       DOCKER_SOCKET: /var/run/docker.sock
     depends_on:
@@ -119,7 +119,7 @@ services:
       postgres:
         condition: service_healthy
     volumes:
-      - ${V2_DATA_ROOT:?Set V2_DATA_ROOT}:/engineering-data:ro
+      - ${EXECUTION_DATA_ROOT:?Set EXECUTION_DATA_ROOT}:/engineering-data:ro
       - ${BACKUP_DIR:-./backups}:/backups
       - ./backup.sh:/usr/local/bin/backup:ro
     entrypoint: ["/bin/sh", "/usr/local/bin/backup"]
@@ -139,7 +139,7 @@ services:
       postgres:
         condition: service_healthy
     volumes:
-      - ${V2_DATA_ROOT:?Set V2_DATA_ROOT}:/engineering-data
+      - ${EXECUTION_DATA_ROOT:?Set EXECUTION_DATA_ROOT}:/engineering-data
       - ${BACKUP_DIR:-./backups}:/backups:ro
       - ./restore.sh:/usr/local/bin/restore:ro
     entrypoint: ["/bin/sh", "/usr/local/bin/restore"]

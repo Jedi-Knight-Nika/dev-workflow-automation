@@ -4,6 +4,7 @@
   import EChart from './EChart.svelte';
   import { chartColors, hexAlpha } from './chart-colors.svelte';
   import { count, duration, money, percent } from './format';
+  import { t } from '$lib/i18n/index.svelte';
   import './analytics-panels.css';
   let { analytics, days }: { analytics: AnalyticsDashboard; days: number } = $props();
   function comparison(
@@ -37,39 +38,52 @@
 </script>
 
 <section class="ops-panel">
-  <h3>AI cost & efficiency</h3>
+  <h3>{t('operations.aiCostEfficiency')}</h3>
   <div class="cards">
     {#each [1, 7, 30] as window (window)}<article>
-        <small>Known AI cost · {window === 1 ? '24 hours' : `${window} days`}</small><strong
-          >{money(analytics.period_costs?.[window]?.known_cost_usd)}</strong
-        ><span>{analytics.period_costs?.[window]?.unknown_cost_runs ?? 0} unknown-cost runs</span>
+        <small
+          >{t('operations.knownAiCost', {
+            window:
+              window === 1 ? t('operations.last24h') : t('operations.lastNDays', { count: window })
+          })}</small
+        ><strong>{money(analytics.period_costs?.[window]?.known_cost_usd)}</strong><span
+          >{t('operations.unknownCostRuns', {
+            count: analytics.period_costs?.[window]?.unknown_cost_runs ?? 0
+          })}</span
+        >
       </article>{/each}
     <article>
-      <small>Input / output · {days}d</small><strong
+      <small>{t('operations.inputOutputWindow', { days })}</small><strong
         >{count(analytics.totals.input_tokens)} / {count(analytics.totals.output_tokens)}</strong
       ><span
-        >Cached subset {count(analytics.totals.cache_read_tokens)} · Cache writes {count(
-          analytics.totals.cache_write_tokens
-        )} · Reasoning subset {count(analytics.totals.reasoning_tokens)}</span
+        >{t('operations.cacheDetail', {
+          cached: count(analytics.totals.cache_read_tokens),
+          writes: count(analytics.totals.cache_write_tokens),
+          reasoning: count(analytics.totals.reasoning_tokens)
+        })}</span
       >
     </article>
     <article>
-      <small>Cost per merged task</small><strong>{money(analytics.cost_per_merged_task_usd)}</strong
+      <small>{t('operations.costPerMergedTask')}</small><strong
+        >{money(analytics.cost_per_merged_task_usd)}</strong
       ><span
-        >{analytics.complete_merged_tasks} complete · {analytics.excluded_incomplete_tasks} excluded</span
+        >{t('operations.completeExcluded', {
+          complete: analytics.complete_merged_tasks,
+          excluded: analytics.excluded_incomplete_tasks
+        })}</span
       >
     </article>
     <article>
-      <small>Failed / compaction spend</small><strong
+      <small>{t('operations.failedCompactionSpend')}</small><strong
         >{money(analytics.totals.failed_spend_usd)} / {money(
           analytics.totals.compaction_spend_usd
         )}</strong
-      ><span>Reserved {money(analytics.totals.reserved_usd)}</span>
+      ><span>{t('operations.reserved', { amount: money(analytics.totals.reserved_usd) })}</span>
     </article>
   </div>
   <div class="charts">
     <EChart
-      summary={`Daily AI cost · ${days}d · UTC. Incomplete costs remain gaps.`}
+      summary={t('operations.dailyAiCost', { days })}
       option={{
         tooltip: { trigger: 'axis' },
         xAxis: { type: 'category', data: analytics.daily.map((d) => d.key) },
@@ -101,10 +115,10 @@
       }}
     />
     <EChart
-      summary="Input and output tokens by model. Cached input and reasoning are subsets."
+      summary={t('operations.tokensByModel')}
       option={{
         tooltip: { trigger: 'axis' },
-        legend: { data: ['Input', 'Output'] },
+        legend: { data: [t('operations.legendInput'), t('operations.legendOutput')] },
         grid: { left: 65, right: 15, bottom: 80 },
         xAxis: {
           type: 'category',
@@ -114,13 +128,13 @@
         yAxis: { type: 'value' },
         series: [
           {
-            name: 'Input',
+            name: t('operations.legendInput'),
             type: 'bar',
             stack: 'tokens',
             data: analytics.models.map((m) => m.input_tokens)
           },
           {
-            name: 'Output',
+            name: t('operations.legendOutput'),
             type: 'bar',
             stack: 'tokens',
             data: analytics.models.map((m) => m.output_tokens)
@@ -130,29 +144,31 @@
     />
   </div>
   <details>
-    <summary>Cost by model, agent, repository & run kind</summary>
+    <summary>{t('operations.costBreakdown')}</summary>
     <div class="charts">
-      <EChart summary="Known cost by model" option={comparison(analytics.models)} /><EChart
-        summary="Known cost by agent"
+      <EChart summary={t('operations.costByModel')} option={comparison(analytics.models)} /><EChart
+        summary={t('operations.costByAgent')}
         option={comparison(
           analytics.agents,
           Object.fromEntries(analytics.agents.map((a) => [a.key, a.display_name]))
         )}
       /><EChart
-        summary="Known cost by repository"
+        summary={t('operations.costByRepository')}
         option={comparison(analytics.repositories, analytics.repository_names)}
-      /><EChart summary="Known cost by run kind" option={comparison(analytics.run_kinds)} />
+      /><EChart summary={t('operations.costByRunKind')} option={comparison(analytics.run_kinds)} />
     </div>
   </details>
-  <h3>Agent leaderboard</h3>
+  <h3>{t('operations.agentLeaderboard')}</h3>
   <div class="scroll">
     <table>
       <thead
         ><tr
-          ><th>Profile / Team</th><th>Harness / model</th><th>Merged / terminal</th><th>Success</th
-          ><th>Median / P90 cost</th><th>Median / P90 active</th><th>Tokens / merged</th><th
-            >Fixes / task</th
-          ><th>Human intervention</th></tr
+          ><th>{t('operations.colProfileTeam')}</th><th>{t('operations.colHarnessModel')}</th><th
+            >{t('operations.colMergedTerminal')}</th
+          ><th>{t('operations.colSuccess')}</th><th>{t('operations.colCostMedianP90')}</th><th
+            >{t('operations.colActiveMedianP90')}</th
+          ><th>{t('operations.colTokensPerMerged')}</th><th>{t('operations.colFixesPerTask')}</th
+          ><th>{t('operations.colHumanIntervention')}</th></tr
         ></thead
       ><tbody
         >{#each analytics.agents as a (a.key)}<tr
@@ -162,23 +178,34 @@
               >{money(a.median_cost_usd)} / {money(a.p90_cost_usd)}</td
             ><td>{duration(a.median_developer_seconds)} / {duration(a.p90_developer_seconds)}</td
             ><td>{count(a.tokens_per_merged_task)}</td><td
-              >{a.review_fix_cycles_per_task?.toFixed(1) ?? 'Unknown'}</td
+              >{a.review_fix_cycles_per_task?.toFixed(1) ?? t('operations.unknownValue')}</td
             ><td>{percent(a.human_intervention_rate)}</td></tr
-          >{:else}<tr><td colspan="9">No agent receipts in this window.</td></tr>{/each}</tbody
+          >{:else}<tr><td colspan="9">{t('operations.noAgentReceipts')}</td></tr>{/each}</tbody
       >
     </table>
   </div>
   <p class="muted">{analytics.basis}</p>
   <p class="muted">
-    Provider failures {analytics.reliability?.provider_failures ?? 0} · Rate-limit failures {analytics
-      .reliability?.rate_limit_failures ?? 0} · Validation failures {analytics.reliability
-      ?.validation_failures ?? 0}
+    {t('operations.reliabilityFailures', {
+      provider: analytics.reliability?.provider_failures ?? 0,
+      rateLimit: analytics.reliability?.rate_limit_failures ?? 0,
+      validation: analytics.reliability?.validation_failures ?? 0
+    })}
   </p>
   <details>
-    <summary>Local Interpreter activity ({analytics.local_runs?.length ?? 0})</summary>
+    <summary
+      >{t('operations.localInterpreterActivity', {
+        count: analytics.local_runs?.length ?? 0
+      })}</summary
+    >
     <div class="scroll">
       <table>
-        <thead><tr><th>Model</th><th>Status</th><th>Input / output</th><th>Duration</th></tr></thead
+        <thead
+          ><tr
+            ><th>{t('operations.colModel')}</th><th>{t('operations.colStatus')}</th><th
+              >{t('operations.inputOutput')}</th
+            ><th>{t('operations.colDuration')}</th></tr
+          ></thead
         ><tbody
           >{#each analytics.local_runs ?? [] as run, index (index)}<tr
               ><td>{run.model}</td><td>{run.status}</td><td

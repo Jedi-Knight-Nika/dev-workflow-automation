@@ -61,7 +61,7 @@ async def operator_message(session: AsyncSession, task: Task, message: TaskMessa
             .with_for_update()
         )
         if native is None:
-            raise ValueError("Enroll the task before sending V2 execution feedback")
+            raise ValueError("Enroll the task before sending execution feedback")
         if not native.native_session_id:
             request = f"{task.description}\n\nOperator clarification:\n{delta}".strip()
             if len(task.title) + len(request) > 24000:

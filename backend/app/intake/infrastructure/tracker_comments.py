@@ -38,7 +38,7 @@ async def tracker_comment(
     integration = await session.scalar(
         select(Integration).where(Integration.provider_name == provider)
     )
-    allowed = (integration.configuration or {}).get("v2_actor_ids", []) if integration else []
+    allowed = (integration.configuration or {}).get("actor_ids", []) if integration else []
     if not actor or (not routed_actor and actor not in allowed):
         return
     key = f"{provider}:{event_id}"

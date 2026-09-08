@@ -3,6 +3,7 @@
   import { getServiceHistory } from '$lib/services/observability';
   import EChart from './EChart.svelte';
   import { bytes, percent, count, duration } from './format';
+  import { t } from '$lib/i18n/index.svelte';
   let { services }: { services: ServiceResource[] } = $props();
   let sort = $state<'cpu' | 'memory' | 'network_rx_rate'>('memory');
   let selected = $state(''),
@@ -26,7 +27,7 @@
           }
         })
         .catch(() => {
-          if (!disposed) error = 'History unavailable';
+          if (!disposed) error = t('operations.historyUnavailable');
         });
     return () => {
       disposed = true;
@@ -36,12 +37,13 @@
 
 <section>
   <header>
-    <h3>Service resource leaderboard ({services.length})</h3>
+    <h3>{t('operations.serviceLeaderboard', { count: services.length })}</h3>
     <label
-      >Sort <select bind:value={sort}
-        ><option value="memory">RAM</option><option value="cpu">CPU</option><option
-          value="network_rx_rate">Network RX</option
-        ></select
+      >{t('operations.sort')}
+      <select bind:value={sort}
+        ><option value="memory">{t('operations.sortRam')}</option><option value="cpu"
+          >{t('operations.sortCpu')}</option
+        ><option value="network_rx_rate">{t('operations.sortNetworkRx')}</option></select
       ></label
     >
   </header>
@@ -49,9 +51,13 @@
     <table>
       <thead
         ><tr
-          ><th>Service / container</th><th>CPU</th><th>RAM / limit</th><th>Network RX / TX</th><th
-            >Restarts / OOM · 7d</th
-          ><th>State / health</th><th>Uptime</th><th>PIDs / throttling</th><th>Last seen</th></tr
+          ><th>{t('operations.colService')}</th><th>{t('operations.colCpu')}</th><th
+            >{t('operations.colRamLimit')}</th
+          ><th>{t('operations.colNetwork')}</th><th>{t('operations.colRestarts')}</th><th
+            >{t('operations.colState')}</th
+          ><th>{t('operations.colUptime')}</th><th>{t('operations.colPids')}</th><th
+            >{t('operations.colLastSeen')}</th
+          ></tr
         ></thead
       >
       <tbody
@@ -61,45 +67,61 @@
                   onclick={() => (selected = selected === row.service ? '' : (row.service ?? ''))}
                   >{row.service}</button
                 >{:else}{row.name}{/if}<small>{row.name}</small></td
-            ><td>{percent(row.cpu)}<small>{row.cpu?.toFixed(2) ?? 'Unknown'} cores</small></td><td
+            ><td
+              >{percent(row.cpu)}<small
+                >{t('operations.cores', {
+                  count: row.cpu?.toFixed(2) ?? t('operations.unknownValue')
+                })}</small
+              ></td
+            ><td
               >{bytes(row.memory)}<small
-                >{row.memory_limit === 0 ? 'No limit' : bytes(row.memory_limit)} · {percent(
+                >{row.memory_limit === 0 ? t('operations.noLimit') : bytes(row.memory_limit)} · {percent(
                   row.memory_ratio
                 )}</small
               ></td
             ><td>{bytes(row.network_rx_rate)}/s<small>{bytes(row.network_tx_rate)}/s</small></td><td
               >{count(row.restart_count)} / {count(row.oom_count)}</td
-            ><td>{row.state ?? 'Unknown'}<small>{row.health ?? 'Unknown'}</small></td><td
-              >{duration(row.uptime_seconds)}</td
-            ><td>{count(row.pids)}<small>{percent(row.throttled_rate)}</small></td><td
-              >{row.last_seen ? new Date(row.last_seen * 1000).toLocaleTimeString() : 'Unknown'}</td
+            ><td
+              >{row.state ?? t('operations.unknownValue')}<small
+                >{row.health ?? t('operations.unknownValue')}</small
+              ></td
+            ><td>{duration(row.uptime_seconds)}</td><td
+              >{count(row.pids)}<small>{percent(row.throttled_rate)}</small></td
+            ><td
+              >{row.last_seen
+                ? new Date(row.last_seen * 1000).toLocaleTimeString()
+                : t('operations.unknownValue')}</td
             ></tr
-          >{:else}<tr><td colspan="9">No current container samples.</td></tr>{/each}</tbody
+          >{:else}<tr><td colspan="9">{t('operations.noContainerSamples')}</td></tr>{/each}</tbody
       >
     </table>
   </div>
   {#if selected}<div class="history">
       <header>
-        <h4>{selected} history</h4>
+        <h4>{t('operations.serviceHistory', { name: selected })}</h4>
         <label
-          >Metric <select bind:value={metric}
-            ><option value="memory">RAM</option><option value="cpu">CPU cores</option><option
-              value="network_rx_rate">Network RX bytes/s</option
-            ><option value="network_tx_rate">Network TX bytes/s</option><option
-              value="block_read_rate">Disk read bytes/s</option
-            ><option value="block_write_rate">Disk write bytes/s</option></select
-          ></label
-        ><label
-          >Window <select bind:value={hours}
-            ><option value={1}>1 hour</option><option value={24}>24 hours</option><option
-              value={168}>7 days</option
+          >{t('operations.metric')}
+          <select bind:value={metric}
+            ><option value="memory">{t('operations.metricRam')}</option><option value="cpu"
+              >{t('operations.metricCpuCores')}</option
+            ><option value="network_rx_rate">{t('operations.metricNetworkRxBytes')}</option><option
+              value="network_tx_rate">{t('operations.metricNetworkTxBytes')}</option
+            ><option value="block_read_rate">{t('operations.metricDiskRead')}</option><option
+              value="block_write_rate">{t('operations.metricDiskWrite')}</option
             ></select
           ></label
-        ><button onclick={() => (selected = '')}>Close history</button>
+        ><label
+          >{t('operations.window')}
+          <select bind:value={hours}
+            ><option value={1}>{t('operations.window1h')}</option><option value={24}
+              >{t('operations.window24hFull')}</option
+            ><option value={168}>{t('operations.window7dFull')}</option></select
+          ></label
+        ><button onclick={() => (selected = '')}>{t('operations.closeHistory')}</button>
       </header>
       {#if error}<p role="status">{error}</p>{/if}
       {#if history}<EChart
-          summary={`${selected} ${metric} · ${history.status}. Missing samples remain gaps.`}
+          summary={t('operations.historyStatusGaps', { selected, metric, status: history.status })}
           option={{
             tooltip: { trigger: 'axis' },
             legend: { type: 'scroll' },

@@ -152,6 +152,18 @@
   }
 }
 
+@keyframes node-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 16px -2px color-mix(in srgb, var(--color-accent) 55%, transparent);
+  }
+  50% {
+    box-shadow:
+      0 0 28px -2px color-mix(in srgb, var(--color-accent) 85%, transparent),
+      0 0 10px color-mix(in srgb, var(--color-accent) 55%, transparent);
+  }
+}
+
 @keyframes face-breathe {
   0%,
   100% {

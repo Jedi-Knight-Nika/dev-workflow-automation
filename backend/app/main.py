@@ -15,6 +15,7 @@ from app.bootstrap.scheduler import create_scheduler
 from app.interfaces.http.routes.analytics import router as analytics_router
 from app.interfaces.http.routes.control_plane import router as control_plane_router
 from app.interfaces.http.routes.dashboard import router as dashboard_router
+from app.interfaces.http.routes.engineering import router as engineering_router
 from app.interfaces.http.routes.events import router as events_router
 from app.interfaces.http.routes.health import router as health_router
 from app.interfaces.http.routes.metrics import router as metrics_router
@@ -22,7 +23,6 @@ from app.interfaces.http.routes.observability import router as observability_rou
 from app.interfaces.http.routes.settings import router as settings_router
 from app.interfaces.http.routes.tasks import router as tasks_router
 from app.interfaces.http.routes.teams import router as teams_router
-from app.interfaces.http.routes.v2 import router as v2_router
 from app.interfaces.http.routes.webhooks import router as webhooks_router
 from app.platform.configuration.settings import get_settings
 from app.platform.integrations.http import integration_http_pool
@@ -60,17 +60,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.include_router(health_router)
-app.include_router(dashboard_router, prefix="/api/v1")
-app.include_router(tasks_router, prefix="/api/v1")
-app.include_router(teams_router, prefix="/api/v1")
-app.include_router(settings_router, prefix="/api/v1")
-app.include_router(control_plane_router, prefix="/api/v1")
-app.include_router(events_router, prefix="/api/v1")
+app.include_router(dashboard_router, prefix="/api")
+app.include_router(tasks_router, prefix="/api")
+app.include_router(teams_router, prefix="/api")
+app.include_router(settings_router, prefix="/api")
+app.include_router(control_plane_router, prefix="/api")
+app.include_router(events_router, prefix="/api")
 app.include_router(webhooks_router)
-app.include_router(v2_router, prefix="/api/v1")
-app.include_router(v2_router, prefix="/api", include_in_schema=False)
-app.include_router(observability_router, prefix="/api/v1")
-app.include_router(analytics_router, prefix="/api/v1")
+app.include_router(engineering_router, prefix="/api")
+app.include_router(observability_router, prefix="/api")
+app.include_router(analytics_router, prefix="/api")
 app.include_router(metrics_router)
 
 

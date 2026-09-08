@@ -22,7 +22,9 @@ async def sweep(client: httpx.AsyncClient, sessions: async_sessionmaker[AsyncSes
     response = await client.get(
         "/containers/json",
         params={
-            "filters": json.dumps({"label": ["managed_by=scheduler-v2"], "status": ["running"]})
+            "filters": json.dumps(
+                {"label": ["managed_by=engineering-scheduler"], "status": ["running"]}
+            )
         },
     )
     response.raise_for_status()
@@ -32,7 +34,10 @@ async def sweep(client: httpx.AsyncClient, sessions: async_sessionmaker[AsyncSes
     for container in containers:
         names = container.get("Names") or []
         match = NAME.fullmatch(names[0]) if len(names) == 1 else None
-        if match is None or container.get("Labels", {}).get("managed_by") != "scheduler-v2":
+        if (
+            match is None
+            or container.get("Labels", {}).get("managed_by") != "engineering-scheduler"
+        ):
             continue
         job_id, token = UUID(match[1]), UUID(match[2])
         async with sessions.begin() as session:
@@ -75,8 +80,8 @@ async def sweep(client: httpx.AsyncClient, sessions: async_sessionmaker[AsyncSes
             session.add(
                 TaskEvent(
                     task_id=task.id,
-                    source="scheduler-v2",
-                    event_type="V2_ORPHAN_STOPPED",
+                    source="engineering-scheduler",
+                    event_type="ENGINEERING_ORPHAN_STOPPED",
                     payload={
                         "job_id": str(job.id),
                         "container_id": container["Id"],

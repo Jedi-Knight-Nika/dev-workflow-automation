@@ -3,10 +3,11 @@
   import { operations, subscribeOperations } from '$lib/services/live-operations.svelte';
   import { bytes, count, duration, money } from './observability/format';
   import { resolve } from '$app/paths';
-  import { Background, Controls, SvelteFlow } from '@xyflow/svelte';
+  import { t } from '$lib/i18n/index.svelte';
+  import { Background, Controls, MarkerType, SvelteFlow } from '@xyflow/svelte';
   import '@xyflow/svelte/dist/style.css';
   import { lifecycleEdges, lifecycleNodes } from '$lib/fixed-lifecycle';
-  import { type EngineeringTask, type TeamActivity } from '$lib/services/engineering-v2';
+  import { type EngineeringTask, type TeamActivity } from '$lib/services/engineering';
 
   let { activity }: { activity: TeamActivity } = $props();
   let container: HTMLDivElement;
@@ -31,13 +32,34 @@
       const detail = runner
         ? `${runner.profile_name || runner.service_kind}\n${runner.task_key || runner.task_title || ''}\n${runner.harness || ''} ${runner.model || ''}\n${count(runner.input_tokens)} in · ${money(runner.known_cost_usd)}\nRAM ${bytes(runner.resources?.memory)} · ${duration(runner.wall_seconds)}`
         : waiting
-          ? 'WAITING · AI spend while idle: $0'
+          ? `${t('canvas.waitingIdleSpend')}`
           : '';
       return {
         ...node,
         data: { ...node.data, label: `${node.data.label}${detail ? '\n' + detail : ''}` },
         style: `${node.style || ''}; white-space: pre-line; width: 205px; font-size: 11px`
       };
+    })
+  );
+  const activeStages = $derived(
+    new Set(activity.tasks.filter((task) => task.status === 'ACTIVE').map((task) => task.stage))
+  );
+  let edges = $derived(
+    lifecycleEdges.map((edge) => {
+      const live = activeStages.has(edge.source) || activeStages.has(edge.target);
+      return live
+        ? {
+            ...edge,
+            animated: true,
+            style: 'stroke: var(--color-brand-2); stroke-width: 2px;',
+            markerEnd: {
+              type: MarkerType.ArrowClosed,
+              width: 16,
+              height: 16,
+              color: 'var(--color-brand-2)'
+            }
+          }
+        : edge;
     })
   );
   const describe = (task: EngineeringTask) => `${task.status} · ${task.stage}`;
@@ -48,7 +70,7 @@
       if (document.fullscreenElement === container) await document.exitFullscreen();
       else await container.requestFullscreen();
     } catch {
-      error = 'Your browser could not enter fullscreen. Use its fullscreen command instead.';
+      error = t('canvas.fullscreenError');
     }
   }
 </script>
@@ -59,20 +81,21 @@
 <div class="canvas" bind:this={container}>
   <header>
     <div>
-      <h2>Fixed engineering lifecycle</h2>
-      <p>Read-only map · planning and AI review are optional</p>
+      <h2>{t('canvas.title')}</h2>
+      <p>{t('canvas.subtitle')}</p>
     </div>
-    <button onclick={toggleFullscreen}>{fullscreen ? 'Exit fullscreen (Esc)' : 'Fullscreen'}</button
+    <button onclick={toggleFullscreen}
+      >{fullscreen ? t('canvas.exitFullscreen') : t('canvas.fullscreen')}</button
     >
   </header>
   {#if error}<p role="alert">{error}</p>{/if}
   <div class="workspace">
-    <section class="map" aria-label="Lifecycle stages">
-      <p class="guide">Intake → Developer → Validation → Publication → Review → Merge</p>
+    <section class="map" aria-label={t('canvas.lifecycleStages')}>
+      <p class="guide">{t('canvas.guide')}</p>
       <div class="flow">
         <SvelteFlow
           {nodes}
-          edges={lifecycleEdges}
+          {edges}
           fitView
           nodesDraggable={false}
           nodesConnectable={false}
@@ -83,10 +106,10 @@
           <Controls showLock={false} />
         </SvelteFlow>
       </div>
-      <p>Planning is optional. Review waits use no AI. Fixes resume the same Developer session.</p>
+      <p>{t('canvas.footnote')}</p>
     </section>
-    <aside aria-label="Queue and task details">
-      <h3>Queue and executing work</h3>
+    <aside aria-label={t('canvas.queueAndDetails')}>
+      <h3>{t('canvas.queueHeading')}</h3>
       {#each activity.tasks as task (task.id)}
         <button
           class="task"
@@ -95,20 +118,20 @@
         >
           <span>{task.title}</span><small>P{task.priority} · {describe(task)}</small>
         </button>
-      {:else}<p>No active or queued tasks.</p>{/each}
+      {:else}<p>{t('canvas.noTasks')}</p>{/each}
       {#if selected}
         <section class="details">
-          <h3>Task details</h3>
+          <h3>{t('canvas.taskDetails')}</h3>
           <p>{selected.title}</p>
           <p>{describe(selected)}</p>
-          <p>Requirement version: {selected.requirement_version}</p>
+          <p>{t('canvas.requirementVersion', { version: selected.requirement_version })}</p>
           {#if selected.wait_reason && selected.wait_reason !== 'NONE'}<p>
-              Waiting: {selected.wait_reason.replaceAll('_', ' ')}
+              {t('canvas.waiting', { reason: selected.wait_reason.replaceAll('_', ' ') })}
             </p>{/if}
-          <a href={resolve('/tasks/[id]', { id: selected.id })}>Open ticket →</a>
+          <a href={resolve('/tasks/[id]', { id: selected.id })}>{t('canvas.openTicket')}</a>
         </section>
       {/if}
-      <h3>Recent milestones</h3>
+      <h3>{t('canvas.recentMilestones')}</h3>
       {#each activity.milestones.filter((item) => !selected || item.task_id === selected.id) as milestone (milestone.id)}
         <p class="milestone">
           <strong>{milestone.stage} · {milestone.status}</strong><br />
@@ -117,7 +140,7 @@
             >{new Date(milestone.started_at).toLocaleString()}</time
           >
         </p>
-      {:else}<p>No milestones recorded yet.</p>{/each}
+      {:else}<p>{t('canvas.noMilestones')}</p>{/each}
     </aside>
   </div>
 </div>
@@ -279,18 +302,18 @@
   /* Svelte Flow theming: bring the graph in line with the app's neon palette. */
   .flow :global(.svelte-flow) {
     --xy-background-color: transparent;
-    --xy-background-pattern-color: color-mix(in srgb, var(--color-line) 90%, transparent);
-    --xy-node-border: 1px solid var(--color-line);
+    --xy-background-pattern-color: color-mix(in srgb, var(--color-brand-2) 16%, var(--color-line));
+    --xy-node-border: 1.5px solid color-mix(in srgb, var(--color-muted) 38%, var(--color-line));
     --xy-node-background-color: var(--color-panel);
-    --xy-node-color: var(--color-text);
+    --xy-node-color: var(--color-heading);
     --xy-node-border-radius: 10px;
     --xy-node-boxshadow-hover: 0 0 16px -4px
-      color-mix(in srgb, var(--color-brand-2) 50%, transparent);
+      color-mix(in srgb, var(--color-brand-2) 55%, transparent);
     --xy-node-boxshadow-selected:
       0 0 0 1.5px var(--color-brand),
       0 0 20px -2px color-mix(in srgb, var(--color-brand) 65%, transparent);
-    --xy-edge-stroke: var(--color-brand-2);
-    --xy-edge-stroke-width: 1.6;
+    --xy-edge-stroke: color-mix(in srgb, var(--color-brand-2) 40%, var(--color-line));
+    --xy-edge-stroke-width: 1.4;
     --xy-edge-stroke-selected: var(--color-brand);
     --xy-controls-button-background-color: var(--color-panel);
     --xy-controls-button-background-color-hover: color-mix(
@@ -307,14 +330,19 @@
   }
   .flow :global(.svelte-flow__node) {
     font-family: inherit;
+    box-shadow: 0 2px 10px -6px color-mix(in srgb, var(--color-text) 25%, transparent);
     transition:
       box-shadow 0.25s var(--ease-smooth),
-      border-color 0.25s var(--ease-smooth);
+      border-color 0.25s var(--ease-smooth),
+      transform 0.2s var(--ease-smooth);
+  }
+  .flow :global(.svelte-flow__node.selectable:hover) {
+    transform: translateY(-1px);
   }
   .flow :global(.svelte-flow__edge.animated path) {
-    stroke-dasharray: 6;
-    animation: dashdraw 0.9s linear infinite;
-    filter: drop-shadow(0 0 4px color-mix(in srgb, var(--color-brand-2) 65%, transparent));
+    stroke-dasharray: 5;
+    animation: dashdraw 1.1s linear infinite;
+    filter: drop-shadow(0 0 5px color-mix(in srgb, var(--color-brand-2) 70%, transparent));
   }
   .flow :global(.svelte-flow__edge:hover .svelte-flow__edge-path) {
     stroke: var(--color-brand);
@@ -323,6 +351,9 @@
   @media (prefers-reduced-motion: reduce) {
     .flow :global(.svelte-flow__edge.animated path) {
       animation: none;
+    }
+    .flow :global(.svelte-flow__node[style*='node-pulse']) {
+      animation: none !important;
     }
   }
 </style>

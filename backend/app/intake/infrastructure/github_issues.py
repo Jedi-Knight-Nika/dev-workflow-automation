@@ -10,8 +10,8 @@ from app.engineering.domain.lifecycle import Action
 from app.engineering.infrastructure.controls import control_task
 from app.engineering.infrastructure.job_queue import request_execution
 from app.engineering.infrastructure.task_models import Task, TaskEvent
+from app.intake.infrastructure.engineering_events import requirements_changed
 from app.intake.infrastructure.task_snapshot import ExternalTaskSnapshot
-from app.intake.infrastructure.v2_events import requirements_changed
 from app.platform.configuration.settings import get_settings
 from app.repositories.infrastructure.models import Repository
 

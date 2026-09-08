@@ -229,7 +229,7 @@ class DockerHarness:
                     metadata = response.json()
                     labels = metadata.get("Config", {}).get("Labels", {})
                     if (
-                        labels.get("managed_by") != "scheduler-v2"
+                        labels.get("managed_by") != "engineering-scheduler"
                         or labels.get("job_id") != str(self.job_id)
                         or labels.get("task_id") != str(self.mounts.task_id)
                         or labels.get("execution_name") != self.name

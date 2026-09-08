@@ -102,7 +102,7 @@ async def merge_phase(sessions: async_sessionmaker[AsyncSession], lease: PhaseLe
                     TaskEvent(
                         task_id=task.id,
                         source="github",
-                        event_type="V2_MERGE_RECHECK_REQUIRED",
+                        event_type="ENGINEERING_MERGE_RECHECK_REQUIRED",
                         payload={"blockers": blockers},
                     )
                 )
@@ -116,7 +116,7 @@ async def merge_phase(sessions: async_sessionmaker[AsyncSession], lease: PhaseLe
             TaskEvent(
                 task_id=task.id,
                 source="github",
-                event_type="V2_MERGE_CONFIRMED",
+                event_type="ENGINEERING_MERGE_CONFIRMED",
                 payload={
                     "head_sha": evidence.current_sha,
                     "merge_sha": result["sha"],

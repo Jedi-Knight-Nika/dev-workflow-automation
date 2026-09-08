@@ -3,8 +3,8 @@ import type { Handle } from '@sveltejs/kit';
 
 // The standalone preview has no Caddy. Keep browser requests on the same origin.
 export const handle: Handle = async ({ event, resolve }) => {
-  if (!env.API_URL || !event.url.pathname.startsWith('/api/v1/')) return resolve(event);
-  if (event.url.pathname === '/api/v1/observability/alerts')
+  if (!env.API_URL || !event.url.pathname.startsWith('/api/')) return resolve(event);
+  if (event.url.pathname === '/api/observability/alerts')
     return new Response(null, { status: 404 });
   const headers = new Headers(event.request.headers);
   headers.delete('host');

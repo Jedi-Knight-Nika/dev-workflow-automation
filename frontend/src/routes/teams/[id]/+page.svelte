@@ -4,7 +4,7 @@
   import ErrorBanner from '$lib/components/ErrorBanner.svelte';
   import FixedLifecycleCanvas from '$lib/components/FixedLifecycleCanvas.svelte';
   import AutomationPolicyEditor from '$lib/components/AutomationPolicyEditor.svelte';
-  import V2StatisticsPanel from '$lib/components/V2StatisticsPanel.svelte';
+  import EngineeringStatisticsPanel from '$lib/components/EngineeringStatisticsPanel.svelte';
   import TokenPolicyEditor from '$lib/components/TokenPolicyEditor.svelte';
   import OperationsDashboard from '$lib/components/observability/OperationsDashboard.svelte';
   import {
@@ -14,7 +14,7 @@
     saveProfile,
     type AgentProfile,
     type TeamActivity
-  } from '$lib/services/engineering-v2';
+  } from '$lib/services/engineering';
 
   let activity = $state<TeamActivity | null>(null);
   let profiles = $state<AgentProfile[]>([]);
@@ -102,10 +102,10 @@
   }
 </script>
 
-<svelte:head><title>{activity?.team_name ?? 'Team'} · V2 engineering</title></svelte:head>
+<svelte:head><title>{activity?.team_name ?? 'Team'} · Engineering</title></svelte:head>
 <main>
   <header>
-    <p>ENGINEERING V2 · CONTROLLED ROLLOUT</p>
+    <p>ENGINEERING CONTROL CENTER</p>
     <h1>{activity?.team_name ?? 'Team'}</h1>
     <p>
       Configure fixed profiles, explicit ticket enrollment, budgets, and merge authority. Verify
@@ -121,7 +121,7 @@
       />{/key}{/if}
   {#if activity}{#key activity.team_id}<OperationsDashboard
         teamId={activity.team_id}
-      /><TokenPolicyEditor teamId={activity.team_id} /><V2StatisticsPanel
+      /><TokenPolicyEditor teamId={activity.team_id} /><EngineeringStatisticsPanel
         teamId={activity.team_id}
       />{/key}{/if}
   <section class="profiles">
@@ -131,7 +131,7 @@
       instructions are not.
     </p>
     {#if !loading && !profiles.length}<button disabled={!!busy} onclick={initialize}
-        >Initialize V2 profiles</button
+        >Initialize profiles</button
       >{/if}
     <div class="cards">
       {#each profiles as profile (profile.id)}

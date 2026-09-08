@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { lifecycleEdges, lifecycleNodes } from './fixed-lifecycle';
-import { STAGES, type EngineeringTask } from './services/engineering-v2';
+import { STAGES, type EngineeringTask } from './services/engineering';
 
 describe('fixed lifecycle map', () => {
   it('has immutable topology and no graph editing controls', () => {

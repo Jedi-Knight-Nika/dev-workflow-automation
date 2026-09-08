@@ -66,9 +66,13 @@ class SqlTokenEfficiency:
     async def task_policy(self, task_id: UUID) -> dict[str, Any]:
         loaded = await SqlSessionAdministration(self.session)._load(task_id)
         if loaded is None:
-            raise ValueError("Enroll the task before selecting an execution override")
-        task, native, _ = loaded
-        override = native.checkpoint.get("token_policy_override")
+            task = await self.session.get(Task, task_id)
+            if task is None:
+                raise LookupError("Task not found")
+            override = None
+        else:
+            task, native, _ = loaded
+            override = native.checkpoint.get("token_policy_override")
         team = await self.policy(task.team_id) if task.team_id else {"values": {}}
         return {
             "version": task.lifecycle_version,
@@ -327,7 +331,12 @@ class SqlTokenEfficiency:
             "peak_active_context_tokens": max(peaks) if peaks else None,
             "context_generation_count": len(generations),
             "rollover_count": sum(g["status"] == "SEALED" for g in generations),
-            "compaction_count": sum(r.prompt_version.startswith("v2.compaction") for r in runs),
+            "compaction_count": sum(
+                r.prompt_version == "developer.compaction"
+                or bool((r.raw_usage or {}).get("compaction"))
+                or (r.raw_usage or {}).get("run_kind") == "DEVELOPER_COMPACTION"
+                for r in runs
+            ),
             "tokens_since_last_progress": samples[-1].get("tokens_since_last_progress")
             if samples
             else None,
@@ -337,11 +346,7 @@ class SqlTokenEfficiency:
                 r.failure_code in {"NO_PROGRESS", "REPEATED_TOOL_LOOP", "EXPLORATION_LIMIT"}
                 for r in runs
             ),
-            "policy": await self.task_policy(task_id)
-            if generations
-            else await self.policy(task.team_id)
-            if task.team_id
-            else None,
+            "policy": await self.task_policy(task_id),
             "measurement_quality": samples[-1].get("measurement_quality")
             if samples
             else {"usage": "historical-receipts-only"},

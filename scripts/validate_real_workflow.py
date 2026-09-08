@@ -9,7 +9,7 @@ from typing import Any
 
 
 def request(base_url: str, path: str) -> Any:
-    with urllib.request.urlopen(base_url.rstrip("/") + "/api/v1" + path, timeout=15) as response:
+    with urllib.request.urlopen(base_url.rstrip("/") + "/api" + path, timeout=15) as response:
         return json.load(response)
 
 

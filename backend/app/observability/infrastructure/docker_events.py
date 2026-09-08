@@ -49,7 +49,7 @@ EVENTS = {
 def event_identity(event: dict[str, Any], host: str, project: str) -> dict[str, Any] | None:
     actor = event.get("Actor", {})
     labels = actor.get("Attributes", {})
-    managed = labels.get("managed_by") == "scheduler-v2"
+    managed = labels.get("managed_by") == "engineering-scheduler"
     if not managed and labels.get("com.docker.compose.project") != project:
         return None
     container_id = actor.get("ID", "")
@@ -230,7 +230,7 @@ class DockerEventsAdapter:
         owned = [
             c
             for c in response.json()
-            if c.get("Labels", {}).get("managed_by") == "scheduler-v2"
+            if c.get("Labels", {}).get("managed_by") == "engineering-scheduler"
             or c.get("Labels", {}).get("com.docker.compose.project") == self.project
         ]
         for container in owned[:200]:
@@ -248,7 +248,7 @@ class DockerEventsAdapter:
                 else None
             )
             attributes = {**labels, "name": value["Name"].lstrip("/")}
-            if instant and labels.get("managed_by") == "scheduler-v2":
+            if instant and labels.get("managed_by") == "engineering-scheduler":
                 async with self.sessions() as session:
                     exists = await session.scalar(
                         select(RunnerResourceBinding.id).where(

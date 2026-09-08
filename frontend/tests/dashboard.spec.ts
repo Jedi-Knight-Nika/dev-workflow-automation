@@ -3,11 +3,11 @@ import { expect, test } from '@playwright/test';
 test('creating a task is free by default and preserves zero story points', async ({ page }) => {
   const tasks: Record<string, unknown>[] = [];
   let created: Record<string, unknown> | null = null;
-  await page.route('**/api/v1/**', async (route) => {
+  await page.route('**/api/**', async (route) => {
     const request = route.request(),
       path = new URL(request.url()).pathname;
     if (path.endsWith('/events/stream')) return route.abort();
-    if (path === '/api/v1/tasks' && request.method() === 'POST') {
+    if (path === '/api/tasks' && request.method() === 'POST') {
       created = request.postDataJSON();
       const task = {
         ...created,
@@ -20,7 +20,7 @@ test('creating a task is free by default and preserves zero story points', async
       tasks.push(task);
       return route.fulfill({ status: 201, json: task });
     }
-    return route.fulfill({ json: path === '/api/v1/tasks' ? tasks : [] });
+    return route.fulfill({ json: path === '/api/tasks' ? tasks : [] });
   });
   await page.goto('/tasks');
   await page.getByRole('button', { name: 'Create task', exact: true }).click();

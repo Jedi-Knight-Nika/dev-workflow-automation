@@ -49,7 +49,7 @@ async def control_task(session: AsyncSession, task: Task, action: Action, *, act
         job.lease_token, job.lease_expires_at = None, None
     await session.flush()
     if action in {Action.RESUME, Action.RELEASE_TAKEOVER}:
-        from app.intake.infrastructure.v2_events import apply_pending_feedback
+        from app.intake.infrastructure.engineering_events import apply_pending_feedback
 
         waiting = await session.scalars(
             select(ReviewCycle).where(

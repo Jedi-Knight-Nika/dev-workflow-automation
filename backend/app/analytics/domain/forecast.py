@@ -5,7 +5,7 @@ from typing import Any
 
 from app.analytics.domain.efficiency import TaskFact, quantile, task_metrics
 
-VERSION = "quantiles-v1"
+VERSION = "quantiles"
 
 
 def complexity(task: TaskFact) -> str:

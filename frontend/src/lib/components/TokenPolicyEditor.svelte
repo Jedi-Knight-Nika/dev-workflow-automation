@@ -12,7 +12,7 @@
   let message = $state('');
   async function load() {
     try {
-      policy = await api<Policy>(`/v2/teams/${teamId}/token-efficiency-policy`);
+      policy = await api<Policy>(`/teams/${teamId}/token-efficiency-policy`);
       profile = String(policy.values.execution_profile);
       mode = String(policy.values.mode);
       effort = String(policy.values.reasoning_effort);
@@ -27,7 +27,7 @@
     message = '';
     try {
       const values = profile === 'CUSTOM' ? JSON.parse(advanced) : {};
-      await api(`/v2/teams/${teamId}/token-efficiency-policy`, {
+      await api(`/teams/${teamId}/token-efficiency-policy`, {
         method: 'PUT',
         body: JSON.stringify({
           version: policy.version,

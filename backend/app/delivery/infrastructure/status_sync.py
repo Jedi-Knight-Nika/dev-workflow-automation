@@ -139,8 +139,8 @@ async def process_status_sync(sessions: async_sessionmaker[AsyncSession]) -> boo
         session.add(
             TaskEvent(
                 task_id=task.id,
-                source="engineering-v2",
-                event_type="V2_EXTERNAL_STATUS_SYNC",
+                source="engineering",
+                event_type="ENGINEERING_EXTERNAL_STATUS_SYNC",
                 payload={
                     "provider": snapshot.provider,
                     "semantic_status": row.semantic_status,

@@ -45,7 +45,7 @@ class Instrumentation:
         if path == "/metrics":
             return
         parts = path.strip("/").split("/")
-        group = parts[2] if len(parts) > 2 and parts[:2] == ["api", "v1"] else parts[0]
+        group = parts[1] if len(parts) > 1 and parts[0] == "api" else parts[0]
         if group not in {
             "tasks",
             "teams",

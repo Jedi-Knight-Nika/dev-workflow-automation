@@ -119,7 +119,7 @@ async def record_transition(
     session.add(
         TaskEvent(
             task_id=task_id,
-            source="engineering-v2",
+            source="engineering",
             event_type="TASK_LIFECYCLE_CHANGED",
             payload={
                 "actor": actor,

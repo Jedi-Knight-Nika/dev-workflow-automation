@@ -45,7 +45,7 @@ class TeamAgentProfile(Base):
     harness: Mapped[str | None] = mapped_column(String(24))
     effort: Mapped[str] = mapped_column(String(20), default="medium")
     supplemental_instructions: Mapped[str] = mapped_column(Text, default="")
-    prompt_version: Mapped[str] = mapped_column(String(40), default="v2.1")
+    prompt_version: Mapped[str] = mapped_column(String(40), default="fixed")
     soft_budget_usd: Mapped[Decimal | None] = mapped_column(Numeric(12, 6))
     hard_budget_usd: Mapped[Decimal | None] = mapped_column(Numeric(12, 6))
     version: Mapped[int] = mapped_column(default=1)

@@ -37,12 +37,13 @@ CMD [".venv/bin/python", "-m", "app.scheduler_runner"]
 
 # Built separately; never started as a long-running Compose service.
 FROM worker-system AS developer-runner
-COPY . .
-RUN uv sync --frozen --extra harness \
+RUN uv sync --frozen --extra harness --no-install-project \
     && groupadd --gid 10001 runner \
     && useradd --uid 10001 --gid 10001 --create-home runner \
     && mkdir /workspace \
     && chown runner:runner /workspace
+COPY . .
+RUN uv sync --frozen --extra harness
 USER 10001:10001
 WORKDIR /workspace
 CMD ["/app/.venv/bin/python", "-m", "app.agent_runtime.infrastructure.runner", "/run/control/task.json"]

@@ -23,7 +23,7 @@ class AgentProfile:
     supplemental_instructions: str = ""
     soft_budget_usd: Decimal | None = None
     hard_budget_usd: Decimal | None = None
-    prompt_version: str = "v2.1"
+    prompt_version: str = "fixed"
 
     def __post_init__(self) -> None:
         if not self.display_name.strip() or len(self.display_name) > 120:

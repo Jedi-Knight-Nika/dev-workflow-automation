@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.engineering.infrastructure.task_models import Job, Task
 from app.platform.scheduling.states import JobState
-from app.platform.telemetry.usage_query import complete_cost, metered_runs
+from app.platform.telemetry.usage_query import complete_sum, metered_runs
 from app.teams.application.ports.team_management import (
     AssignTaskCommand,
     SaveTeamCommand,
@@ -333,7 +333,7 @@ class SqlAlchemyTeamManagementWorkflow:
                     measured.team_id,
                     func.coalesce(func.sum(measured.input_tokens), 0),
                     func.coalesce(func.sum(measured.output_tokens), 0),
-                    complete_cost(measured.cost_usd),
+                    complete_sum(measured.cost_usd),
                 )
                 .where(measured.team_id.in_(team_ids))
                 .group_by(measured.team_id)

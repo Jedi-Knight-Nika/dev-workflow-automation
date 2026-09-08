@@ -23,7 +23,7 @@ for (const [failure, action] of [
     };
     let attempts = 0;
     let boardRequests = 0;
-    await page.route('**/api/v1/**', async (route) => {
+    await page.route('**/api/**', async (route) => {
       const path = new URL(route.request().url()).pathname;
       if (path.endsWith('/events/stream')) return route.abort();
       if (path.endsWith('/integrations/trello/test')) {

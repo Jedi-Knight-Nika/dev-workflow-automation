@@ -22,7 +22,7 @@ describe('isActiveNavItem', () => {
 });
 
 describe('NAV_ITEMS', () => {
-  it('does not expose legacy role or graph editors', () => {
+  it('does not expose arbitrary role or graph editors', () => {
     const hrefs: string[] = NAV_ITEMS.map((item) => item.href);
     expect(hrefs).not.toContain('/roles');
     expect(hrefs).not.toContain('/agents');

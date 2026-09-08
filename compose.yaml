@@ -61,7 +61,7 @@ services:
       DATABASE_URL_SYNC: ${DATABASE_URL_SYNC:-postgresql+psycopg://engineering_worker:change-me@postgres:5432/engineering_worker}
       APP_SECRET_KEY: ${APP_SECRET_KEY:-development-only-secret-change-me}
       WORKSPACE_ROOT: /data/workspaces
-      # Base Compose starts the UI/API only. Use the V2 overlay for native runners.
+      # Base Compose starts the UI/API only. Use the execution overlay for native runners.
       SCHEDULER_ENABLED: "false"
       SCHEDULER_POLL_SECONDS: ${SCHEDULER_POLL_SECONDS:-1.0}
       SCHEDULER_MAX_CONCURRENT_JOBS: ${SCHEDULER_MAX_CONCURRENT_JOBS:-2}

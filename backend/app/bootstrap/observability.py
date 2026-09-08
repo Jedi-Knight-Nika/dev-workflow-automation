@@ -1,4 +1,7 @@
-"""Composition only: supporting services have their own tiny database pool."""
+"""Supporting contexts use the same application database through a bounded pool.
+
+The separate pool isolates dashboard timeouts/load; it is not a second database.
+"""
 
 import asyncio
 from collections.abc import AsyncIterator

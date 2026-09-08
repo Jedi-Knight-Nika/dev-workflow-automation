@@ -32,8 +32,8 @@
     if (busy) return;
     busy = true;
     try {
-      const current = await api<{ version: number }>(`/v2/tasks/${taskId}/token-efficiency-policy`);
-      await api(`/v2/tasks/${taskId}/token-efficiency-policy`, {
+      const current = await api<{ version: number }>(`/tasks/${taskId}/token-efficiency-policy`);
+      await api(`/tasks/${taskId}/token-efficiency-policy`, {
         method: 'PUT',
         body: JSON.stringify({
           version: current.version,
@@ -60,8 +60,8 @@
     busy = true;
     try {
       [metrics, generations] = await Promise.all([
-        api<Metrics>(`/v2/tasks/${taskId}/token-efficiency`),
-        api<Generation[]>(`/v2/tasks/${taskId}/context-generations`)
+        api<Metrics>(`/tasks/${taskId}/token-efficiency`),
+        api<Generation[]>(`/tasks/${taskId}/context-generations`)
       ]);
     } catch (error) {
       message = String(error);
@@ -74,7 +74,7 @@
     busy = true;
     try {
       const task = await api<{ requirement_version: number }>(`/tasks/${taskId}`);
-      await api(`/v2/tasks/${taskId}/context-rollover`, {
+      await api(`/tasks/${taskId}/context-rollover`, {
         method: 'POST',
         body: JSON.stringify({ requirement_version: task.requirement_version, note })
       });
@@ -122,7 +122,7 @@
           #{generation.sequence} · {generation.harness} / {generation.model} · {generation.status}
         </p>{/each}
       {#if !generations.length}<p class="text-sm text-muted">
-          Historical runs predate V2.2 instrumentation. Unknown measurements are not zero.
+          These runs predate token instrumentation. Unknown measurements are not zero.
         </p>{/if}
     </details>
     <details>

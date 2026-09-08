@@ -39,7 +39,7 @@ class Settings(BaseSettings):
     github_app_private_key_file: Path | None = None
     github_app_return_url: str = "http://localhost:3000/repositories"
     linear_webhook_secret: str = ""
-    # Fresh installations use V2. Enabling paid execution remains an explicit step.
+    # Fresh installations use the fixed lifecycle. Enabling paid execution remains an explicit step.
     developer_harness_codex: bool = False
     developer_harness_claude: bool = False
     local_event_interpreter: bool = False
@@ -51,7 +51,7 @@ class Settings(BaseSettings):
     developer_turn_timeout_seconds: int = Field(default=1200, ge=1, le=7200)
     # Zero keeps native automatic compaction only. Opt in after the SDK smoke test.
     developer_compact_before_feedback_tokens: int = Field(default=0, ge=0, le=10000000)
-    v2_validation_commands: dict[str, list[list[str]]] = Field(default_factory=dict)
+    repository_validation_commands: dict[str, list[list[str]]] = Field(default_factory=dict)
     ollama_base_url: str = "http://ollama:11434"
     interpreter_model: str = "qwen3:4b"
     interpreter_timeout_seconds: int = Field(default=30, ge=1, le=120)

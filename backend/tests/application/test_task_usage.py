@@ -6,7 +6,7 @@ from app.engineering.application.task_usage import UsageSample, task_usage
 def test_task_usage_combines_history_and_native_turns_without_losing_missing_cost() -> None:
     result = task_usage(
         [
-            UsageSample("EXECUTOR", "openai", "legacy", 100, 20, 1000, Decimal("0.1")),
+            UsageSample("EXECUTOR", "openai", "historical", 100, 20, 1000, Decimal("0.1")),
             UsageSample("DEVELOPER", "openai", "native", 50, 10, 500, Decimal("0.02"), native=True),
         ]
     )

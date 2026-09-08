@@ -20,7 +20,7 @@ from app.platform.scheduling.states import JobState
 from app.teams.infrastructure.management import SqlAlchemyTeamManagementWorkflow
 from app.teams.infrastructure.models import TeamAgentProfile
 from app.teams.infrastructure.team_models import Team
-from tests.integration.test_v2_enrollment_and_costs import scenario
+from tests.integration.test_enrollment_and_costs import scenario
 
 pytestmark = pytest.mark.asyncio
 

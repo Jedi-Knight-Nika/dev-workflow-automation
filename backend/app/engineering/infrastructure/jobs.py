@@ -52,7 +52,7 @@ async def enqueue_phase(session: AsyncSession, task: Task) -> Job | None:
     session.add(
         TaskEvent(
             task_id=task.id,
-            source="engineering-v2",
+            source="engineering",
             event_type="JOB_QUEUED",
             payload={
                 "job_id": str(job.id),
@@ -175,7 +175,7 @@ class SqlPhaseJobs:
             job.lease_token, job.lease_expires_at = None, None
             await session.flush()
             if action == Action.PUBLISHED:
-                from app.intake.infrastructure.v2_events import apply_pending_feedback
+                from app.intake.infrastructure.engineering_events import apply_pending_feedback
 
                 queued = await session.scalars(
                     select(ReviewCycle).where(

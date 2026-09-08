@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { t } from '$lib/i18n/index.svelte';
   import { operations, subscribeOperations } from '$lib/services/live-operations.svelte';
   import {
     getIncidents,
@@ -65,7 +66,7 @@
         ]);
         if (!stopped) {
           analytics = result[0].status === 'fulfilled' ? result[0].value : null;
-          error = analytics ? '' : 'AI analytics unavailable';
+          error = analytics ? '' : t('operations.analyticsUnavailable');
           incidents = result[1].status === 'fulfilled' ? result[1].value : [];
           availability = result[2].status === 'fulfilled' ? result[2].value : null;
           config = result[3].status === 'fulfilled' ? result[3].value : null;
@@ -88,91 +89,104 @@
 <section class="operations" aria-label="Live operations and AI analytics">
   <header>
     <div>
-      <p class="eyebrow">V2.1 · Operations</p>
-      <h2>System & engineering intelligence</h2>
+      <p class="eyebrow">{t('operations.eyebrow')}</p>
+      <h2>{t('operations.title')}</h2>
     </div>
     <label
-      >AI window <select bind:value={days}
-        ><option value={1}>24 hours</option><option value={7}>7 days</option><option value={30}
-          >30 days</option
-        ></select
+      >{t('operations.aiWindow')}
+      <select bind:value={days}
+        ><option value={1}>{t('operations.window24h')}</option><option value={7}
+          >{t('operations.window7d')}</option
+        ><option value={30}>{t('operations.window30d')}</option></select
       ></label
-    ><button onclick={() => refreshVersion++}>Refresh analytics</button>
+    ><button onclick={() => refreshVersion++}>{t('operations.refreshAnalytics')}</button>
   </header>
   <p class="muted">
     {live?.sampled_at
-      ? `Metrics sampled ${new Date(live.sampled_at).toLocaleTimeString()}`
-      : 'Infrastructure monitoring unavailable or disabled.'} · {live?.status ?? 'unavailable'}
+      ? t('operations.metricsSampled', { time: new Date(live.sampled_at).toLocaleTimeString() })
+      : t('operations.monitoringUnavailable')} · {live?.status ?? t('operations.statusUnavailable')}
   </p>
   {#if error || operations.error}<p role="status">{error || operations.error}</p>{/if}
   {#if !teamId}
     <div class="gauges">
       <MetricGauge
-        label="Host CPU"
+        label={t('operations.hostCpu')}
         value={live?.host.host_cpu ?? null}
         warning={config?.cpu_warning}
       /><MetricGauge
-        label="Host RAM"
+        label={t('operations.hostRam')}
         value={live?.host.host_memory ?? null}
         warning={config?.ram_warning}
-      /><MetricGauge label="Monthly AI budget" value={budgetRatio} /><RingGauge
-        label="Disk"
+      /><MetricGauge label={t('operations.monthlyBudget')} value={budgetRatio} /><RingGauge
+        label={t('operations.disk')}
         value={live?.host.host_disk ?? null}
         warning={config?.disk_warning}
       />
     </div>
     <p class="muted">
-      Host uptime {duration(live?.host.host_uptime)} · {live?.services.length ?? 0} containers · {runners.length}
-      active runners · Budget {money(config?.monthly_budget_usd)} includes known spend and reservations;
-      unknown costs remain flagged. Docker Desktop readings describe its Linux VM.
+      {t('operations.hostSummary', {
+        uptime: duration(live?.host.host_uptime),
+        containers: live?.services.length ?? 0,
+        runners: runners.length,
+        budget: money(config?.monthly_budget_usd)
+      })}
     </p>
     <details>
-      <summary>Host capacity & throughput</summary>
+      <summary>{t('operations.hostCapacity')}</summary>
       <div class="kpis">
         <article>
-          <small>RAM available / total</small><strong
+          <small>{t('operations.ramAvailableTotal')}</small><strong
             >{bytes(live?.host.host_memory_available)} / {bytes(
               live?.host.host_memory_total
             )}</strong
-          ><span>Swap {bytes(live?.host.host_swap)}</span>
+          ><span>{t('operations.swap', { swap: bytes(live?.host.host_swap) })}</span>
         </article>
         <article>
-          <small>Load · 1 / 5 / 15 minutes</small><strong
-            >{live?.host.host_load1?.toFixed(2) ?? 'Unavailable'} / {live?.host.host_load5?.toFixed(
+          <small>{t('operations.loadAvg')}</small><strong
+            >{live?.host.host_load1?.toFixed(2) ?? t('operations.unavailable')} / {live?.host.host_load5?.toFixed(
               2
-            ) ?? 'Unavailable'} / {live?.host.host_load15?.toFixed(2) ?? 'Unavailable'}</strong
-          ><span>File descriptors {count(live?.host.host_file_descriptors)}</span>
-        </article>
-        <article>
-          <small>Disk free / growth</small><strong>{bytes(live?.host.host_disk_available)}</strong
+            ) ?? t('operations.unavailable')} / {live?.host.host_load15?.toFixed(2) ??
+              t('operations.unavailable')}</strong
           ><span
-            >{bytes(live?.host.host_disk_growth)}/s · Busy {live?.host.host_disk_busy?.toFixed(1) ??
-              'Unknown'}%</span
+            >{t('operations.fileDescriptors', {
+              count: count(live?.host.host_file_descriptors)
+            })}</span
           >
         </article>
         <article>
-          <small>Disk read / write</small><strong
+          <small>{t('operations.diskFreeGrowth')}</small><strong
+            >{bytes(live?.host.host_disk_available)}</strong
+          ><span
+            >{t('operations.diskBusy', {
+              rate: bytes(live?.host.host_disk_growth),
+              busy: live?.host.host_disk_busy?.toFixed(1) ?? t('operations.unavailable')
+            })}</span
+          >
+        </article>
+        <article>
+          <small>{t('operations.diskReadWrite')}</small><strong
             >{bytes(live?.host.host_disk_read)}/s / {bytes(live?.host.host_disk_write)}/s</strong
           >
         </article>
         <article>
-          <small>Network RX / TX</small><strong
+          <small>{t('operations.networkRxTx')}</small><strong
             >{bytes(live?.host.host_network_rx)}/s / {bytes(live?.host.host_network_tx)}/s</strong
           ><span
-            >Errors {count(live?.host.host_network_errors)}/s · Drops {count(
-              live?.host.host_network_drops
-            )}/s</span
+            >{t('operations.networkErrorsDrops', {
+              errors: count(live?.host.host_network_errors),
+              drops: count(live?.host.host_network_drops)
+            })}</span
           >
         </article>
         <article>
-          <small>Last boot / last observed</small><strong
+          <small>{t('operations.lastBootObserved')}</small><strong
             >{live?.host.host_boot_time
               ? new Date(live.host.host_boot_time * 1000).toLocaleString()
-              : 'Unknown'}</strong
+              : t('operations.unavailable')}</strong
           ><span
             >{live?.host.host_last_seen
               ? new Date(live.host.host_last_seen * 1000).toLocaleTimeString()
-              : 'Unknown'}</span
+              : t('operations.unavailable')}</span
           >
         </article>
       </div>
@@ -181,10 +195,10 @@
   {/if}
   {#if analytics}<AnalyticsPanels {analytics} {days} />{/if}
   <ForecastPanels {forecasts} {accuracy} />
-  <h3>Active runners ({runners.length})</h3>
+  <h3>{t('operations.activeRunners', { count: runners.length })}</h3>
   <div class="kpis">
     {#each runners as runner (runner.runner_run_id)}<RunnerResourceCard {runner} />{:else}<p>
-        No observed active runners.
+        {t('operations.noActiveRunners')}
       </p>{/each}
   </div>
   {#if !teamId}<ReliabilityPanel {availability} {incidents} {live} />{/if}

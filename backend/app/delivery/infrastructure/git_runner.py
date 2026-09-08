@@ -24,7 +24,7 @@ class GitManifest(BaseModel):
     operation: Literal["prepare", "publish"]
     owner: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9-]{0,99}$")
     repository: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$")
-    branch: str = Field(pattern=r"^agent/v2-[0-9a-f-]{36}$")
+    branch: str = Field(pattern=r"^agent/task-[0-9a-f-]{36}$")
     base_branch: str = Field(min_length=1, max_length=255)
     expected_sha: str | None = Field(default=None, pattern=r"^[0-9a-f]{40,64}$")
 
@@ -110,7 +110,7 @@ async def execute(manifest: GitManifest, workspace: Path = Path("/workspace")) -
     git_dir = workspace / ".git"
     if git_dir.is_symlink() or not git_dir.is_dir():
         raise ValueError("An isolated Git database is required")
-    with tempfile.TemporaryDirectory(prefix="v2-publish-") as directory:
+    with tempfile.TemporaryDirectory(prefix="publish-") as directory:
         bare = Path(directory)
         await git(bare, "init", "--bare", ".")
         copy_objects(git_dir / "objects", bare / "objects")

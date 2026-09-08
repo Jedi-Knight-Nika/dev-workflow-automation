@@ -148,7 +148,9 @@ class SqlDevelopmentStore:
                 provider=native.provider,
                 model=native.model,
                 harness=native.harness,
-                prompt_version="v2.compaction.1" if self.operation == "compaction" else "v2.1",
+                prompt_version="developer.compaction"
+                if self.operation == "compaction"
+                else "fixed",
                 status="RUNNING",
                 reserved_cost_usd=self.reservation_usd,
                 pricing_id=self.pricing_id,

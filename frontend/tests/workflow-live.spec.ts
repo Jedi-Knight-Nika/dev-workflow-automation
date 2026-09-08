@@ -25,7 +25,7 @@ test('dashboard shows concurrent workers and updates elapsed time without refetc
     output_tokens: 20
   }));
   let requests = 0;
-  await page.route('**/api/v1/**', async (route) => {
+  await page.route('**/api/**', async (route) => {
     const path = new URL(route.request().url()).pathname;
     if (path.endsWith('/dashboard/summary')) {
       requests++;
@@ -81,7 +81,7 @@ test('fullscreen map keeps the queue and milestones visible without workflow wri
   page
 }) => {
   let writes = 0;
-  await page.route('**/api/v1/**', async (route) => {
+  await page.route('**/api/**', async (route) => {
     const request = route.request(),
       path = new URL(request.url()).pathname;
     if (request.method() !== 'GET') writes++;
@@ -149,10 +149,10 @@ test('ticket displays native receipts, exact status actor/time and responsive no
 }) => {
   const id = ids[0],
     at = '2026-09-08T10:00:00Z';
-  await page.route('**/api/v1/**', async (route) => {
+  await page.route('**/api/**', async (route) => {
     const path = new URL(route.request().url()).pathname;
     if (path.endsWith('/events/stream')) return route.abort();
-    if (path === '/api/v1/tasks/' + id)
+    if (path === '/api/tasks/' + id)
       return route.fulfill({
         json: {
           id,

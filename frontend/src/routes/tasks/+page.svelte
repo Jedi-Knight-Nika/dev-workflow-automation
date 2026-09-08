@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { resolve } from '$app/paths';
-  import { API_URL } from '$lib/api';
+  import { API_BASE_URL } from '$lib/api';
   import PageHeader from '$lib/components/PageHeader.svelte';
   import ErrorBanner from '$lib/components/ErrorBanner.svelte';
   import { createLiveRefresh } from '$lib/live-refresh';
@@ -100,7 +100,7 @@
       .catch((cause) => {
         error = String(cause);
       });
-    const events = new EventSource(API_URL + '/api/v1/events/stream');
+    const events = new EventSource(API_BASE_URL + '/events/stream');
     events.addEventListener('update', () => live.request());
     const poll = setInterval(() => {
       if (!document.hidden) live.request();

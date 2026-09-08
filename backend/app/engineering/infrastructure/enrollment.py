@@ -39,7 +39,7 @@ async def enroll(session: AsyncSession, task: Task, settings: Settings, *, actor
     ):
         raise ValueError("Team and repository must be available")
     if not policy.enrollment_enabled or repository.id not in policy.repository_ids:
-        raise ValueError("Enable explicit Team V2 enrollment for this repository first")
+        raise ValueError("Enable explicit Team enrollment for this repository first")
     if team.repository_ids and str(repository.id) not in team.repository_ids:
         raise ValueError("Repository is outside the Team's scope")
     if task.workspace_path or task.pull_request_number or task.manual_takeover or task.archived_at:
@@ -90,7 +90,7 @@ async def enroll(session: AsyncSession, task: Task, settings: Settings, *, actor
         )
     )
     await enqueue_status(session, task.id, task.lifecycle_version, "NEW", "INTAKE")
-    task.branch_name = f"agent/v2-{task.id}"
+    task.branch_name = f"agent/task-{task.id}"
     task.workspace_path = str(workspace)
     task.progress_fingerprint = {
         "requirement": requirement_fingerprint(task.title, task.description)
@@ -113,7 +113,7 @@ async def enroll(session: AsyncSession, task: Task, settings: Settings, *, actor
         TaskEvent(
             task_id=task.id,
             source=actor,
-            event_type="V2_TASK_ENROLLED",
+            event_type="ENGINEERING_TASK_ENROLLED",
             payload={"repository_id": str(repository.id), "profile_id": str(profile.id)},
         )
     )

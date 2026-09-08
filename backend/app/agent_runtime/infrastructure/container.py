@@ -98,7 +98,7 @@ def developer_container_spec(
         "Env": [f"{key}={value}" for key, value in sorted(provider_environment.items())],
         "AttachStdout": True,
         "AttachStderr": True,
-        "Labels": {"managed_by": "scheduler-v2", "task_id": str(mounts.task_id)},
+        "Labels": {"managed_by": "engineering-scheduler", "task_id": str(mounts.task_id)},
         "HostConfig": {
             "AutoRemove": False,
             "ReadonlyRootfs": True,

@@ -1,12 +1,13 @@
 <script lang="ts">
   import EChart from './EChart.svelte';
   import { chartColors } from './chart-colors.svelte';
+  import { t } from '$lib/i18n/index.svelte';
   let {
     label,
     value,
     warning = 85
   }: { label: string; value: number | null; warning?: number } = $props();
-  const display = $derived(value === null ? 'Unavailable' : `${value.toFixed(1)}%`);
+  const display = $derived(value === null ? t('operations.unavailable') : `${value.toFixed(1)}%`);
   const hot = $derived(value !== null && value >= warning);
 </script>
 
@@ -56,7 +57,9 @@
         ]
       }}
     />
-  {:else}<p class="empty">Unavailable<span>No current measurement</span></p>{/if}
+  {:else}<p class="empty">
+      {t('operations.unavailable')}<span>{t('operations.noCurrentMeasurement')}</span>
+    </p>{/if}
 </article>
 
 <style>
@@ -66,13 +69,39 @@
     border-radius: 1rem;
     min-width: 0;
     background: var(--color-panel);
+    position: relative;
+    overflow: hidden;
     transition:
       border-color 0.3s var(--ease-smooth),
       box-shadow 0.3s var(--ease-smooth);
   }
+  article::before {
+    content: '';
+    position: absolute;
+    inset: -30% -30% auto -30%;
+    height: 60%;
+    background: radial-gradient(
+      circle,
+      color-mix(in srgb, var(--color-brand-2) 20%, transparent),
+      transparent 70%
+    );
+    pointer-events: none;
+    opacity: 0.6;
+    transition: opacity 0.3s var(--ease-smooth);
+  }
+  article.hot::before {
+    background: radial-gradient(
+      circle,
+      color-mix(in srgb, var(--color-warning) 22%, transparent),
+      transparent 70%
+    );
+  }
   article:hover {
     border-color: color-mix(in srgb, var(--color-brand-2) 50%, var(--color-line));
     box-shadow: 0 0 20px -6px color-mix(in srgb, var(--color-brand-2) 40%, transparent);
+  }
+  article:hover::before {
+    opacity: 1;
   }
   article.hot:hover {
     border-color: color-mix(in srgb, var(--color-warning) 55%, var(--color-line));

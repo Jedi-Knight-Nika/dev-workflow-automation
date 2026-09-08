@@ -30,4 +30,4 @@ async def actor_allowed(
     integration = await session.scalar(
         select(Integration).where(Integration.provider_name == provider)
     )
-    return bool(integration and actor in (integration.configuration or {}).get("v2_actor_ids", []))
+    return bool(integration and actor in (integration.configuration or {}).get("actor_ids", []))

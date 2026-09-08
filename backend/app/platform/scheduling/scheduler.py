@@ -1,4 +1,4 @@
-"""Bounded V2 phase dispatch and external-event polling; no model-call loop."""
+"""Bounded phase dispatch and external-event polling; no model-call loop."""
 
 import asyncio
 from time import monotonic

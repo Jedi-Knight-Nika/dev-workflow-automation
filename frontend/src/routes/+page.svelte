@@ -1,10 +1,10 @@
 <script lang="ts">
   import { resolve } from '$app/paths';
   import { onMount } from 'svelte';
-  import { API_URL } from '$lib/api';
+  import { API_BASE_URL } from '$lib/api';
   import { createLiveRefresh } from '$lib/live-refresh';
   import ErrorBanner from '$lib/components/ErrorBanner.svelte';
-  import V2StatisticsPanel from '$lib/components/V2StatisticsPanel.svelte';
+  import EngineeringStatisticsPanel from '$lib/components/EngineeringStatisticsPanel.svelte';
   import OperationsDashboard from '$lib/components/observability/OperationsDashboard.svelte';
   import PageHeader from '$lib/components/PageHeader.svelte';
   import Skeleton from '$lib/components/Skeleton.svelte';
@@ -86,7 +86,7 @@
       }
     };
     void updateTelemetry();
-    const stream = new EventSource(`${API_URL}/api/v1/events/stream`);
+    const stream = new EventSource(`${API_BASE_URL}/events/stream`);
     const telemetryTimer = setInterval(() => void updateTelemetry(), 5000);
     const clockTimer = setInterval(() => {
       if (!document.hidden) now = Date.now();
@@ -451,7 +451,7 @@
     {/if}
   {/if}
   <OperationsDashboard />
-  <V2StatisticsPanel />
+  <EngineeringStatisticsPanel />
 </main>
 
 <style>

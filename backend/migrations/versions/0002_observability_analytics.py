@@ -1,4 +1,4 @@
-"""Add independent observability and forecast history; preserve all V2 records."""
+"""Add independent observability and forecast history; preserve all task records."""
 
 import sqlalchemy as sa
 from alembic import op
@@ -98,5 +98,5 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     raise RuntimeError(
-        "Rollback the application with V2.1 disabled; retain additive history tables"
+        "Rollback the application with the observability release disabled; retain additive history tables"
     )

@@ -14,9 +14,9 @@ from app.engineering.infrastructure.task_models import Task
 from app.intake.application.interpret import InterpretEvent, TextInterpreter
 from app.intake.domain.events import Event, Intent, classify
 from app.intake.infrastructure.authorization import actor_allowed
+from app.intake.infrastructure.engineering_events import apply_pending_feedback, github_event
 from app.intake.infrastructure.metered import CloudInterpreter, MeteredLocalInterpreter
 from app.intake.infrastructure.ollama import OllamaInterpreter
-from app.intake.infrastructure.v2_events import apply_pending_feedback, github_event
 from app.platform.configuration.settings import Settings
 from app.repositories.infrastructure.models import Repository
 from app.teams.infrastructure.automation import read_policy

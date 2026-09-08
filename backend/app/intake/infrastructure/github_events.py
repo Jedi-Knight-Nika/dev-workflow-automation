@@ -168,7 +168,7 @@ async def process_github_event(
         task = await session.get(Task, scope.task_id)
     if task is None:
         return
-    from app.intake.infrastructure.v2_events import github_event
+    from app.intake.infrastructure.engineering_events import github_event
 
     await github_event(session, task, repository, event_type, payload)
 

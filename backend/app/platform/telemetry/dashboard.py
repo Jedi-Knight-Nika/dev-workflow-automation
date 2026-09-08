@@ -20,7 +20,7 @@ from app.platform.telemetry.ports.dashboard_queries import (
     TimeBucketView,
     UsageBucketView,
 )
-from app.platform.telemetry.usage_query import complete_cost, metered_runs
+from app.platform.telemetry.usage_query import complete_sum, metered_runs
 from app.teams.infrastructure.models import TeamAgentProfile
 from app.teams.infrastructure.team_models import Team
 
@@ -345,7 +345,7 @@ class SqlAlchemyDashboardQueries:
     async def _usage(self, start: datetime, dimension: str) -> list[UsageBucketView]:
         inputs = func.coalesce(func.sum(RUN_USAGE.c.input_tokens), 0)
         outputs = func.coalesce(func.sum(RUN_USAGE.c.output_tokens), 0)
-        cost = complete_cost(RUN_USAGE.c.cost_usd)
+        cost = complete_sum(RUN_USAGE.c.cost_usd)
         statement: Any
         if dimension == "role":
             statement = (
@@ -384,7 +384,7 @@ class SqlAlchemyDashboardQueries:
                 select(
                     func.coalesce(func.sum(RUN_USAGE.c.input_tokens), 0),
                     func.coalesce(func.sum(RUN_USAGE.c.output_tokens), 0),
-                    complete_cost(RUN_USAGE.c.cost_usd),
+                    complete_sum(RUN_USAGE.c.cost_usd),
                 ).where(RUN_USAGE.c.started_at >= start)
             )
         ).one()

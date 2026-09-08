@@ -29,7 +29,7 @@ class SqlAutomationAdmin:
         if task is None:
             raise LookupError("Task not found")
         if task.archived_at:
-            raise ProfileConflict("Status synchronization requires an unarchived V2 task")
+            raise ProfileConflict("Status synchronization requires an unarchived enrolled task")
         await enqueue_status(
             self.session, task.id, task.lifecycle_version, task.status or "", task.stage or ""
         )
@@ -37,7 +37,7 @@ class SqlAutomationAdmin:
             TaskEvent(
                 task_id=task.id,
                 source="user",
-                event_type="V2_STATUS_SYNC_REQUESTED",
+                event_type="ENGINEERING_STATUS_SYNC_REQUESTED",
                 payload={"actor": "local-operator"},
             )
         )
@@ -67,7 +67,7 @@ class SqlAutomationAdmin:
             TaskEvent(
                 task_id=row.task_id,
                 source="user",
-                event_type="V2_COST_RECONCILED",
+                event_type="ENGINEERING_COST_RECONCILED",
                 payload={"run_id": str(run_id), **evidence},
             )
         )
@@ -121,7 +121,7 @@ class SqlAutomationAdmin:
         row.configuration, row.version = policy_payload(policy), version + 1
         self.session.add(
             SettingsAuditEvent(
-                section="v2_automation",
+                section="automation",
                 source="local-operator",
                 old_values={"team_id": str(team_id), "version": version, "policy": old},
                 new_values={

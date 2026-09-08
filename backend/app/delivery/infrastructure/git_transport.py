@@ -19,7 +19,7 @@ async def github_token(session: AsyncSession) -> str:
         select(Integration).where(Integration.provider_name == "github")
     )
     if integration is None or not integration.encrypted_credentials:
-        raise ValueError("Connect GitHub before V2 enrollment/publication")
+        raise ValueError("Connect GitHub before enrollment/publication")
     return (await resolve_github_auth(cipher.decrypt(integration.encrypted_credentials))).token
 
 

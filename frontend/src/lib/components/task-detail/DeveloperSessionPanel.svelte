@@ -8,7 +8,7 @@
     changeDeveloperSession,
     type DeveloperSessionView,
     type SessionChangeMode
-  } from '$lib/services/engineering-v2';
+  } from '$lib/services/engineering';
 
   let { taskId, onChanged }: { taskId: string; onChanged: () => Promise<void> } = $props();
   let session = $state<DeveloperSessionView | null>(null);

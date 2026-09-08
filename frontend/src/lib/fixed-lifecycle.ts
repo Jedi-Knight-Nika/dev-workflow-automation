@@ -1,5 +1,5 @@
-import type { Edge, Node } from '@xyflow/svelte';
-import { STAGES, type EngineeringTask } from './services/engineering-v2';
+import { MarkerType, type Edge, type Node } from '@xyflow/svelte';
+import { STAGES, type EngineeringTask } from './services/engineering';
 
 // This is product-owned topology, never saved as a user-editable workflow.
 const connections = [
@@ -39,7 +39,7 @@ export function lifecycleNodes(tasks: EngineeringTask[], selected?: EngineeringT
       connectable: false,
       deletable: false,
       style: active
-        ? 'border-color: var(--color-accent); background: color-mix(in srgb, var(--color-accent) 16%, var(--color-panel)); color: var(--color-heading); box-shadow: 0 0 18px -2px color-mix(in srgb, var(--color-accent) 55%, transparent);'
+        ? 'border-color: var(--color-accent); border-width: 1.5px; background: color-mix(in srgb, var(--color-accent) 18%, var(--color-panel)); color: var(--color-heading); animation: node-pulse 2.6s ease-in-out infinite;'
         : undefined
     };
   });
@@ -50,7 +50,14 @@ export const lifecycleEdges: Edge[] = connections.map(([source, target]) => ({
   source,
   target,
   deletable: false,
-  animated: true,
+  animated: false,
   type: 'smoothstep',
-  style: 'stroke: var(--color-brand-2); stroke-width: 1.6px;'
+  style:
+    'stroke: color-mix(in srgb, var(--color-brand-2) 40%, var(--color-line)); stroke-width: 1.4px;',
+  markerEnd: {
+    type: MarkerType.ArrowClosed,
+    width: 16,
+    height: 16,
+    color: 'color-mix(in srgb, var(--color-brand-2) 45%, var(--color-line))'
+  }
 }));

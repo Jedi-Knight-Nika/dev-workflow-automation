@@ -15,7 +15,7 @@
   import RunList from '$lib/components/task-detail/RunList.svelte';
   import TimelineList from '$lib/components/task-detail/TimelineList.svelte';
   import ValidationList from '$lib/components/task-detail/ValidationList.svelte';
-  import { API_URL } from '$lib/api';
+  import { API_BASE_URL } from '$lib/api';
   import { createLiveRefresh } from '$lib/live-refresh';
   import { safeExternalUrl } from '$lib/task-links';
   import {
@@ -95,7 +95,7 @@
       }
     });
     live.request();
-    const stream = new EventSource(API_URL + '/api/v1/events/stream');
+    const stream = new EventSource(API_BASE_URL + '/events/stream');
     stream.onopen = () => {
       connected = true;
       live.request();

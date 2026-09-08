@@ -4,7 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.engineering.infrastructure.task_models import Task, TaskEvent
-from app.intake.infrastructure.v2_events import github_event
+from app.intake.infrastructure.engineering_events import github_event
 from app.repositories.infrastructure.models import Repository
 from app.teams.infrastructure.team_models import Team
 
@@ -47,7 +47,7 @@ async def recheck_review(sessions: async_sessionmaker[AsyncSession]) -> bool:
                 TaskEvent(
                     task_id=task.id,
                     source="github",
-                    event_type="V2_RECHECK_UNAVAILABLE",
+                    event_type="ENGINEERING_RECHECK_UNAVAILABLE",
                     payload={"failure_code": type(exc).__name__},
                 )
             )

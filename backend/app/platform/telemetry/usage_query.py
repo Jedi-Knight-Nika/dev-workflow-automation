@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from sqlalchemy import case, func, select
+from sqlalchemy import SQLColumnExpression, case, func, select
 from sqlalchemy.sql import ColumnElement
 from sqlalchemy.sql.selectable import Subquery
 
@@ -27,6 +27,6 @@ def metered_runs() -> Subquery:
     ).subquery("metered_runs")
 
 
-def complete_cost(column: ColumnElement[Any]) -> ColumnElement[Any]:
+def complete_sum(column: SQLColumnExpression[Any]) -> ColumnElement[Any]:
     # SQL SUM normally hides missing measurements. One unknown makes the total unknown.
     return case((func.count() == func.count(column), func.sum(column)), else_=None)

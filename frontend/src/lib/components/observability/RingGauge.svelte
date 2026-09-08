@@ -1,6 +1,7 @@
 <script lang="ts">
   import EChart from './EChart.svelte';
   import { chartColors } from './chart-colors.svelte';
+  import { t } from '$lib/i18n/index.svelte';
   let {
     label,
     value,
@@ -12,7 +13,7 @@
 
 <EChart
   height={220}
-  summary={`${label}: ${value === null ? 'Unavailable' : value.toFixed(1) + '%'}`}
+  summary={`${label}: ${value === null ? t('operations.unavailable') : value.toFixed(1) + '%'}`}
   option={{
     series: [
       {
@@ -36,7 +37,7 @@
         splitLine: { show: false },
         axisLabel: { show: false },
         detail: {
-          formatter: () => (value === null ? 'Unavailable' : value.toFixed(1) + '%'),
+          formatter: () => (value === null ? t('operations.unavailable') : value.toFixed(1) + '%'),
           fontSize: 24,
           offsetCenter: [0, 0]
         },

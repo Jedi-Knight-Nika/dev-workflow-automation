@@ -1,0 +1,100 @@
+# Overlay: docker compose -f deploy/compose.production.yaml -f deploy/compose.execution.yaml …
+# EXECUTION_DATA_ROOT MUST be the same absolute path on the Docker host and controller.
+services:
+  backend:
+    environment: &execution-environment
+      DEVELOPER_HARNESS_CODEX: ${DEVELOPER_HARNESS_CODEX:-true}
+      DEVELOPER_HARNESS_CLAUDE: ${DEVELOPER_HARNESS_CLAUDE:-true}
+      WORKSPACE_ROOT: ${EXECUTION_DATA_ROOT:?Set an absolute EXECUTION_DATA_ROOT}/workspaces
+      HARNESS_STATE_ROOT: ${EXECUTION_DATA_ROOT}/native
+      HARNESS_CONTROL_ROOT: ${EXECUTION_DATA_ROOT}/control
+      DEVELOPER_CONTAINER_IMAGE: ${DEVELOPER_CONTAINER_IMAGE:-engineering-developer:local}
+      DEVELOPER_CONTAINER_NETWORK: engineering-provider-internal
+      DEVELOPER_EGRESS_PROXY: http://provider-egress:3128
+      REPOSITORY_VALIDATION_COMMANDS: ${REPOSITORY_VALIDATION_COMMANDS:-}
+      LOCAL_EVENT_INTERPRETER: ${LOCAL_EVENT_INTERPRETER:-false}
+      OLLAMA_BASE_URL: http://ollama:11434
+      INTERPRETER_MODEL: ${INTERPRETER_MODEL:-qwen3:4b}
+      INTERPRETER_CLOUD_MODELS: ${INTERPRETER_CLOUD_MODELS:-[]}
+      INTERPRETER_CLOUD_REQUEST_LIMIT_USD: ${INTERPRETER_CLOUD_REQUEST_LIMIT_USD:-0.02}
+      DEVELOPER_COMPACT_BEFORE_FEEDBACK_TOKENS: ${DEVELOPER_COMPACT_BEFORE_FEEDBACK_TOKENS:-0}
+      DEVELOPER_TURN_TIMEOUT_SECONDS: ${DEVELOPER_TURN_TIMEOUT_SECONDS:-1200}
+      DOCKER_API_TIMEOUT_SECONDS: ${DOCKER_API_TIMEOUT_SECONDS:-30}
+      SLACK_SIGNING_SECRET: ${SLACK_SIGNING_SECRET:-}
+      SLACK_TEAM_ROUTES: ${SLACK_TEAM_ROUTES:-}
+      GITHUB_ISSUE_ROUTES: ${GITHUB_ISSUE_ROUTES:-}
+      TRELLO_WEBHOOK_SECRET: ${TRELLO_WEBHOOK_SECRET:-}
+      TRELLO_WEBHOOK_CALLBACK_URL: ${TRELLO_WEBHOOK_CALLBACK_URL:-}
+      GITHUB_APP_ID: ${GITHUB_APP_ID:-}
+      GITHUB_APP_PRIVATE_KEY: ${GITHUB_APP_PRIVATE_KEY:-}
+      GITHUB_APP_PRIVATE_KEY_FILE: /run/secrets/github_app_private_key
+    volumes:
+      - ${EXECUTION_DATA_ROOT}:${EXECUTION_DATA_ROOT}
+    networks: [default, interpreter-private]
+
+  worker:
+    environment:
+      <<: *execution-environment
+      # Opt in after configuring profiles, prices, policy and validation commands.
+      SCHEDULER_ENABLED: ${SCHEDULER_ENABLED:-false}
+    volumes:
+      - ${EXECUTION_DATA_ROOT}:${EXECUTION_DATA_ROOT}
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${GITHUB_APP_PRIVATE_KEY_FILE_HOST:-./github-app.private-key.pem}:/run/secrets/github_app_private_key:ro
+    networks: [default, interpreter-private]
+    depends_on:
+      provider-egress:
+        condition: service_started
+
+  developer-image:
+    build:
+      context: ${BACKEND_BUILD_CONTEXT:-../backend}
+      target: developer-runner
+    # Build the native base without overwriting a repository's prepared dependency image.
+    image: ${NATIVE_RUNNER_IMAGE:-engineering-developer:local}
+    profiles: [images]
+    network_mode: none
+    entrypoint: [/bin/true]
+
+  provider-egress:
+    build:
+      context: ${BACKEND_BUILD_CONTEXT:-../backend}
+      target: worker
+    entrypoint: [.venv/bin/python, -m, app.agent_runtime.infrastructure.egress_proxy]
+    user: "65534:65534"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs: [/tmp]
+    pids_limit: 80
+    mem_limit: 128m
+    cpus: 0.5
+    networks: [provider-private, provider-public]
+    restart: unless-stopped
+
+  ollama:
+    # Set a tested image digest for your production CPU/GPU platform.
+    image: ${OLLAMA_IMAGE:?Set a verified Ollama image tag or digest}
+    profiles: [local-interpreter]
+    environment:
+      OLLAMA_HOST: 0.0.0.0:11434
+      OLLAMA_MAX_LOADED_MODELS: "1"
+      OLLAMA_NUM_PARALLEL: "1"
+      OLLAMA_KEEP_ALIVE: 5m
+    volumes:
+      - ollama_models:/root/.ollama
+    networks: [interpreter-private]
+    mem_limit: ${OLLAMA_MEMORY_LIMIT:-4g}
+    cpus: ${OLLAMA_CPUS:-2}
+    restart: unless-stopped
+
+networks:
+  provider-private:
+    name: engineering-provider-internal
+    internal: true
+  provider-public: {}
+  interpreter-private:
+    internal: true
+
+volumes:
+  ollama_models:

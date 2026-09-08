@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.engineering.infrastructure.task_models import Job, Task
 from app.intake.infrastructure import github_issues
 from app.repositories.infrastructure.models import Repository
-from tests.integration.test_v2_enrollment_and_costs import scenario
+from tests.integration.test_enrollment_and_costs import scenario
 
 
 @pytest.mark.asyncio
