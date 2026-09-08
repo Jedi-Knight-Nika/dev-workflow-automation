@@ -129,7 +129,8 @@ async def test_validation_is_real_subprocess_and_output_is_bounded(tmp_path: Pat
 
 
 @pytest.mark.asyncio
-async def test_codex_uses_pinned_sdk_resume_and_native_sandbox(tmp_path: Path) -> None:
+async def test_codex_uses_pinned_sdk_resume_and_native_sandbox(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "acceptance-fake-key")
     sdk = pytest.importorskip("openai_codex")
     from app.agent_runtime.infrastructure.codex import CodexHarness
 
@@ -138,6 +139,7 @@ async def test_codex_uses_pinned_sdk_resume_and_native_sandbox(tmp_path: Path) -
     with patch.object(sdk, "AsyncCodex", return_value=client):
         harness = CodexHarness(HarnessSettings("gpt-5.6-terra", tmp_path, "contract"))
         await harness.resume("thread-1")
+        client.login_api_key.assert_awaited_once_with("acceptance-fake-key")
         options = client.thread_resume.await_args.kwargs
         assert client.thread_resume.await_args.args == ("thread-1",)
         assert options["model"] == "gpt-5.6-terra"

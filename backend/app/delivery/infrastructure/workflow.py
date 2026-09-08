@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.delivery.domain.merge import MergePolicy
 from app.delivery.infrastructure.git_transport import github_token
 from app.delivery.infrastructure.github import GitHubDelivery, github_client
+from app.delivery.infrastructure.review_state import review_state
 from app.engineering.application.jobs import PhaseBlocked, PhaseLease
 from app.engineering.domain.lifecycle import Action, WaitReason
 from app.engineering.infrastructure.models import ValidationRun
@@ -43,6 +44,7 @@ async def delivery_gate(
             and repository.archived_at is None,
             frozenset(policy.authorized_reviewer_ids),
             policy.require_formal_approval,
+            policy.reviewer_scope == "any_human",
         ),
         tuple(policy.required_checks),
         validated,
@@ -72,6 +74,7 @@ async def merge_phase(sessions: async_sessionmaker[AsyncSession], lease: PhaseLe
         if not team or not repository or not task.pull_request_number or not task.current_revision:
             raise PhaseBlocked(WaitReason.MISSING_CONFIGURATION, "Task has no published PR")
         policy, checks, validated = await delivery_gate(session, task, repository)
+        reviewed, validated_at = await review_state(session, task)
         async with asyncio.timeout(20), github_client(await github_token(session)) as client:
             gateway = GitHubDelivery(client, repository.owner, repository.name)
             evidence, pull = await gateway.evidence(
@@ -80,6 +83,8 @@ async def merge_phase(sessions: async_sessionmaker[AsyncSession], lease: PhaseLe
                 validated,
                 policy,
                 checks,
+                reviewed_messages=reviewed,
+                validated_at=validated_at,
                 runnable=task.status == "ACTIVE"
                 and task.stage == "MERGING"
                 and not task.manual_takeover

@@ -1,11 +1,14 @@
 """Authoritative, paginated GitHub evidence. Webhooks only trigger rechecks."""
 
 import re
+from datetime import datetime
 from typing import Any
 
 import httpx
 
 from app.delivery.domain.merge import Approval, MergeEvidence, MergePolicy
+from app.delivery.domain.review import ReviewedMessage, ReviewMessage
+from app.delivery.infrastructure.review_messages import human_message
 
 
 class GitHubDelivery:
@@ -70,6 +73,8 @@ class GitHubDelivery:
         required_checks: tuple[str, ...],
         *,
         runnable: bool,
+        reviewed_messages: tuple[ReviewedMessage, ...] = (),
+        validated_at: datetime | None = None,
     ) -> tuple[MergeEvidence, dict[str, Any]]:
         pull = await self.get(f"/pulls/{number}")
         sha = pull["head"]["sha"]
@@ -81,24 +86,29 @@ class GitHubDelivery:
         approvals = [
             value
             for actor, value in latest.items()
-            if actor in policy.authorized_actor_ids
+            if policy.allows_actor(actor)
             and value.get("state") == "APPROVED"
             and value.get("commit_id") == sha
             and value.get("user", {}).get("type") == "User"
-            and actor != str(pull["user"]["id"])
+            and (policy.any_human_reviewer or actor != str(pull["user"]["id"]))
         ]
         approval = None
+        messages: list[ReviewMessage] = []
+        pending = False
         if approvals:
             chosen = max(approvals, key=lambda value: value["id"])
             approval = Approval(str(chosen["user"]["id"]), sha, str(chosen["id"]))
-        elif not policy.require_formal_approval:
+        if not policy.require_formal_approval:
             comments = await self.pages(f"/issues/{number}/comments")
             commands = [
                 value
                 for value in comments
                 if (
-                    str(value.get("user", {}).get("id")) in policy.authorized_actor_ids
-                    and str(value.get("user", {}).get("id")) != str(pull["user"]["id"])
+                    policy.allows_actor(str(value.get("user", {}).get("id") or ""))
+                    and (
+                        policy.any_human_reviewer
+                        or str(value.get("user", {}).get("id")) != str(pull["user"]["id"])
+                    )
                     and value.get("user", {}).get("type") == "User"
                     and latest.get(str(value.get("user", {}).get("id")), {}).get("state")
                     not in {"CHANGES_REQUESTED", "DISMISSED"}
@@ -107,11 +117,43 @@ class GitHubDelivery:
                     )
                 )
             ]
-            if commands:
+            if commands and approval is None:
                 chosen = max(commands, key=lambda value: value["id"])
                 approval = Approval(
                     str(chosen["user"]["id"]), sha, f"comment:{chosen['id']}", formal=False
                 )
+            if validated_at is not None:
+                sources = (
+                    ("issue_comment", comments),
+                    ("review_comment", await self.pages(f"/pulls/{number}/comments")),
+                    ("review", [r for r in reviews if r.get("state") == "COMMENTED"]),
+                )
+                for source, values in sources:
+                    for value in values:
+                        message = human_message(source, value, sha, validated_at)
+                        if message is None or not policy.allows_actor(message.actor_id):
+                            continue
+                        if not policy.any_human_reviewer and message.actor_id == str(
+                            pull["user"]["id"]
+                        ):
+                            continue
+                        if source == "issue_comment" and message.body == f"/lgtm {sha}":
+                            continue
+                        messages.append(message)
+                        saved = next((r for r in reviewed_messages if r.matches(message)), None)
+                        if saved is None or saved.decision not in {
+                            "APPROVAL_INTERPRETED",
+                            "IGNORED",
+                            "COMMAND_APPLIED",
+                        }:
+                            pending = True
+                        elif (
+                            saved.decision == "APPROVAL_INTERPRETED"
+                            and approval is None
+                            and latest.get(message.actor_id, {}).get("state")
+                            not in {"CHANGES_REQUESTED", "DISMISSED"}
+                        ):
+                            approval = Approval(message.actor_id, sha, message.key, formal=False)
         checks = await self.pages(f"/commits/{sha}/check-runs?filter=latest", "check_runs")
         statuses = await self.pages(f"/commits/{sha}/statuses")
         states: dict[tuple[str, str], bool] = {}
@@ -140,6 +182,8 @@ class GitHubDelivery:
             mergeable=pull.get("mergeable") is True and pull.get("mergeable_state") == "clean",
             task_runnable=runnable,
             approval=approval,
+            review_messages=tuple(messages),
+            pending_review_messages=pending,
         )
         return evidence, pull
 

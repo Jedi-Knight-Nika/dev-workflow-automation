@@ -89,6 +89,7 @@ export type AutomationPolicy = {
   task_budget_usd: string | number;
   team_budget_usd: string | number;
   require_formal_approval: boolean;
+  reviewer_scope: 'allowlist' | 'any_human';
 };
 export const getAutomation = (id: string) => api<AutomationPolicy>(`/v2/teams/${id}/automation`);
 export const saveAutomation = (id: string, policy: AutomationPolicy) =>

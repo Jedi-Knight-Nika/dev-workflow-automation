@@ -6,6 +6,10 @@ from typing import Any, Protocol
 from app.agent_runtime.domain.usage import Pricing, Usage
 
 
+class WorkspaceUnavailable(RuntimeError):
+    """The native runner cannot safely use its prepared task checkout."""
+
+
 @dataclass(frozen=True)
 class HarnessSettings:
     model: str
@@ -37,6 +41,7 @@ class TurnReceipt:
     raw_usage: dict[str, Any] = field(default_factory=dict)
     provider_duration_ms: int | None = None
     cumulative_usage: dict[str, int | None] | None = None
+    failure_code: str | None = None
 
 
 class DeveloperHarness(Protocol):

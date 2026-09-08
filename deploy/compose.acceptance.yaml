@@ -1,0 +1,92 @@
+# Unpaid acceptance environment: no application .env, credentials or Docker socket.
+# docker compose --env-file /dev/null -p engineering-acceptance -f deploy/compose.acceptance.yaml ...
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: acceptance
+      POSTGRES_USER: acceptance
+      POSTGRES_PASSWORD: acceptance-only
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U acceptance -d acceptance"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+    volumes:
+      - database:/var/lib/postgresql/data
+
+  backend:
+    build:
+      context: ../backend
+      target: api
+    image: engineering-acceptance-api:local
+    environment: &test-environment
+      DATABASE_URL: postgresql+asyncpg://acceptance:acceptance-only@postgres:5432/acceptance
+      DATABASE_URL_SYNC: postgresql+psycopg://acceptance:acceptance-only@postgres:5432/acceptance
+      APP_SECRET_KEY: acceptance-only-not-a-production-secret
+      SCHEDULER_ENABLED: "false"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:18000:8000"
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/ready')"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  backend-checks:
+    image: engineering-acceptance-api:local
+    profiles: [checks]
+    environment:
+      <<: *test-environment
+      TEST_DATABASE_URL: postgresql+asyncpg://acceptance:acceptance-only@postgres:5432/acceptance
+    # Integration tests create their own rows; this database is disposable.
+    command: [.venv/bin/pytest, -q]
+    volumes:
+      - ../scripts:/scripts:ro
+    depends_on:
+      backend:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: ../backend
+      target: worker
+    image: engineering-acceptance-worker:local
+    profiles: [images]
+    network_mode: none
+    entrypoint: [/bin/true]
+
+  developer:
+    build:
+      context: ../backend
+      target: developer-runner
+    image: engineering-acceptance-developer:local
+    profiles: [images]
+    network_mode: none
+    entrypoint: [/bin/true]
+
+  frontend:
+    build:
+      context: ../frontend
+    image: engineering-acceptance-frontend:local
+    environment:
+      API_URL: http://backend:8000
+    ports:
+      - "127.0.0.1:13000:3000"
+    depends_on:
+      backend:
+        condition: service_healthy
+
+  frontend-checks:
+    build:
+      context: ../frontend
+      target: build
+    profiles: [checks]
+    network_mode: none
+    command: [npm, run, check]
+
+volumes:
+  database:

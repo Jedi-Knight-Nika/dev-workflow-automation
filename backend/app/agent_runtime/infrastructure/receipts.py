@@ -11,6 +11,7 @@ def apply_receipt(row: AIRun, receipt: TurnReceipt, price: PricingCatalog | None
     usage = receipt.usage
     row.native_turn_id, row.native_session_id = receipt.native_turn_id, receipt.native_session_id
     row.artifact = receipt.summary[-8000:]
+    row.failure_code = receipt.failure_code
     row.input_tokens, row.output_tokens = usage.input_tokens, usage.output_tokens
     row.cache_read_tokens, row.cache_write_tokens = (
         usage.cache_read_input_tokens,

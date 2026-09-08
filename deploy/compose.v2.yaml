@@ -11,7 +11,7 @@ services:
       DEVELOPER_CONTAINER_IMAGE: ${V2_RUNNER_IMAGE:-engineering-developer:local}
       DEVELOPER_CONTAINER_NETWORK: engineering-provider-internal
       DEVELOPER_EGRESS_PROXY: http://provider-egress:3128
-      V2_VALIDATION_COMMANDS: ${V2_VALIDATION_COMMANDS:-{}}
+      V2_VALIDATION_COMMANDS: ${V2_VALIDATION_COMMANDS:-}
       LOCAL_EVENT_INTERPRETER: ${LOCAL_EVENT_INTERPRETER:-false}
       OLLAMA_BASE_URL: http://ollama:11434
       INTERPRETER_MODEL: ${INTERPRETER_MODEL:-qwen3:4b}
@@ -21,10 +21,13 @@ services:
       DEVELOPER_TURN_TIMEOUT_SECONDS: ${DEVELOPER_TURN_TIMEOUT_SECONDS:-1200}
       DOCKER_API_TIMEOUT_SECONDS: ${DOCKER_API_TIMEOUT_SECONDS:-30}
       SLACK_SIGNING_SECRET: ${SLACK_SIGNING_SECRET:-}
-      SLACK_TEAM_ROUTES: ${SLACK_TEAM_ROUTES:-{}}
-      GITHUB_ISSUE_ROUTES: ${GITHUB_ISSUE_ROUTES:-{}}
+      SLACK_TEAM_ROUTES: ${SLACK_TEAM_ROUTES:-}
+      GITHUB_ISSUE_ROUTES: ${GITHUB_ISSUE_ROUTES:-}
       TRELLO_WEBHOOK_SECRET: ${TRELLO_WEBHOOK_SECRET:-}
       TRELLO_WEBHOOK_CALLBACK_URL: ${TRELLO_WEBHOOK_CALLBACK_URL:-}
+      GITHUB_APP_ID: ${GITHUB_APP_ID:-}
+      GITHUB_APP_PRIVATE_KEY: ${GITHUB_APP_PRIVATE_KEY:-}
+      GITHUB_APP_PRIVATE_KEY_FILE: /run/secrets/github_app_private_key
     volumes:
       - ${V2_DATA_ROOT}:${V2_DATA_ROOT}
     networks: [default, interpreter-private]
@@ -36,6 +39,8 @@ services:
       SCHEDULER_ENABLED: ${V2_SCHEDULER_ENABLED:-false}
     volumes:
       - ${V2_DATA_ROOT}:${V2_DATA_ROOT}
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${GITHUB_APP_PRIVATE_KEY_FILE_HOST:-./github-app.private-key.pem}:/run/secrets/github_app_private_key:ro
     networks: [default, interpreter-private]
     depends_on:
       provider-egress:
@@ -43,7 +48,7 @@ services:
 
   developer-image:
     build:
-      context: ../backend
+      context: ${V2_BUILD_CONTEXT:-../backend}
       target: developer-runner
     image: ${V2_RUNNER_IMAGE:-engineering-developer:local}
     profiles: [images]
@@ -52,7 +57,7 @@ services:
 
   provider-egress:
     build:
-      context: ../backend
+      context: ${V2_BUILD_CONTEXT:-../backend}
       target: worker
     entrypoint: [.venv/bin/python, -m, app.agent_runtime.infrastructure.egress_proxy]
     user: "65534:65534"

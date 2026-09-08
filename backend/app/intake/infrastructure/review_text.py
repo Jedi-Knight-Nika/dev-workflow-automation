@@ -16,8 +16,10 @@ from app.intake.domain.events import Event, Intent, classify
 from app.intake.infrastructure.authorization import actor_allowed
 from app.intake.infrastructure.metered import CloudInterpreter, MeteredLocalInterpreter
 from app.intake.infrastructure.ollama import OllamaInterpreter
-from app.intake.infrastructure.v2_events import apply_pending_feedback
+from app.intake.infrastructure.v2_events import apply_pending_feedback, github_event
 from app.platform.configuration.settings import Settings
+from app.repositories.infrastructure.models import Repository
+from app.teams.infrastructure.automation import read_policy
 from app.teams.infrastructure.models import TeamAgentProfile
 
 # Local + two cloud attempts can each take up to two minutes. Recovery must not
@@ -48,7 +50,7 @@ async def process_review_text(
         if cycle is None:
             return False
         task = await session.get(Task, cycle.task_id)
-        if task is None:
+        if task is None or task.team_id is None:
             cycle.decision = "OBSOLETE"
             return True
         if cycle.decision == "CLASSIFYING":
@@ -114,7 +116,10 @@ async def process_review_text(
             cycle.head_sha,
             True,
         )
-        if not await actor_allowed(session, task, event.provider, event.actor):
+        policy = await read_policy(session, task.team_id)
+        if not await actor_allowed(
+            session, task, event.provider, event.actor, actor_type=cycle.feedback.get("actor_type")
+        ):
             cycle.decision = "AUTHORITY_REVOKED"
             return True
         deterministic = classify(event)
@@ -123,6 +128,13 @@ async def process_review_text(
             Intent.RESUME,
             Intent.CANCEL,
         }
+        if (
+            is_control
+            and event.provider == "github"
+            and event.actor not in policy.authorized_reviewer_ids
+        ):
+            cycle.decision = "AUTHORITY_REVOKED"
+            return True
         if not is_control and (task.status in {"PAUSED", "WAITING_HUMAN"} or task.manual_takeover):
             cycle.decision = "CLASSIFY_AFTER_RESUME"
             return True
@@ -161,22 +173,49 @@ async def process_review_text(
         )
         for model in models
     )
-    result = await InterpretEvent(tuple(chain)).execute(event)
+    result = await InterpretEvent(
+        tuple(chain), allow_approval=not policy.require_formal_approval
+    ).execute(event)
     async with sessions.begin() as session:
         task = await session.get(Task, task_id, with_for_update=True)
         cycle = await session.get(ReviewCycle, cycle_id, with_for_update=True)
-        if task is None or cycle is None or cycle.decision != "CLASSIFYING":
+        if task is None or task.team_id is None or cycle is None or cycle.decision != "CLASSIFYING":
             return True
-        if not await actor_allowed(session, task, event.provider, event.actor):
+        if not await actor_allowed(
+            session, task, event.provider, event.actor, actor_type=cycle.feedback.get("actor_type")
+        ):
             cycle.decision = "AUTHORITY_REVOKED"
             return True
-        if result.intent in {Intent.FEEDBACK, Intent.REQUIREMENT_CHANGE}:
+        if not is_control and cycle.head_sha != task.current_revision:
+            cycle.decision = "STALE"
+            return True
+        cycle.feedback = {
+            **cycle.feedback,
+            "interpretation": {
+                "intent": result.intent.value,
+                "confidence": result.confidence,
+                "reason": result.reason,
+            },
+        }
+        if (
+            result.intent == Intent.APPROVAL
+            and not (await read_policy(session, task.team_id)).require_formal_approval
+        ):
+            cycle.decision = "APPROVAL_INTERPRETED"
+        elif result.intent in {Intent.FEEDBACK, Intent.REQUIREMENT_CHANGE}:
             cycle.decision = "FEEDBACK_PENDING"
             await session.flush()
             await apply_pending_feedback(session, task)
         elif result.intent == Intent.IGNORE:
             cycle.decision = "IGNORED"
         elif result.intent in {Intent.PAUSE, Intent.RESUME, Intent.CANCEL}:
+            if (
+                event.provider == "github"
+                and event.actor
+                not in (await read_policy(session, task.team_id)).authorized_reviewer_ids
+            ):
+                cycle.decision = "AUTHORITY_REVOKED"
+                return True
             await control_task(
                 session, task, Action(result.intent.value), actor=f"{event.provider}:{event.actor}"
             )
@@ -201,5 +240,15 @@ async def process_review_text(
                     expected_version=task.lifecycle_version,
                     actor="interpreter",
                     wait_reason=WaitReason.MISSING_REQUIREMENT,
+                )
+        if (
+            cycle.decision in {"APPROVAL_INTERPRETED", "IGNORED"}
+            and task.status == "WAITING_EXTERNAL"
+        ):
+            repository = await session.get(Repository, task.repository_id)
+            if repository is not None:
+                await session.flush()
+                await github_event(
+                    session, task, repository, "interpretation_completed", {"cycle": str(cycle.id)}
                 )
     return True

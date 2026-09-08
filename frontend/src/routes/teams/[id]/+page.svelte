@@ -106,8 +106,8 @@
     <p>ENGINEERING V2 · CONTROLLED ROLLOUT</p>
     <h1>{activity?.team_name ?? 'Team'}</h1>
     <p>
-      Configure fixed profiles, explicit ticket enrollment, budgets, and merge authority. Existing
-      legacy tickets stay unchanged. Verify your isolated runtime before enabling workers.
+      Configure fixed profiles, explicit ticket enrollment, budgets, and merge authority. Verify
+      your isolated runtime before enabling workers.
     </p>
   </header>
   <ErrorBanner message={error} />

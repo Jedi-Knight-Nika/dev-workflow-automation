@@ -38,6 +38,12 @@ Local ports bind to 127.0.0.1:3000 and 127.0.0.1:8000. Scheduling stays disabled
 
 ## Production native execution
 
+For a local native instance, use the same overlay with root `compose.yaml`. In the selected
+ignored environment file set `V2_BUILD_CONTEXT=./backend`, an absolute `V2_DATA_ROOT`, a
+new database and a prepared `V2_RUNNER_IMAGE`. Always pass that environment file explicitly;
+do not accidentally reconnect the base `.env` database. Keep the scheduler disabled until
+the Team admission checklist is complete.
+
 Use both production files:
 
 ```sh
@@ -66,12 +72,27 @@ A stock runner cannot test every repository without dependency preparation. Buil
 3. For OpenAI and cloud interpretation, register current verified pricing and source/effective date in the pricing UI. Do not copy guessed rates.
 4. Set the Team's allowed repository UUIDs, task budget and cumulative Team budget.
 5. Enable enrollment for that scope; leave auto-merge off for the first smoke test.
-6. Configure required CI check names and authorized immutable numeric reviewer IDs before enabling auto-merge.
+6. Configure required CI check names and reviewer scope before enabling auto-merge. Choose listed immutable numeric GitHub reviewer IDs, or explicitly allow any human commenter (including the PR author).
 7. Optionally enable Thinker/Reviewer with their own limits; neither is required for routine tasks.
 8. Validate the dependency image, native start/resume and offline test command first.
 9. Explicitly enable the scheduler and start one low-risk task.
 
 There is no hard-coded success guarantee for an arbitrary task or insufficient allowance. Scope and dependencies must be feasible. Task/Team/role limits all apply; increasing one does not reset accumulated use.
+
+### Human approval comments
+
+Turn off **Require formal GitHub review approval** to accept normal-language approval.
+Exact phrases such as `LGTM`, `looks good to me`, or `ready to merge` need no model call.
+Other wording uses the configured Interpreter with bounded spending; uncertain messages
+pause for clarification. Configure a supported cloud Interpreter with its own hard allowance
+and verified pricing, or enable the local interpreter, for this broader wording support.
+
+Comments must come from a human allowed by the Team's reviewer scope and follow successful
+validation of the current commit. The controller fetches comments and CI from GitHub again
+before merging. Edited/deleted comments, changed commits, failed/missing checks and blocking
+reviews prevent merge. Missed webhooks are recovered by periodic polling. Any-human review
+does not grant everyone permission to pause, resume or cancel tasks; those GitHub commands
+still require a listed numeric actor ID.
 
 ## Source routing
 
@@ -113,10 +134,13 @@ The backup name includes UTC timestamp and a unique suffix. Incomplete backups r
 
 Restore requires CONFIRM_RESTORE=RESTORE and CONFIRM_QUIESCENT=YES. Supply a trusted BACKUP_SET and a NEW RESTORE_DATABASE. Runtime directories must be empty. The restore tool never drops a database or deletes existing directories. Restore at the original absolute data path, preserve UID/GID ownership, verify keys and inspect suspended/unknown runs before enabling execution.
 
-Backup/restore tooling is wired to the same native/checkouts/control tree but still requires a deployment-host smoke test.
+Backup/restore tooling has passed an isolated Docker/PostgreSQL 16 smoke test. Repeat it
+with your deployment storage, permissions and protected backup destination before production.
 
 ## What must be supplied by the operator
 
 Docker availability; a new database; protected secrets; GitHub/repository access; selected model access and verified rates; explicit Team/role allowances; a tested dependency image and validation commands; reviewer/check policy; and authorization for the first real paid run.
 
-The refactor itself did not launch paid workers, modify the application's database, publish a PR or perform a real-model benchmark.
+For actual verification evidence, the authorized live task and the remaining acceptance work,
+see [refactor verification](refactor-verification.md). One documentation PR is not a real-model
+benchmark across representative tasks.

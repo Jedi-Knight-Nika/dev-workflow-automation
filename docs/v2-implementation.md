@@ -30,7 +30,9 @@ Signed events are durably deduplicated. Structured reviews/checks and exact comm
 
 Feedback received during an active phase is deferred; paused tasks stay paused. Actionable feedback resumes the same Developer with a delta. Requirement changes increment version, record actor/history and invalidate prior evidence.
 
-Merge requires all configured gates: enabled Team, runnable task/lease, allowed repository, auto-merge policy, exact current SHA, current local validation, required successful CI checks, authorized human review and mergeability. Formal approval is the default. If policy explicitly permits nonformal approval, only the supported exact current-SHA /lgtm command is accepted.
+Merge requires all configured gates: enabled Team, runnable task/lease, allowed repository, auto-merge policy, exact current SHA, current local validation, required successful CI checks, authorized human review and mergeability. Formal approval is the default. Teams can explicitly allow any human GitHub reviewer, including the PR author, instead of an ID allowlist. When nonformal approval is enabled, common exact approval phrases are classified without inference; other wording uses the bounded Interpreter and requires at least 0.95 confidence for approval. The exact current-SHA `/lgtm` command remains supported.
+
+The controller fetches human comment/review snapshots directly from GitHub, binds them to the validated commit and stores their body digest, author and update time. Unclassified messages block merge. The final merge job fetches the evidence again, so edited/deleted comments and changed revisions cannot reuse an old interpretation. Human comments must follow validation; bots never supply approval. GitHub pause/resume/cancel commands still require explicit actor IDs even under any-human reviewer scope.
 
 The final GitHub merge request includes the expected SHA. If evidence changes, the task returns to review wait. Waiting/polling does not create paid planning runs.
 
@@ -83,6 +85,12 @@ The observer performs GET requests only. It never starts, resumes, retries, rese
 
 Local verification covers backend architecture/types/lint, unit and PostgreSQL integration tests, frontend checks/build, and mocked-API browser flows including fullscreen and receipts.
 
-Docker was unavailable during this refactor. Still required on the deployment host: build the runner/dependency image, verify native start/resume/compaction/cancellation with each configured harness, run an offline backup/restore smoke test, then benchmark 10–20 explicitly authorized low-risk tasks. Record completion rate, cost per completed task, context/cache/compaction usage, latency and failure categories.
+Docker acceptance now covers isolated validation, cancellation, Caddy and backup/restore.
+One paid Codex documentation task resumed its native session, passed offline checks, and
+opened a PR for approximately $0.091. See [the verification record](refactor-verification.md)
+for exact evidence, fixes and caveats. Real reviewer/CI-authorized merge, other configured
+harnesses, compaction and the 10–20-task benchmark still need deployment acceptance.
+Record completion rate, cost per completed task, context/cache/compaction usage, latency
+and failure categories; do not extrapolate savings from this single small task.
 
 Model discovery for the optional DeepSeek interpreter uses its [documented GET /models endpoint](https://api-docs.deepseek.com/api/list-models/). Provider model availability/prices must be verified by the operator; no static discovery list or price is guessed.

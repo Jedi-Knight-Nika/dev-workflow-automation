@@ -47,6 +47,7 @@ test-results/
 .cache/
 
 # Local runtime data
+.runtime/
 postgres_data/
 workspaces/
 deploy/backups/

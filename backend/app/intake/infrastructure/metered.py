@@ -127,7 +127,7 @@ class CloudInterpreter:
                 role_kind="INTERPRETER",
                 provider=self.provider,
                 model=self.model,
-                prompt_version="v2.classify.1",
+                prompt_version="v2.classify.2",
                 status="RUNNING",
                 reserved_cost_usd=reserve,
                 pricing_id=price.id,
