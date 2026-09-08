@@ -32,7 +32,7 @@ class AccountSettings(Base):
     structured_output_retry_limit: Mapped[int] = mapped_column(Integer, default=2)
 
     default_execution_mode: Mapped[str] = mapped_column(String(30), default="AUTONOMOUS")
-    default_worker_runtime: Mapped[str] = mapped_column(String(30), default="LOCAL_PROCESS")
+    default_worker_runtime: Mapped[str] = mapped_column(String(30), default="DOCKER")
     max_concurrent_workers: Mapped[int] = mapped_column(Integer, default=1)
     default_job_timeout_seconds: Mapped[int] = mapped_column(Integer, default=3600)
 
@@ -41,8 +41,8 @@ class AccountSettings(Base):
     default_dependency_install_policy: Mapped[str] = mapped_column(String(30), default="ALLOW")
     default_push_task_branch_policy: Mapped[str] = mapped_column(String(30), default="ALLOW")
 
-    auto_index_repositories: Mapped[bool] = mapped_column(default=True)
-    incremental_index_after_merge: Mapped[bool] = mapped_column(default=True)
+    auto_index_repositories: Mapped[bool] = mapped_column(default=False)
+    incremental_index_after_merge: Mapped[bool] = mapped_column(default=False)
     index_source_code: Mapped[bool] = mapped_column(default=True)
     index_tests: Mapped[bool] = mapped_column(default=True)
     index_documentation: Mapped[bool] = mapped_column(default=True)

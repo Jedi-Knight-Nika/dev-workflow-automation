@@ -31,6 +31,13 @@ from ._base import utcnow
 
 class Task(Base):
     __tablename__ = "tasks"
+    __table_args__ = (
+        Index("ix_tasks_state_priority", "state", "priority"),
+        Index("ix_tasks_due_at", "due_at"),
+        Index("ix_tasks_team_state", "team_id", "state"),
+        Index("ix_tasks_repository", "repository_id"),
+        Index("ix_tasks_workflow", "workflow_id"),
+    )
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     external_key: Mapped[str | None] = mapped_column(String(100), unique=True)
     title: Mapped[str] = mapped_column(String(500))
@@ -90,6 +97,7 @@ class TaskRepositoryScope(Base):
     __table_args__ = (
         UniqueConstraint("task_id", "repository_id", name="uq_task_repository_scope"),
         Index("ix_task_repository_scopes_repository", "repository_id"),
+        Index("ix_task_repository_scopes_task", "task_id"),
     )
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     task_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tasks.id", ondelete="CASCADE"))
@@ -115,7 +123,12 @@ class TaskRepositoryScope(Base):
 
 class Job(Base):
     __tablename__ = "jobs"
-    __table_args__ = (Index("ix_jobs_claim", "state", "priority", "created_at"),)
+    __table_args__ = (
+        Index("ix_jobs_claim", "state", "priority", "created_at"),
+        Index("ix_jobs_retry_not_before", "retry_not_before"),
+        Index("ix_jobs_task", "task_id"),
+        Index("ix_jobs_agent", "agent_id"),
+    )
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     task_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tasks.id", ondelete="CASCADE"))
     role: Mapped[JobRole] = mapped_column(Enum(JobRole))
@@ -148,6 +161,7 @@ class TaskEvent(Base):
     __tablename__ = "task_events"
     __table_args__ = (
         UniqueConstraint("source", "external_event_id", name="uq_event_source_external_id"),
+        Index("ix_task_events_task", "task_id"),
     )
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     task_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tasks.id", ondelete="CASCADE"))
@@ -163,6 +177,7 @@ class ExternalTaskSnapshot(Base):
     __tablename__ = "external_task_snapshots"
     __table_args__ = (
         UniqueConstraint("provider", "external_id", name="uq_external_task_provider_id"),
+        Index("ix_external_task_snapshots_task", "task_id"),
     )
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     task_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tasks.id", ondelete="CASCADE"))
@@ -177,6 +192,7 @@ class ExternalTaskSnapshot(Base):
 
 class TaskMemory(Base):
     __tablename__ = "task_memories"
+    __table_args__ = (Index("ix_task_memories_plan_job", "current_plan_job_id"),)
     task_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("tasks.id", ondelete="CASCADE"), primary_key=True
     )
@@ -202,7 +218,11 @@ class TaskMemory(Base):
 
 class AgentCheckpoint(Base):
     __tablename__ = "agent_checkpoints"
-    __table_args__ = (Index("ix_checkpoints_task_role_created", "task_id", "role", "created_at"),)
+    __table_args__ = (
+        Index("ix_checkpoints_task_role_created", "task_id", "role", "created_at"),
+        Index("ix_agent_checkpoints_agent", "agent_id"),
+        Index("ix_agent_checkpoints_role_id", "role_id"),
+    )
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     task_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tasks.id", ondelete="CASCADE"))
     job_id: Mapped[uuid.UUID] = mapped_column(
@@ -223,6 +243,7 @@ class AgentCheckpoint(Base):
 
 class JobContext(Base):
     __tablename__ = "job_contexts"
+    __table_args__ = (Index("ix_job_contexts_plan_job", "plan_job_id"),)
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     job_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("jobs.id", ondelete="CASCADE"), unique=True
@@ -243,6 +264,7 @@ class JobContext(Base):
 
 class WorkspaceLease(Base):
     __tablename__ = "workspace_leases"
+    __table_args__ = (Index("ix_workspace_leases_job", "job_id"),)
     task_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("tasks.id", ondelete="CASCADE"), primary_key=True
     )
@@ -272,6 +294,7 @@ class ReviewFinding(Base):
     __table_args__ = (
         Index("ix_review_findings_task_status", "task_id", "status"),
         Index("ix_review_findings_fingerprint", "task_id", "finding_fingerprint"),
+        Index("ix_review_findings_reviewer_job", "reviewer_job_id"),
     )
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     task_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tasks.id", ondelete="CASCADE"))

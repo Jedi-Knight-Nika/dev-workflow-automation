@@ -1,360 +1,104 @@
+"""Bounded V2 phase dispatch and external-event polling; no model-call loop."""
+
 import asyncio
-import uuid
-from datetime import UTC, datetime
 from time import monotonic
-from typing import Any
 
 import structlog
-from pydantic import ValidationError
 
-from app.application.complete_consultation import CompleteConsultation
-from app.application.dispatch_jobs import DispatchJobs
-from app.application.jobs import (
-    CompleteDelivererJob,
-    CompleteExecutorJob,
-    CompleteFailedJob,
-    CompleteReviewerJob,
-    CompleteTesterJob,
-    CompleteThinkerJob,
-)
 from app.application.manage_worker_presence import ManageWorkerPresence
-from app.application.ports.deliverer_completion import DelivererCompletionCommand
-from app.application.ports.executor_completion import ExecutorCompletionCommand
-from app.application.ports.job_completion import FailedJobCommand
-from app.application.ports.job_dispatch import ClaimedJob
-from app.application.ports.reviewer_completion import ReviewerCompletionCommand
-from app.application.ports.tester_completion import TesterCompletionCommand
-from app.application.ports.thinker_completion import ThinkerCompletionCommand
-from app.application.ports.worker_runtime import WorkerRunner
 from app.application.process_deliveries import ProcessDeliveries
-from app.application.process_indexes import ProcessIndexes
 from app.application.reconcile_tasks import ReconcileExternalTasks
-from app.application.recover_resources import RecoveryManager
-from app.application.run_startup_maintenance import RunStartupMaintenance
 from app.config import Settings
-from app.domain.agents import AgentRole
-from app.domain.jobs import JobExecutionState
 from app.engineering.application.jobs import PhaseJobs, RunEngineeringJob
-from app.schemas import WorkerResult
 
 log = structlog.get_logger()
-
-
-def parse_worker_result(stdout: bytes) -> WorkerResult:
-    """Parse the worker's final JSON line while tolerating preceding process logs."""
-    lines = [line.strip() for line in stdout.splitlines() if line.strip()]
-    payload = lines[-1] if lines else stdout
-    return WorkerResult.model_validate_json(payload)
 
 
 class Scheduler:
     def __init__(
         self,
+        *,
         settings: Settings,
         worker_id: str,
-        job_dispatch: DispatchJobs,
-        worker_runner: WorkerRunner,
-        failed_job_completer: CompleteFailedJob,
-        deliverer_job_completer: CompleteDelivererJob,
-        thinker_job_completer: CompleteThinkerJob,
-        executor_job_completer: CompleteExecutorJob,
-        tester_job_completer: CompleteTesterJob,
-        reviewer_job_completer: CompleteReviewerJob,
-        delivery_processor: ProcessDeliveries,
-        index_processor: ProcessIndexes,
-        startup_maintenance: RunStartupMaintenance,
-        worker_presence: ManageWorkerPresence,
-        task_reconciler: ReconcileExternalTasks,
-        recovery_manager: RecoveryManager | None = None,
-        consultation_completer: CompleteConsultation | None = None,
-        phase_jobs: PhaseJobs | None = None,
-        phase_worker: RunEngineeringJob | None = None,
+        jobs: PhaseJobs,
+        worker: RunEngineeringJob,
+        deliveries: ProcessDeliveries,
+        presence: ManageWorkerPresence,
+        reconciler: ReconcileExternalTasks,
     ) -> None:
-        self.settings = settings
-        self._job_dispatch = job_dispatch
-        self._worker_runner = worker_runner
-        self._failed_job_completer = failed_job_completer
-        self._deliverer_job_completer = deliverer_job_completer
-        self._thinker_job_completer = thinker_job_completer
-        self._executor_job_completer = executor_job_completer
-        self._tester_job_completer = tester_job_completer
-        self._reviewer_job_completer = reviewer_job_completer
-        self._delivery_processor = delivery_processor
-        self._index_processor = index_processor
-        self._startup_maintenance = startup_maintenance
-        self._worker_presence = worker_presence
-        self._task_reconciler = task_reconciler
-        self._recovery_manager = recovery_manager
-        self._consultation_completer = consultation_completer
-        self._phase_jobs, self._phase_worker = phase_jobs, phase_worker
-        self._last_phase_recovery = monotonic()
-        self.worker_id = worker_id
+        self.settings, self.worker_id = settings, worker_id
+        self.jobs, self.worker = jobs, worker
+        self.deliveries, self.presence, self.reconciler = deliveries, presence, reconciler
         self._stop = asyncio.Event()
         self._loop_task: asyncio.Task[None] | None = None
-        self._index_task: asyncio.Task[None] | None = None
         self._heartbeat_task: asyncio.Task[None] | None = None
         self._job_tasks: set[asyncio.Task[None]] = set()
+        self._last_recovery = 0.0
 
     async def start(self) -> None:
-        await self._startup_maintenance.execute()
-        if self._phase_jobs is not None:
-            await self._phase_jobs.recover()
-        await self._worker_presence.online()
-        self._loop_task = asyncio.create_task(self._run(), name="job-scheduler")
-        if self.settings.repository_rag_enabled:
-            self._index_task = asyncio.create_task(self._run_indexer(), name="repository-indexer")
-        self._heartbeat_task = asyncio.create_task(self._run_heartbeat(), name="worker-heartbeat")
+        if self._loop_task is not None:
+            raise RuntimeError("Scheduler is already started")
+        self._stop.clear()
+        # Reconcile lost leases/cost receipts before admitting any new paid turn.
+        await self.jobs.recover()
+        self._last_recovery = monotonic()
+        await self.presence.online()
+        self._loop_task = asyncio.create_task(self._run(), name="phase-scheduler")
+        self._heartbeat_task = asyncio.create_task(self._heartbeat(), name="worker-heartbeat")
 
     async def stop(self) -> None:
         self._stop.set()
-        if self._loop_task:
-            await self._loop_task
-        if self._index_task:
-            await self._index_task
-        if self._heartbeat_task:
-            await self._heartbeat_task
-        await self._worker_presence.stopped()
+        # Polling HTTP calls must not postpone cancellation of paid native turns.
+        background = [task for task in (self._loop_task, self._heartbeat_task) if task]
+        running = list(self._job_tasks)
+        for task in (*background, *running):
+            task.cancel()
+        await asyncio.gather(*background, *running, return_exceptions=True)
+        self._job_tasks.clear()
+        self._loop_task = self._heartbeat_task = None
+        await self.presence.stopped()
 
-    async def _run_heartbeat(self) -> None:
+    async def _wait(self, seconds: float) -> None:
+        try:
+            await asyncio.wait_for(self._stop.wait(), timeout=seconds)
+        except TimeoutError:
+            pass
+
+    async def _heartbeat(self) -> None:
         while not self._stop.is_set():
             try:
-                await self._worker_presence.online()
-            except asyncio.CancelledError:
-                raise
+                await self.presence.online()
             except Exception:
                 log.exception("worker_heartbeat_failed", worker_id=self.worker_id)
-            try:
-                await asyncio.wait_for(
-                    self._stop.wait(), timeout=self.settings.worker_heartbeat_seconds
-                )
-            except TimeoutError:
-                pass
+            await self._wait(self.settings.worker_heartbeat_seconds)
+
+    def _finished(self, task: asyncio.Task[None]) -> None:
+        self._job_tasks.discard(task)
+        if not task.cancelled() and task.exception() is not None:
+            # RunEngineeringJob normally records failures. A storage failure can
+            # still escape; observe it, leaving lease recovery to suspend the job.
+            log.error("phase_controller_failed", task=task.get_name())
 
     async def _run(self) -> None:
-        try:
-            while not self._stop.is_set():
-                try:
-                    self._job_tasks = {task for task in self._job_tasks if not task.done()}
-                    if (
-                        self._phase_jobs is not None
-                        and monotonic() - self._last_phase_recovery
-                        >= self.settings.worker_lease_seconds
-                    ):
-                        await self._phase_jobs.recover()
-                        self._last_phase_recovery = monotonic()
-                    await self._task_reconciler.execute()
-                    if self._recovery_manager is not None:
-                        await self._recovery_manager.recover_due_resources()
-                    await self._delivery_processor.execute()
-                    claimed_any = False
-                    while len(self._job_tasks) < self.settings.scheduler_max_concurrent_jobs:
-                        if self._phase_jobs is not None and self._phase_worker is not None:
-                            phase = await self._phase_jobs.claim()
-                            if phase is not None:
-                                claimed_any = True
-                                self._job_tasks.add(
-                                    asyncio.create_task(
-                                        self._phase_worker.execute(phase),
-                                        name=f"v2-job-{phase.job_id}",
-                                    )
-                                )
-                                continue
-                        if not self.settings.legacy_workflow_routing:
-                            break
-                        job = await self._job_dispatch.claim()
-                        if job is None:
-                            break
-                        claimed_any = True
-                        task = asyncio.create_task(
-                            self._execute_safely(job), name=f"job-{job.job_id}"
-                        )
-                        self._job_tasks.add(task)
-                    if self._job_tasks:
-                        await asyncio.wait(
-                            self._job_tasks,
-                            timeout=self.settings.scheduler_poll_seconds,
-                            return_when=asyncio.FIRST_COMPLETED,
-                        )
-                    elif not claimed_any:
-                        await asyncio.sleep(self.settings.scheduler_poll_seconds)
-                except asyncio.CancelledError:
-                    raise
-                except Exception:
-                    log.exception("scheduler_iteration_failed")
-                    await asyncio.sleep(self.settings.scheduler_poll_seconds)
-        finally:
-            if self._job_tasks:
-                for task in self._job_tasks:
-                    task.cancel()
-                await asyncio.gather(*self._job_tasks, return_exceptions=True)
-                self._job_tasks.clear()
-
-    async def _execute_safely(self, claimed_job: ClaimedJob) -> None:
-        try:
-            await self._execute(claimed_job)
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:
-            log.exception("job_execution_failed", job_id=str(claimed_job.job_id))
-            message = str(exc)
-            failure = (
-                message
-                if message.startswith(("MODEL_POLICY_ERROR:", "MODEL_UNAVAILABLE:"))
-                else f"Unknown system error: {type(exc).__name__}"
-            )
-            await self._finish(
-                claimed_job.job_id,
-                claimed_job.lease_token,
-                JobExecutionState.FAILED,
-                None,
-                failure,
-            )
-
-    async def _run_indexer(self) -> None:
         while not self._stop.is_set():
             try:
-                processed = await self._index_processor.execute()
-                if not processed:
-                    await asyncio.sleep(max(self.settings.scheduler_poll_seconds, 2.0))
-            except asyncio.CancelledError:
-                raise
+                if monotonic() - self._last_recovery >= self.settings.worker_lease_seconds:
+                    await self.jobs.recover()
+                    self._last_recovery = monotonic()
+                await self.reconciler.execute()
+                await self.deliveries.execute()
+                while (
+                    not self._stop.is_set()
+                    and len(self._job_tasks) < self.settings.scheduler_max_concurrent_jobs
+                ):
+                    lease = await self.jobs.claim()
+                    if lease is None:
+                        break
+                    task = asyncio.create_task(
+                        self.worker.execute(lease), name=f"phase-{lease.job_id}"
+                    )
+                    self._job_tasks.add(task)
+                    task.add_done_callback(self._finished)
             except Exception:
-                log.exception("repository_index_iteration_failed")
-                await asyncio.sleep(max(self.settings.scheduler_poll_seconds, 2.0))
-
-    async def _execute(self, claimed_job: ClaimedJob) -> None:
-        if not await self._job_dispatch.prepare(claimed_job):
-            return
-        job_id = claimed_job.job_id
-        lease_token = claimed_job.lease_token
-        if claimed_job.durable_result is not None:
-            try:
-                result = WorkerResult.model_validate(claimed_job.durable_result)
-                if result.job_id != job_id:
-                    raise ValueError("Durable worker result belongs to another Job")
-            except (ValidationError, ValueError) as exc:
-                await self._finish(
-                    job_id,
-                    lease_token,
-                    JobExecutionState.FAILED,
-                    None,
-                    f"Invalid durable worker result: {exc}",
-                )
-                return
-            await self._finish(
-                job_id,
-                lease_token,
-                JobExecutionState.SUCCEEDED,
-                result.model_dump(mode="json"),
-                None,
-            )
-            if self._recovery_manager is not None:
-                await self._recovery_manager.record_job_success(job_id)
-            return
-        execution = await self._worker_runner(job_id)
-        if execution.timed_out:
-            await self._finish(
-                job_id,
-                lease_token,
-                JobExecutionState.TIMED_OUT,
-                None,
-                "Worker timed out",
-            )
-            return
-        if execution.returncode != 0:
-            reason = (
-                execution.stderr.decode(errors="replace")[-4000:]
-                or execution.stdout.decode(errors="replace")[-4000:]
-                or f"Worker exited {execution.returncode}"
-            )
-            await self._finish(
-                job_id,
-                lease_token,
-                JobExecutionState.FAILED,
-                None,
-                f"Worker crashed: {reason}",
-            )
-            return
-        try:
-            result = parse_worker_result(execution.stdout)
-        except ValidationError as exc:
-            await self._finish(
-                job_id,
-                lease_token,
-                JobExecutionState.FAILED,
-                None,
-                f"Invalid worker result: {exc}",
-            )
-            return
-        await self._finish(
-            job_id,
-            lease_token,
-            JobExecutionState.SUCCEEDED,
-            result.model_dump(mode="json"),
-            None,
-        )
-        if self._recovery_manager is not None:
-            await self._recovery_manager.record_job_success(job_id)
-
-    async def _finish(
-        self,
-        job_id: uuid.UUID,
-        lease_token: uuid.UUID,
-        state: JobExecutionState,
-        result: dict[str, Any] | None,
-        failure: str | None,
-    ) -> None:
-        if state != JobExecutionState.SUCCEEDED:
-            completed = await self._failed_job_completer.execute(
-                FailedJobCommand(
-                    job_id=job_id,
-                    lease_token=lease_token,
-                    terminal_state=state.value,
-                    failure=failure or state.value,
-                    finished_at=datetime.now(UTC),
-                )
-            )
-            if not completed:
-                log.warning("stale_worker_result_rejected", job_id=str(job_id))
-            return
-        if result and result.get("result") in {"CONSULTATION_REQUESTED", "CONSULTATION_REPLIED"}:
-            if self._consultation_completer is None:
-                raise RuntimeError("Consultation completion is not configured")
-            await self._consultation_completer.execute(job_id, lease_token, result)
-            return
-        if result and result.get("role") == AgentRole.DELIVERER.value:
-            completed = await self._deliverer_job_completer.execute(
-                DelivererCompletionCommand(job_id, lease_token, result, datetime.now(UTC))
-            )
-            if not completed:
-                log.warning("stale_worker_result_rejected", job_id=str(job_id))
-            return
-        if result and result.get("role") == AgentRole.THINKER.value:
-            completed = await self._thinker_job_completer.execute(
-                ThinkerCompletionCommand(job_id, lease_token, result, datetime.now(UTC))
-            )
-            if not completed:
-                log.warning("stale_worker_result_rejected", job_id=str(job_id))
-            return
-        if result and result.get("role") == AgentRole.EXECUTOR.value:
-            completed = await self._executor_job_completer.execute(
-                ExecutorCompletionCommand(job_id, lease_token, result, datetime.now(UTC))
-            )
-            if not completed:
-                log.warning("stale_worker_result_rejected", job_id=str(job_id))
-            return
-        if result and result.get("role") == AgentRole.TESTER.value:
-            completed = await self._tester_job_completer.execute(
-                TesterCompletionCommand(job_id, lease_token, result, datetime.now(UTC))
-            )
-            if not completed:
-                log.warning("stale_worker_result_rejected", job_id=str(job_id))
-            return
-        if result and result.get("role") == AgentRole.REVIEWER.value:
-            completed = await self._reviewer_job_completer.execute(
-                ReviewerCompletionCommand(job_id, lease_token, result, datetime.now(UTC))
-            )
-            if not completed:
-                log.warning("stale_worker_result_rejected", job_id=str(job_id))
-            return
-        raise ValueError("Successful worker result is missing a supported role")
+                log.exception("scheduler_iteration_failed")
+            await self._wait(self.settings.scheduler_poll_seconds)

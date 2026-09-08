@@ -27,7 +27,10 @@ from app.db.models import (
     Team,
 )
 from app.infrastructure.persistence.usage_query import complete_cost, metered_runs
-from app.infrastructure.persistence.workflow_designer import SqlAlchemyWorkflowDesigner
+from app.teams.domain.automation import AutomationPolicy
+from app.teams.domain.profiles import default_profiles
+from app.teams.infrastructure.automation import TeamAutomationPolicy, policy_payload
+from app.teams.infrastructure.profiles import initialize_profiles
 
 
 class SqlAlchemyTeamManagementWorkflow:
@@ -62,7 +65,13 @@ class SqlAlchemyTeamManagementWorkflow:
         self._session.add(team)
         try:
             await self._session.flush()
-            await SqlAlchemyWorkflowDesigner(self._session, team.id).get()
+            await initialize_profiles(self._session, team.id, default_profiles())
+            self._session.add(
+                TeamAutomationPolicy(
+                    team_id=team.id, configuration=policy_payload(AutomationPolicy())
+                )
+            )
+            await self._session.commit()
         except IntegrityError as exc:
             await self._session.rollback()
             raise TeamConflict("A team with this name already exists") from exc

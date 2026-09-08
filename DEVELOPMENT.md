@@ -10,6 +10,10 @@ Dependencies are pinned in `backend/uv.lock` and `frontend/package-lock.json`.
 
 ## Setup
 
+Start with the [initial schema and entities guide](docs/initial-setup.md). This branch
+does not upgrade the MVP database: use a separately created empty database/volume.
+Never use `alembic stamp` to disguise an old schema as the new initial revision.
+
 ```bash
 cp .env.example .env
 make setup
@@ -21,9 +25,10 @@ The Compose database is intentionally not published to a host port because the
 containerized backend accesses it through Docker's internal network.
 
 Compose runs four services: PostgreSQL, the API, a dedicated scheduler/agent worker,
-and the frontend. The API applies migrations and does not execute agent jobs. The worker
-has the shared workspace volume, Git, process/memory limits, a read-only root filesystem,
-and graceful shutdown handling.
+and the frontend. The API applies the single initial Alembic revision and does not
+execute agent jobs. Base Compose keeps scheduling disabled. Native task execution uses
+the [V2 deployment overlay](docs/v2-implementation.md#deployment), configured images,
+isolated task binds, explicit budgets and a separately enabled scheduler.
 
 ```bash
 make dev-backend
@@ -153,7 +158,6 @@ from the repository root:
 ```bash
 cp deploy/.env.example deploy/.env
 docker compose --env-file deploy/.env -f deploy/compose.production.yaml up -d postgres backend
-make provision-worker-db
 docker compose --env-file deploy/.env -f deploy/compose.production.yaml up -d --build
 ```
 
@@ -162,11 +166,11 @@ secrets. The three values must each be at least 32 characters and different from
 another. It also rejects placeholder database URLs and requires an absolute HTTPS
 `GITHUB_APP_RETURN_URL`; `deploy/.env.example` is intentionally not runnable unchanged.
 
-The first command starts PostgreSQL and applies Alembic migrations through the backend.
-The second idempotently creates or rotates the disposable-job login and grants table
-reads plus only the task/repository updates and worker-run inserts used by job code.
-Run `make provision-worker-db` again after migrations that introduce tables workers
-must read. Existing installations can adopt the restricted login with the same command.
+The first command initializes an empty database through the backend; subsequent starts
+at `0001_initial` do not reseed or overwrite configuration. Base production Compose
+leaves the scheduler idle. Follow the V2 overlay guide to enable execution after setup.
+Native task containers receive no database credentials; the old disposable-job database
+login/provisioning command is not part of V2 setup.
 
 DNS for `DOMAIN` must point to the server, and inbound TCP ports 80/443 plus UDP 443
 must be allowed.

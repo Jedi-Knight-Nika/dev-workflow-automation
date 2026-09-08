@@ -21,7 +21,7 @@ services:
     restart: unless-stopped
 
   postgres:
-    image: pgvector/pgvector:pg16
+    image: postgres:16
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-engineering_worker}
       POSTGRES_USER: ${POSTGRES_USER:-engineering_worker}
@@ -51,16 +51,9 @@ services:
       SCHEDULER_ENABLED: "false"
       REPOSITORY_RAG_ENABLED: ${REPOSITORY_RAG_ENABLED:-false}
       SCHEDULER_POLL_SECONDS: ${SCHEDULER_POLL_SECONDS:-1.0}
-      WORKER_TIMEOUT_SECONDS: ${WORKER_TIMEOUT_SECONDS:-300}
+      SCHEDULER_MAX_CONCURRENT_JOBS: ${SCHEDULER_MAX_CONCURRENT_JOBS:-2}
       WORKER_LEASE_SECONDS: ${WORKER_LEASE_SECONDS:-330}
       WORKER_HEARTBEAT_SECONDS: ${WORKER_HEARTBEAT_SECONDS:-5}
-      MAX_EXECUTOR_JOBS_PER_TASK: ${MAX_EXECUTOR_JOBS_PER_TASK:-5}
-      MAX_THINKER_JOBS_PER_TASK: ${MAX_THINKER_JOBS_PER_TASK:-3}
-      MAX_SAME_FINDING_REPEATS: ${MAX_SAME_FINDING_REPEATS:-2}
-      MAX_CI_REPAIRS_PER_TASK: ${MAX_CI_REPAIRS_PER_TASK:-3}
-      MAX_EXTERNAL_REVIEW_REPAIRS_PER_TASK: ${MAX_EXTERNAL_REVIEW_REPAIRS_PER_TASK:-3}
-      MAX_JOB_ATTEMPTS: ${MAX_JOB_ATTEMPTS:-3}
-      JOB_RETRY_BASE_SECONDS: ${JOB_RETRY_BASE_SECONDS:-5}
     depends_on:
       postgres:
         condition: service_healthy
@@ -82,18 +75,10 @@ services:
     image: autonomous-engineering-worker-runtime:latest
     environment:
       <<: *backend-environment
-      SCHEDULER_ENABLED: "true"
+      # Native execution is opt-in through compose.v2.yaml after configuration.
+      SCHEDULER_ENABLED: "false"
       REPOSITORY_RAG_ENABLED: ${REPOSITORY_RAG_ENABLED:-false}
-      WORKER_TRANSPORT: docker
       DOCKER_SOCKET: /var/run/docker.sock
-      WORKER_CONTAINER_IMAGE: autonomous-engineering-worker-runtime:latest
-      WORKER_CONTAINER_NETWORK: autonomous-engineering-worker_default
-      WORKER_WORKSPACE_VOLUME: autonomous-engineering-worker_workspaces
-      WORKER_CONTAINER_MEMORY_MB: ${WORKER_CONTAINER_MEMORY_MB:-1536}
-      WORKER_CONTAINER_CPUS: ${WORKER_CONTAINER_CPUS:-1.5}
-      WORKER_DATABASE_URL: ${WORKER_DATABASE_URL:?Set a least-privilege worker database URL}
-      WORKER_EGRESS_PROXY: ${WORKER_EGRESS_PROXY:-}
-      WORKER_NO_PROXY: ${WORKER_NO_PROXY:-postgres}
     depends_on:
       backend:
         condition: service_healthy
@@ -157,23 +142,6 @@ services:
       - ${BACKUP_DIR:-./backups}:/backups:ro
       - ./restore.sh:/usr/local/bin/restore:ro
     entrypoint: ["/bin/sh", "/usr/local/bin/restore"]
-
-  provision-worker-db:
-    image: postgres:16-alpine
-    profiles: ["tools"]
-    environment:
-      PGHOST: postgres
-      PGDATABASE: ${POSTGRES_DB:-engineering_worker}
-      PGUSER: ${POSTGRES_USER:-engineering_worker}
-      PGPASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
-      WORKER_DB_USER: ${WORKER_DB_USER:?Set WORKER_DB_USER}
-      WORKER_DB_PASSWORD: ${WORKER_DB_PASSWORD:?Set WORKER_DB_PASSWORD}
-    depends_on:
-      postgres:
-        condition: service_healthy
-    volumes:
-      - ./provision-worker-db.sh:/usr/local/bin/provision-worker-db:ro
-    entrypoint: ["/bin/sh", "/usr/local/bin/provision-worker-db"]
 
   rotate-credentials:
     build:

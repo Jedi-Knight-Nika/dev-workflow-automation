@@ -10,25 +10,29 @@ The project is designed around durable jobs, isolated workers, auditable events,
 human control. AI models assist with reasoning and implementation; the application
 controls scheduling, permissions, retries, and lifecycle decisions.
 
-## V2 architecture migration
+## V2 implementation
 
 The [V2 technical specification](autonomous_engineering_worker_v2_technical_architecture.md)
 is the target architecture and takes precedence over legacy workflow descriptions.
 Read [implementation status and rollout](docs/v2-implementation.md) before enabling
-anything: fixed-phase scheduling, native-runner transport and isolated validation are
-implemented behind flags, but this is **not yet a
-production replacement for the legacy worker**. Existing tasks/history are preserved.
+anything: fixed-phase scheduling, native-runner transport, isolated validation and
+PR/review/merge orchestration are implemented. Real Docker/native-provider acceptance
+and the live-ticket benchmark are still outstanding.
 
 The obsolete graph/Role editors and web terminals have been removed. Teams now
-open the fixed lifecycle/profile page; old bookmarks redirect there. Task enrollment
-and V2 publication/merge still need completion before switching production execution.
+open the fixed lifecycle/profile page; old bookmarks redirect there. The scheduler
+only dispatches V2 phases; it no longer runs the legacy model/patch or indexing loops.
 
-Repository RAG is off by default. Set `REPOSITORY_RAG_ENABLED=true` explicitly to
-enable repository indexing and retrieval; normal coding uses current workspaces.
+Use the [fresh initial setup guide](docs/initial-setup.md). The old 59-revision MVP
+upgrade chain has been replaced with one frozen initial schema and safe default
+entities. Existing databases are refused, never automatically wiped or stamped.
+Repository RAG is unsupported by this baseline; coding reads the current checkout.
+Explicit [native session changes](docs/v2-implementation.md#explicit-session-changes)
+preserve task usage and require a separate resume.
 
 ## Local development
 
-The application is containerized and can be started with:
+With a new empty PostgreSQL volume, start the API/UI without paid execution:
 
 ```bash
 cp .env.example .env

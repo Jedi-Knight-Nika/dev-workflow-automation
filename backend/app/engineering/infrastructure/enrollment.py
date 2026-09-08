@@ -5,6 +5,7 @@ from pathlib import Path
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.agent_runtime.infrastructure.versions import HARNESS_VERSIONS
 from app.config import Settings
 from app.db.models import (
     DeveloperSession,
@@ -104,7 +105,7 @@ async def enroll(session: AsyncSession, task: Task, settings: Settings, *, actor
             task_id=task.id,
             profile_id=profile.id,
             harness=profile.harness,
-            harness_version="0.147.0" if profile.harness == "codex" else "0.2.152",
+            harness_version=HARNESS_VERSIONS[profile.harness],
             provider=profile.provider,
             model=profile.model,
             workspace_path=str(workspace),

@@ -38,7 +38,7 @@ async def test_repository_summary_and_archive_use_real_postgres(
             repositories = await workflow.list()
             repository = next(item for item in repositories if item.id == repository_id)
             assert repository.code_status == "NOT_PREPARED"
-            assert repository.knowledge_status == "NOT_PREPARED"
+            assert repository.knowledge_status == "DISABLED"
             assert repository.active_tasks_count == 0
 
             archived = await workflow.set_archived(repository_id, True)
@@ -46,6 +46,9 @@ async def test_repository_summary_and_archive_use_real_postgres(
             assert archived.code_status == "DISABLED"
             assert all(item.id != repository_id for item in await workflow.list())
             assert any(item.id == repository_id for item in await workflow.list(True))
+            restored = await workflow.set_archived(repository_id, False)
+            assert restored.index_status == "NOT_INDEXED"
+            assert restored.knowledge_status == "DISABLED"
     finally:
         async with postgres_session_factory() as session:
             await session.execute(delete(Repository).where(Repository.id == repository_id))

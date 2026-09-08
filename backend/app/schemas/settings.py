@@ -39,7 +39,7 @@ class AIDefaultSettings(BaseModel):
 class ExecutionDefaultSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
     default_execution_mode: Literal["CONSERVATIVE", "AUTONOMOUS", "CUSTOM"] = "AUTONOMOUS"
-    default_worker_runtime: Literal["LOCAL_PROCESS", "DOCKER", "WSL2"] = "LOCAL_PROCESS"
+    default_worker_runtime: Literal["LOCAL_PROCESS", "DOCKER", "WSL2"] = "DOCKER"
     max_concurrent_workers: int = Field(default=1, ge=1, le=32)
     default_job_timeout_seconds: int = Field(default=3600, ge=60, le=86_400)
 
@@ -54,8 +54,8 @@ class SafetyDefaultSettings(BaseModel):
 
 class KnowledgeSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    auto_index_repositories: bool = True
-    incremental_index_after_merge: bool = True
+    auto_index_repositories: bool = False
+    incremental_index_after_merge: bool = False
     index_source_code: bool = True
     index_tests: bool = True
     index_documentation: bool = True

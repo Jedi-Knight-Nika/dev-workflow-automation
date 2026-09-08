@@ -15,6 +15,7 @@
   import FindingList from '$lib/components/task-detail/FindingList.svelte';
   import TaskMemoryPanel from '$lib/components/task-detail/TaskMemoryPanel.svelte';
   import TaskMetricsPanel from '$lib/components/task-detail/TaskMetricsPanel.svelte';
+  import DeveloperSessionPanel from '$lib/components/task-detail/DeveloperSessionPanel.svelte';
   import GenerationProgress from '$lib/components/task-detail/GenerationProgress.svelte';
   import TaskConversation from '$lib/components/task-detail/TaskConversation.svelte';
   import { API_URL } from '$lib/api';
@@ -320,6 +321,7 @@
     </details>
     <GenerationProgress progress={generationProgress} connected={eventStreamConnected} />
     <TaskMetricsPanel {metrics} taskId={task.id} taskTitle={task.title} />
+    {#key task.id}<DeveloperSessionPanel taskId={task.id} onChanged={refresh} />{/key}
     <div class="min-w-0 xl:col-span-2">
       <TaskConversation
         {messages}

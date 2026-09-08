@@ -101,6 +101,52 @@ export const saveAutomation = (id: string, policy: AutomationPolicy) =>
 export const enrollTask = (id: string) =>
   api<{ status: string }>(`/v2/tasks/${id}/enroll`, { method: 'POST' });
 
+export type SessionChangeMode = 'keep_native' | 'handoff';
+export type DeveloperSessionView = {
+  session_id: string;
+  generation: number;
+  has_native_session: boolean;
+  harness: string;
+  provider: string;
+  model: string;
+  state: string;
+  task_status: string;
+  lifecycle_version: number;
+  profile_version: number;
+  target_harness: string;
+  target_provider: string;
+  target_model: string;
+  keep_native_available: boolean;
+  blocker: string | null;
+};
+export const getDeveloperSession = (id: string) =>
+  api<DeveloperSessionView | null>(`/v2/tasks/${id}/session`);
+
+export function sessionChangeInput(
+  session: DeveloperSessionView,
+  mode: SessionChangeMode,
+  reason: string
+) {
+  return {
+    session_id: session.session_id,
+    lifecycle_version: session.lifecycle_version,
+    profile_version: session.profile_version,
+    mode,
+    reason
+  };
+}
+
+export const changeDeveloperSession = (
+  id: string,
+  session: DeveloperSessionView,
+  mode: SessionChangeMode,
+  reason: string
+) =>
+  api<DeveloperSessionView>(`/v2/tasks/${id}/session/change`, {
+    method: 'POST',
+    body: JSON.stringify(sessionChangeInput(session, mode, reason))
+  });
+
 export type V2Statistics = {
   scope: string;
   days: number;

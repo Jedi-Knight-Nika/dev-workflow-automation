@@ -1,9 +1,8 @@
 from pathlib import Path
 from unittest.mock import AsyncMock
-from uuid import uuid4
 
 import pytest
-from sqlalchemy import delete, select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.db.models import ExternalStatusSync, ExternalTaskSnapshot, Integration, Task
@@ -24,24 +23,22 @@ async def test_merged_status_is_durable_idempotent_and_requires_explicit_target(
     provider: str,
 ) -> None:
     async with scenario(postgres_session_factory, tmp_path) as (_, _, task_id, _):
-        integration_id = uuid4()
+        integration_id = None
         method = AsyncMock()
         monkeypatch.setattr(TrelloClient, "update_card_list", method)
         monkeypatch.setattr(LinearClient, "update_issue_state", method)
         try:
             async with postgres_session_factory.begin() as session:
-                session.add(
-                    Integration(
-                        id=integration_id,
-                        provider_type="tasks",
-                        provider_name=provider,
-                        encrypted_credentials=cipher.encrypt(
-                            '{"api_key":"test-only","token":"test-only"}'
-                            if provider == "trello"
-                            else "test-only"
-                        ),
-                        configuration={},
-                    )
+                integration = await session.scalar(
+                    select(Integration).where(Integration.provider_name == provider)
+                )
+                assert integration and integration.encrypted_credentials is None
+                assert integration.configuration == {}
+                integration_id = integration.id
+                integration.encrypted_credentials = cipher.encrypt(
+                    '{"api_key":"test-only","token":"test-only"}'
+                    if provider == "trello"
+                    else "test-only"
                 )
                 session.add(
                     ExternalTaskSnapshot(
@@ -77,4 +74,8 @@ async def test_merged_status_is_durable_idempotent_and_requires_explicit_target(
                 assert snapshot and snapshot.state_id == "done-exact-id"
         finally:
             async with postgres_session_factory.begin() as session:
-                await session.execute(delete(Integration).where(Integration.id == integration_id))
+                await session.execute(
+                    update(Integration)
+                    .where(Integration.id == integration_id)
+                    .values(encrypted_credentials=None, configuration={})
+                )

@@ -56,17 +56,19 @@ class SqlAlchemyRepositoryManagementWorkflow:
     ]:
         if not repository_ids:
             return {}, {}, []
-        chunk_rows = (
-            await self._session.execute(
-                text(
-                    """SELECT repository_id, count(*) AS count
-                    FROM knowledge_chunks WHERE repository_id = ANY(:repository_ids)
-                    GROUP BY repository_id"""
-                ),
-                {"repository_ids": repository_ids},
-            )
-        ).mappings()
-        chunks = {row["repository_id"]: int(row["count"]) for row in chunk_rows}
+        chunks: dict[uuid.UUID, int] = {}
+        if self._repository_rag_enabled:
+            chunk_rows = (
+                await self._session.execute(
+                    text(
+                        """SELECT repository_id, count(*) AS count
+                        FROM knowledge_chunks WHERE repository_id = ANY(:repository_ids)
+                        GROUP BY repository_id"""
+                    ),
+                    {"repository_ids": repository_ids},
+                )
+            ).mappings()
+            chunks = {row["repository_id"]: int(row["count"]) for row in chunk_rows}
         task_rows = (
             await self._session.execute(
                 select(
@@ -132,7 +134,7 @@ class SqlAlchemyRepositoryManagementWorkflow:
             chunks.get(item.id, 0),
             item.archived_at,
             self._code_status(item),
-            self._knowledge_status(item),
+            self._knowledge_status(item) if self._repository_rag_enabled else "DISABLED",
             teams_count,
             active_tasks,
             active_workspaces,
@@ -214,7 +216,10 @@ class SqlAlchemyRepositoryManagementWorkflow:
             raise ManagedRepositoryConflict("Restore the repository before enabling it")
         item.enabled = enabled
         if enabled:
-            item.index_status, item.index_error = IndexStatus.QUEUED, None
+            item.index_status = (
+                IndexStatus.QUEUED if self._repository_rag_enabled else IndexStatus.NOT_INDEXED
+            )
+            item.index_error = None
         await self._session.commit()
         return (await self._views([item]))[0]
 
@@ -223,14 +228,17 @@ class SqlAlchemyRepositoryManagementWorkflow:
         item.archived_at = datetime.now(UTC) if archived else None
         item.enabled = not archived
         if not archived:
-            item.index_status, item.index_error = IndexStatus.QUEUED, None
+            item.index_status = (
+                IndexStatus.QUEUED if self._repository_rag_enabled else IndexStatus.NOT_INDEXED
+            )
+            item.index_error = None
         await self._session.commit()
         return (await self._views([item]))[0]
 
     async def queue_index(self, repository_id: uuid.UUID) -> RepositoryView:
         if not self._repository_rag_enabled:
             raise ManagedRepositoryConflict(
-                "Repository RAG is disabled. Enable REPOSITORY_RAG_ENABLED before requesting an index."
+                "Repository indexing is unavailable in V2. Coding uses the current task checkout."
             )
         item = await self._locked(repository_id)
         if not item.enabled or item.archived_at is not None:

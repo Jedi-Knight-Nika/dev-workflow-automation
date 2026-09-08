@@ -48,6 +48,7 @@ class SqlDevelopmentStore:
             or native is None
             or job.task_id != task_id
             or native.task_id != task_id
+            or native.state == "SUPERSEDED"
             or job.lease_token != self.lease_token
             or job.state != JobState.RUNNING
             or job.lease_expires_at is None

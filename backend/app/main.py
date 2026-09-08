@@ -38,7 +38,6 @@ from app.logging import configure_logging
 settings = get_settings()
 configure_logging(settings.log_level)
 log = structlog.get_logger()
-scheduler = create_scheduler(settings)
 
 
 async def notification_delivery_loop() -> None:
@@ -54,15 +53,20 @@ async def notification_delivery_loop() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings.workspace_root.mkdir(parents=True, exist_ok=True)
+    scheduler = create_scheduler(settings) if settings.scheduler_enabled else None
     notification_task = asyncio.create_task(notification_delivery_loop())
-    if settings.scheduler_enabled:
-        await scheduler.start()
-    yield
-    notification_task.cancel()
-    await asyncio.gather(notification_task, return_exceptions=True)
-    if settings.scheduler_enabled:
-        await scheduler.stop()
-    await integration_http_pool.aclose()
+    try:
+        if scheduler is not None:
+            await scheduler.start()
+        yield
+    finally:
+        notification_task.cancel()
+        await asyncio.gather(notification_task, return_exceptions=True)
+        try:
+            if scheduler is not None:
+                await scheduler.stop()
+        finally:
+            await integration_http_pool.aclose()
 
 
 app = FastAPI(title=settings.app_name, version="0.1.0", lifespan=lifespan)

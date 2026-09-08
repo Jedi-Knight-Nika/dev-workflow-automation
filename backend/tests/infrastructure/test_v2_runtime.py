@@ -138,6 +138,8 @@ async def test_codex_uses_pinned_sdk_resume_and_native_sandbox(tmp_path: Path) -
         harness = CodexHarness(HarnessSettings("gpt-5.6-terra", tmp_path, "contract"))
         await harness.resume("thread-1")
         options = client.thread_resume.await_args.kwargs
+        assert client.thread_resume.await_args.args == ("thread-1",)
+        assert options["model"] == "gpt-5.6-terra"
         assert options["sandbox"] == sdk.Sandbox.workspace_write
         assert options["approval_mode"] == sdk.ApprovalMode.deny_all
         assert options["config"]["features.multi_agent"] is False

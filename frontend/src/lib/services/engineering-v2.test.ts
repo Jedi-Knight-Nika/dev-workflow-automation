@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { profileInput, STAGES, type AgentProfile } from './engineering-v2';
+import {
+  profileInput,
+  sessionChangeInput,
+  STAGES,
+  type AgentProfile,
+  type DeveloperSessionView
+} from './engineering-v2';
 
 describe('fixed engineering contracts', () => {
   it('sends only editable fields, never system prompt or role overrides', () => {
@@ -31,5 +37,31 @@ describe('fixed engineering contracts', () => {
     expect(STAGES).toContain('DEVELOPING');
     expect(STAGES).not.toContain('EXECUTOR');
     expect(STAGES).not.toContain('TESTER');
+  });
+  it('sends versioned session intent, never model, budget, paths or native credentials', () => {
+    const session: DeveloperSessionView = {
+      session_id: 'record-id',
+      generation: 2,
+      has_native_session: true,
+      harness: 'codex',
+      provider: 'openai',
+      model: 'current',
+      state: 'READY',
+      task_status: 'PAUSED',
+      lifecycle_version: 5,
+      profile_version: 3,
+      target_harness: 'claude',
+      target_provider: 'anthropic',
+      target_model: 'target',
+      keep_native_available: false,
+      blocker: null
+    };
+    expect(sessionChangeInput(session, 'handoff', 'Operator request')).toEqual({
+      session_id: 'record-id',
+      lifecycle_version: 5,
+      profile_version: 3,
+      mode: 'handoff',
+      reason: 'Operator request'
+    });
   });
 });

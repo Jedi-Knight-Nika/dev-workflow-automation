@@ -9,6 +9,7 @@ from typing import Any
 from sqlalchemy import (
     JSON,
     BigInteger,
+    CheckConstraint,
     DateTime,
     Enum,
     ForeignKey,
@@ -18,6 +19,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -31,6 +33,9 @@ from ._base import utcnow
 
 class Team(Base):
     __tablename__ = "teams"
+    __table_args__ = (
+        CheckConstraint("max_concurrent_tasks BETWEEN 1 AND 32", name="ck_team_concurrency"),
+    )
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name: Mapped[str] = mapped_column(String(120), unique=True)
     description: Mapped[str] = mapped_column(Text, default="")
@@ -48,6 +53,13 @@ class TaskAssignment(Base):
     __tablename__ = "task_assignments"
     __table_args__ = (
         Index("ix_task_assignments_team_queue", "team_id", "status", "queue_position"),
+        Index(
+            "uq_task_assignments_active",
+            "task_id",
+            unique=True,
+            postgresql_where=text("status IN ('QUEUED', 'RUNNING')"),
+        ),
+        Index("ix_task_assignments_task", "task_id"),
     )
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     task_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tasks.id", ondelete="CASCADE"))

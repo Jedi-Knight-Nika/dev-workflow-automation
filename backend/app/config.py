@@ -25,7 +25,7 @@ class Settings(BaseSettings):
     app_secret_key: str = Field(default="development-only-secret-change-me", min_length=16)
     workspace_root: Path = Path("./workspaces")
     archived_workspace_retention_days: int = Field(default=30, ge=1, le=3650)
-    scheduler_enabled: bool = True
+    scheduler_enabled: bool = False
     scheduler_poll_seconds: float = 1.0
     scheduler_max_concurrent_jobs: int = Field(default=2, ge=1, le=32)
     worker_timeout_seconds: int = 300
@@ -65,14 +65,14 @@ class Settings(BaseSettings):
     github_app_return_url: str = "http://localhost:3000/repositories"
     linear_webhook_secret: str = ""
     application_base_url: str = "http://localhost:3000"
-    # Additive V2 rollout: never silently reroute existing engineering jobs.
-    new_fixed_lifecycle: bool = False
+    # Fresh installations use V2. Enabling paid execution remains an explicit step.
+    new_fixed_lifecycle: bool = True
     developer_harness_codex: bool = False
     developer_harness_claude: bool = False
     local_event_interpreter: bool = False
     repository_rag_enabled: bool = False
-    legacy_workflow_routing: bool = True
-    legacy_executor: bool = True
+    legacy_workflow_routing: bool = False
+    legacy_executor: bool = False
     harness_state_root: Path = Path("./harness-state")
     harness_control_root: Path = Path("./harness-control")
     developer_container_image: str = "engineering-developer:local"
@@ -93,6 +93,20 @@ class Settings(BaseSettings):
     slack_team_routes: dict[str, dict[str, str]] = Field(default_factory=dict)
     trello_webhook_secret: str = ""
     trello_webhook_callback_url: str = ""
+
+    @model_validator(mode="after")
+    def validate_fixed_runtime(self) -> "Settings":
+        if self.legacy_executor or self.legacy_workflow_routing:
+            raise ValueError(
+                "The legacy executor and workflow dispatcher are retired; disable their flags"
+            )
+        if self.new_fixed_lifecycle and self.repository_rag_enabled:
+            raise ValueError(
+                "Repository RAG is not supported by the V2 initial schema; use current workspaces"
+            )
+        if self.scheduler_enabled and not self.new_fixed_lifecycle:
+            raise ValueError("The scheduler requires NEW_FIXED_LIFECYCLE=true")
+        return self
 
     @model_validator(mode="after")
     def validate_production_secrets(self) -> "Settings":

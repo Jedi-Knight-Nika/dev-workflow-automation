@@ -8,6 +8,7 @@ import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.agent_runtime.domain.session_changes import handoff_request
 from app.agent_runtime.infrastructure.accounting import SqlDevelopmentStore
 from app.agent_runtime.infrastructure.container import RunnerMounts, validation_container_spec
 from app.agent_runtime.infrastructure.container_job import run_container_job
@@ -191,6 +192,14 @@ class SqlPhaseExecutor:
                     raise PhaseBlocked(WaitReason.BUDGET_EXHAUSTED, "Task USD budget is exhausted")
                 store.reservation_usd = remaining
                 request = f"{task.title}\n\n{task.description}".strip()
+                if not native.native_session_id and native.checkpoint.get("handoff"):
+                    handoff = native.checkpoint["handoff"]
+                    request = handoff_request(
+                        request,
+                        str(handoff.get("summary") or ""),
+                        str(handoff.get("note") or ""),
+                        str(native.checkpoint.get("next_feedback") or ""),
+                    )
                 feedback = (
                     str(native.checkpoint.get("next_feedback") or "").strip()
                     if native.native_session_id

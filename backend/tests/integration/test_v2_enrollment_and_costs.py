@@ -7,7 +7,7 @@ from uuid import uuid4
 
 import httpx
 import pytest
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.agent_runtime.application.harness import TurnReceipt
@@ -55,17 +55,15 @@ async def test_cloud_fallback_is_bounded_and_metered_without_real_provider_calls
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async with scenario(postgres_session_factory, tmp_path) as (_, _, task_id, _):
-        integration_id, price_id = uuid4(), uuid4()
+        integration_id, price_id = None, uuid4()
         try:
             async with postgres_session_factory.begin() as session:
-                session.add(
-                    Integration(
-                        id=integration_id,
-                        provider_type="ai",
-                        provider_name="openai",
-                        encrypted_credentials=cipher.encrypt("test-only"),
-                    )
+                integration = await session.scalar(
+                    select(Integration).where(Integration.provider_name == "openai")
                 )
+                assert integration and integration.encrypted_credentials is None
+                integration_id = integration.id
+                integration.encrypted_credentials = cipher.encrypt("test-only")
                 session.add(
                     PricingCatalog(
                         id=price_id,
@@ -133,7 +131,11 @@ async def test_cloud_fallback_is_bounded_and_metered_without_real_provider_calls
             async with postgres_session_factory.begin() as session:
                 await session.execute(delete(AIRun).where(AIRun.task_id == task_id))
                 await session.execute(delete(PricingCatalog).where(PricingCatalog.id == price_id))
-                await session.execute(delete(Integration).where(Integration.id == integration_id))
+                await session.execute(
+                    update(Integration)
+                    .where(Integration.id == integration_id)
+                    .values(encrypted_credentials=None)
+                )
 
 
 async def test_v2_ui_note_does_not_spawn_legacy_jobs_and_feedback_is_explicit(

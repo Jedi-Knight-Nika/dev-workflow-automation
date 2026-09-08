@@ -50,6 +50,7 @@ class WorkflowRevision(Base):
     __tablename__ = "workflow_revisions"
     __table_args__ = (
         UniqueConstraint("workflow_id", "version", name="uq_workflow_revision_version"),
+        Index("ix_workflow_revisions_workflow", "workflow_id"),
     )
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     workflow_id: Mapped[uuid.UUID] = mapped_column(
@@ -62,6 +63,10 @@ class WorkflowRevision(Base):
 
 class WorkflowNode(Base):
     __tablename__ = "workflow_nodes"
+    __table_args__ = (
+        Index("ix_workflow_nodes_workflow", "workflow_id"),
+        Index("ix_workflow_nodes_agent", "agent_id"),
+    )
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
     workflow_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("workflow_definitions.id", ondelete="CASCADE")
@@ -115,6 +120,8 @@ class WorkflowEdge(Base):
             "outcome",
             name="uq_workflow_edge_route",
         ),
+        Index("ix_workflow_edges_source", "source_node_id"),
+        Index("ix_workflow_edges_target", "target_node_id"),
     )
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
     workflow_id: Mapped[uuid.UUID] = mapped_column(
@@ -137,6 +144,11 @@ class WorkflowEdge(Base):
 
 class WorkflowTransition(Base):
     __tablename__ = "workflow_transitions"
+    __table_args__ = (
+        Index("ix_workflow_transitions_task_created", "task_id", "created_at"),
+        Index("ix_workflow_transitions_job", "job_id"),
+        Index("ix_workflow_transitions_workflow", "workflow_id"),
+    )
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     task_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tasks.id", ondelete="CASCADE"))
     job_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("jobs.id", ondelete="CASCADE"))

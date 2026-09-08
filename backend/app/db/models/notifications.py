@@ -31,7 +31,13 @@ from ._base import utcnow
 
 class Incident(Base):
     __tablename__ = "incidents"
-    __table_args__ = (Index("ix_incidents_status_severity", "status", "severity"),)
+    __table_args__ = (
+        Index("ix_incidents_status_severity", "status", "severity"),
+        Index("ix_incidents_team", "team_id"),
+        Index("ix_incidents_task", "task_id"),
+        Index("ix_incidents_job", "job_id"),
+        Index("ix_incidents_integration", "integration_id"),
+    )
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     fingerprint: Mapped[str] = mapped_column(String(255), unique=True)
     type: Mapped[str] = mapped_column(String(100))
@@ -61,7 +67,13 @@ class Incident(Base):
 
 class Notification(Base):
     __tablename__ = "notifications"
-    __table_args__ = (Index("ix_notifications_user_status", "user_id", "status"),)
+    __table_args__ = (
+        Index("ix_notifications_user_status", "user_id", "status"),
+        Index("ix_notifications_incident", "incident_id"),
+        Index("ix_notifications_team", "team_id"),
+        Index("ix_notifications_task", "task_id"),
+        Index("ix_notifications_job", "job_id"),
+    )
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id: Mapped[str] = mapped_column(String(255), default="local-user")
     incident_id: Mapped[uuid.UUID | None] = mapped_column(
@@ -86,6 +98,10 @@ class Notification(Base):
 
 class NotificationDelivery(Base):
     __tablename__ = "notification_deliveries"
+    __table_args__ = (
+        Index("ix_notification_deliveries_notification", "notification_id"),
+        Index("ix_notification_deliveries_retry_due", "channel", "state", "next_attempt_at"),
+    )
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     notification_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("notifications.id", ondelete="CASCADE")

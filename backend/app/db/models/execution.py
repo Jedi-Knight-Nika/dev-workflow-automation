@@ -48,6 +48,12 @@ class ExecutionPolicy(Base):
 
 class ApprovalRequest(Base):
     __tablename__ = "approval_requests"
+    __table_args__ = (
+        Index("ix_approval_pending", "state", "expires_at"),
+        Index("ix_approvals_team_state", "team_id", "state"),
+        Index("ix_approvals_task", "task_id"),
+        Index("ix_approvals_job", "job_id"),
+    )
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     team_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("teams.id", ondelete="CASCADE"))
     task_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tasks.id", ondelete="CASCADE"))
@@ -70,6 +76,11 @@ class ApprovalRequest(Base):
 
 class ToolExecutionEvent(Base):
     __tablename__ = "tool_execution_events"
+    __table_args__ = (
+        Index("ix_tool_events_task_created", "task_id", "created_at"),
+        Index("ix_tool_events_job", "job_id"),
+        Index("ix_tool_events_team", "team_id"),
+    )
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     team_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("teams.id", ondelete="CASCADE"))
     task_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tasks.id", ondelete="CASCADE"))
@@ -93,6 +104,11 @@ class ToolExecutionEvent(Base):
 
 class WorkerRun(Base):
     __tablename__ = "worker_runs"
+    __table_args__ = (
+        Index("ix_worker_runs_job", "job_id"),
+        Index("ix_worker_runs_agent", "agent_id"),
+        Index("ix_worker_runs_role", "role_id"),
+    )
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     job_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("jobs.id", ondelete="CASCADE"))
     role: Mapped[JobRole] = mapped_column(Enum(JobRole))

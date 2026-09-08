@@ -1,13 +1,9 @@
-import importlib.util
 import uuid
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
-from pathlib import Path
 
 import pytest
 import pytest_asyncio
-from alembic.migration import MigrationContext
-from alembic.operations import Operations
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -324,75 +320,3 @@ async def test_multi_repo_merges_require_each_scope_and_fresh_approval(
         assert context and len(context.evidence) == 1
         await workflow.complete(context, MergeOutcome(True, "merged-two", "Merged"))
         assert task.state == TaskState.MERGED and task.completed_at is not None
-
-
-async def test_combined_deliverer_migration_round_trip(
-    isolated_sessions: async_sessionmaker[AsyncSession],
-) -> None:
-    task_id, job_id, _lease, old_delivery = await seed_consultation(isolated_sessions)
-    async with isolated_sessions() as session:
-        job = await session.get(Job, job_id)
-        assert job
-        incoming = await session.get(WorkflowNode, job.workflow_node_id)
-        old = await session.get(WorkflowNode, old_delivery)
-        assert incoming and old
-        incoming.role, old.role = "INTAKE", "DELIVERER"
-        job.role = JobRole.INTAKE
-        role = await session.get(Role, (await session.get(AIAgent, incoming.agent_id)).role_id)
-        assert role
-        role.name, role.built_in = "Intake", True
-        role.runtime_profile = {"reasoning_min": "LOW"}
-        session.add(Role(name="Deliverer", category="DELIVERY", built_in=True))
-        controller_id = uuid.uuid4()
-        session.add(
-            WorkflowNode(
-                id=controller_id,
-                workflow_id=incoming.workflow_id,
-                role="ORCHESTRATOR",
-                label="Dispatcher",
-                position_x=0,
-                position_y=0,
-            )
-        )
-        await session.flush()
-        edge = WorkflowEdge(
-            id=uuid.uuid4(),
-            workflow_id=incoming.workflow_id,
-            source_node_id=old.id,
-            target_node_id=controller_id,
-            outcome="always",
-        )
-        session.add(edge)
-        workflow_id, kept_id, edge_id = incoming.workflow_id, incoming.id, edge.id
-        await session.commit()
-
-    spec = importlib.util.spec_from_file_location(
-        "combined_migration", Path("migrations/versions/0055_combined_deliverer.py")
-    )
-    assert spec and spec.loader
-    migration = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(migration)
-    async with isolated_sessions() as session:
-        connection = await session.connection()
-
-        def run(sync, direction):
-            migration.op = Operations(MigrationContext.configure(sync))
-            getattr(migration, direction)()
-
-        await connection.run_sync(run, "upgrade")
-        await session.commit()
-    async with isolated_sessions() as session:
-        assert (await session.get(WorkflowNode, kept_id)).role == "DELIVERER"
-        assert await session.get(WorkflowNode, old_delivery) is None
-        assert (await session.get(WorkflowEdge, edge_id)).source_node_id == kept_id
-        assert (await session.get(WorkflowDefinition, workflow_id)).version == 2
-        assert (await session.get(Job, job_id)).role == JobRole.DELIVERER
-    async with isolated_sessions() as session:
-        connection = await session.connection()
-        await connection.run_sync(run, "downgrade")
-        await connection.run_sync(run, "upgrade")
-        await session.commit()
-    async with isolated_sessions() as session:
-        assert (await session.get(WorkflowNode, kept_id)).role == "DELIVERER"
-        assert (await session.get(WorkflowDefinition, workflow_id)).version == 2
-        assert (await session.get(Task, task_id)).workflow_version == 2

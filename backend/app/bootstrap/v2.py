@@ -3,6 +3,8 @@ from typing import Annotated
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.agent_runtime.application.sessions import SessionAdministration
+from app.agent_runtime.infrastructure.sessions import SqlSessionAdministration
 from app.config import get_settings
 from app.db.session import get_session
 from app.teams.application.automation import AutomationAdmin
@@ -17,3 +19,9 @@ def team_profiles(session: Annotated[AsyncSession, Depends(get_session)]) -> Tea
 
 def automation_admin(session: Annotated[AsyncSession, Depends(get_session)]) -> AutomationAdmin:
     return SqlAutomationAdmin(session, get_settings())
+
+
+def session_administration(
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> SessionAdministration:
+    return SqlSessionAdministration(session)

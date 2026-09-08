@@ -1,191 +1,133 @@
 import asyncio
-import uuid
-from types import SimpleNamespace
 from typing import Any, cast
+from unittest.mock import AsyncMock
+from uuid import uuid4
 
 import pytest
 
-from app.application.ports.job_dispatch import ClaimedJob
-from app.domain.operational_states import JobRole
-from app.infrastructure.scheduler import Scheduler, parse_worker_result
-from app.schemas import WorkerResult
+from app.config import Settings
+from app.engineering.application.jobs import PhaseLease
+from app.infrastructure.scheduler import Scheduler
 
 
-def test_worker_result_parser_uses_final_json_line_after_process_logs() -> None:
-    job_id = uuid.uuid4()
-    task_id = uuid.uuid4()
-    worker_result = WorkerResult(
-        job_id=job_id,
-        task_id=task_id,
-        role=JobRole.DELIVERER,
-        result="DELIVERER_COMPLETE",
-        summary="ready",
+def controller() -> Scheduler:
+    return Scheduler(
+        settings=Settings(
+            _env_file=None,
+            scheduler_poll_seconds=0.01,
+            scheduler_max_concurrent_jobs=2,
+            worker_heartbeat_seconds=0.01,
+        ),
+        worker_id="test-controller",
+        jobs=cast(Any, AsyncMock(claim=AsyncMock(return_value=None))),
+        worker=cast(Any, AsyncMock()),
+        deliveries=cast(Any, AsyncMock()),
+        presence=cast(Any, AsyncMock()),
+        reconciler=cast(Any, AsyncMock()),
     )
-    stdout = b"HTTP Request: POST https://api.openai.com/v1/responses 200 OK\n"
-    stdout += worker_result.model_dump_json().encode()
-
-    result = parse_worker_result(stdout)
-
-    assert result.job_id == job_id
-    assert result.task_id == task_id
 
 
-class PreparedDispatch:
-    async def prepare(self, _job: ClaimedJob) -> bool:
-        return True
-
-
-class InvalidConfigurationDispatch:
-    async def prepare(self, _job: ClaimedJob) -> bool:
-        raise RuntimeError("MODEL_POLICY_ERROR: Agent model is not configured")
-
-
-class ForbiddenRunner:
-    def __init__(self) -> None:
-        self.called = False
-
-    async def __call__(self, _job_id: uuid.UUID) -> None:
-        self.called = True
-        raise AssertionError("A durable result must not launch another worker")
-
-
-class RecordingCompleter:
-    def __init__(self) -> None:
-        self.commands: list[object] = []
-
-    async def execute(self, command: object) -> bool:
-        self.commands.append(command)
-        return True
+def lease() -> PhaseLease:
+    return PhaseLease(uuid4(), uuid4(), uuid4(), "DEVELOPER_TURN", 1)
 
 
 @pytest.mark.asyncio
-async def test_reclaimed_job_resumes_durable_result_without_worker_execution() -> None:
-    job_id = uuid.uuid4()
-    task_id = uuid.uuid4()
-    lease_token = uuid.uuid4()
-    runner = ForbiddenRunner()
-    executor_completer = RecordingCompleter()
-    unused = cast(Any, object())
-    scheduler = Scheduler(
-        unused,
-        "test-scheduler",
-        cast(Any, PreparedDispatch()),
-        cast(Any, runner),
-        unused,
-        unused,
-        unused,
-        cast(Any, executor_completer),
-        unused,
-        unused,
-        unused,
-        unused,
-        unused,
-        unused,
-        unused,
-    )
-    claimed = ClaimedJob(
-        job_id,
-        lease_token,
-        {
-            "protocol_version": 1,
-            "job_id": str(job_id),
-            "task_id": str(task_id),
-            "role": JobRole.EXECUTOR.value,
-            "result": "IMPLEMENTED",
-            "summary": "Already completed",
-            "data": {"changed_files": ["src/example.py"]},
-        },
-    )
-
-    await scheduler._execute(claimed)
-
-    assert not runner.called
-    assert len(executor_completer.commands) == 1
+async def test_start_recovers_before_claiming_and_does_not_start_a_legacy_worker() -> None:
+    scheduler = controller()
+    order: list[str] = []
+    scheduler.jobs.recover.side_effect = lambda: order.append("recover")
+    scheduler.jobs.claim.side_effect = lambda: order.append("claim")
+    await scheduler.start()
+    try:
+        await asyncio.sleep(0.03)
+        assert order[0] == "recover"
+        assert "claim" in order
+        assert not hasattr(scheduler, "_worker_runner")
+        assert not hasattr(scheduler, "_index_task")
+        with pytest.raises(RuntimeError, match="already started"):
+            await scheduler.start()
+    finally:
+        await scheduler.stop()
+    scheduler.presence.stopped.assert_awaited_once()
 
 
 @pytest.mark.asyncio
-async def test_scheduler_runs_jobs_up_to_configured_bound() -> None:
-    jobs = [ClaimedJob(uuid.uuid4(), uuid.uuid4()), ClaimedJob(uuid.uuid4(), uuid.uuid4())]
-
-    class Dispatch:
-        async def claim(self) -> ClaimedJob | None:
-            return jobs.pop(0) if jobs else None
-
-    class NoOp:
-        async def execute(self) -> None:
-            return None
-
-    settings = SimpleNamespace(
-        scheduler_max_concurrent_jobs=2, scheduler_poll_seconds=0.01, legacy_workflow_routing=True
-    )
-    unused = cast(Any, object())
-    scheduler = Scheduler(
-        cast(Any, settings),
-        "test-scheduler",
-        cast(Any, Dispatch()),
-        unused,
-        unused,
-        unused,
-        unused,
-        unused,
-        unused,
-        unused,
-        cast(Any, NoOp()),
-        unused,
-        unused,
-        unused,
-        cast(Any, NoOp()),
-    )
-    release = asyncio.Event()
-    both_started = asyncio.Event()
+async def test_scheduler_obeys_concurrency_and_cancels_active_turns_on_stop() -> None:
+    scheduler = controller()
+    scheduler.jobs.claim.side_effect = [lease(), lease(), lease(), None]
+    started = asyncio.Event()
+    cancelled: list[PhaseLease] = []
     active = 0
-    peak = 0
 
-    async def execute(_job: ClaimedJob) -> None:
-        nonlocal active, peak
+    async def execute(item: PhaseLease) -> None:
+        nonlocal active
         active += 1
-        peak = max(peak, active)
         if active == 2:
-            both_started.set()
-        await release.wait()
-        active -= 1
+            started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cancelled.append(item)
+            active -= 1
 
-    scheduler._execute = execute  # type: ignore[method-assign]
-    run_task = asyncio.create_task(scheduler._run())
-    await asyncio.wait_for(both_started.wait(), timeout=1)
-    scheduler._stop.set()
-    release.set()
-    await asyncio.wait_for(run_task, timeout=1)
-
-    assert peak == 2
+    scheduler.worker.execute.side_effect = execute
+    await scheduler.start()
+    try:
+        await asyncio.wait_for(started.wait(), timeout=1)
+        await asyncio.sleep(0.03)
+        assert active == 2
+        assert scheduler.jobs.claim.await_count == 2
+    finally:
+        await asyncio.wait_for(scheduler.stop(), timeout=1)
+    assert active == 0
+    assert len(cancelled) == 2
+    assert not scheduler._job_tasks
 
 
 @pytest.mark.asyncio
-async def test_preflight_configuration_error_is_preserved_for_resilience_routing() -> None:
-    job = ClaimedJob(uuid.uuid4(), uuid.uuid4())
-    failed_completer = RecordingCompleter()
-    runner = ForbiddenRunner()
-    unused = cast(Any, object())
-    scheduler = Scheduler(
-        unused,
-        "test-scheduler",
-        cast(Any, InvalidConfigurationDispatch()),
-        cast(Any, runner),
-        cast(Any, failed_completer),
-        unused,
-        unused,
-        unused,
-        unused,
-        unused,
-        unused,
-        unused,
-        unused,
-        unused,
-        unused,
-    )
+async def test_stop_interrupts_hung_external_polling() -> None:
+    scheduler = controller()
+    started = asyncio.Event()
 
-    await scheduler._execute_safely(job)
+    async def hanging_poll() -> None:
+        started.set()
+        await asyncio.Event().wait()
 
-    assert not runner.called
-    command = cast(Any, failed_completer.commands[0])
-    assert command.failure == "MODEL_POLICY_ERROR: Agent model is not configured"
+    scheduler.reconciler.execute.side_effect = hanging_poll
+    await scheduler.start()
+    await asyncio.wait_for(started.wait(), timeout=1)
+    await asyncio.wait_for(scheduler.stop(), timeout=1)
+    scheduler.jobs.claim.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_failed_start_does_not_mark_worker_online_or_launch_tasks() -> None:
+    scheduler = controller()
+    scheduler.jobs.recover.side_effect = RuntimeError("storage unavailable")
+    with pytest.raises(RuntimeError, match="storage unavailable"):
+        await scheduler.start()
+    assert scheduler._loop_task is None
+    scheduler.presence.online.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_disabled_process_never_constructs_scheduler(monkeypatch, tmp_path) -> None:
+    from app import scheduler_runner
+
+    settings = Settings(_env_file=None, scheduler_enabled=False, workspace_root=tmp_path / "unused")
+    monkeypatch.setattr(scheduler_runner, "get_settings", lambda: settings)
+
+    def forbidden(_settings):
+        pytest.fail("Disabled worker constructed a scheduler")
+
+    monkeypatch.setattr(scheduler_runner, "create_scheduler", forbidden)
+    # No real process signals in a unit test; the event stays asleep until cancellation.
+    loop = asyncio.get_running_loop()
+    monkeypatch.setattr(loop, "add_signal_handler", lambda *_args: None)
+    running = asyncio.create_task(scheduler_runner.run())
+    await asyncio.sleep(0.01)
+    assert not running.done()
+    assert not settings.workspace_root.exists()
+    running.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await running

@@ -6,7 +6,14 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, HttpUrl
 
-from app.bootstrap.v2 import automation_admin, team_profiles
+from app.agent_runtime.application.sessions import (
+    ChangeSession,
+    SessionAdministration,
+    SessionConflict,
+    SessionView,
+)
+from app.agent_runtime.domain.session_changes import SessionChangeMode
+from app.bootstrap.v2 import automation_admin, session_administration, team_profiles
 from app.config import get_settings
 from app.teams.application.automation import AutomationAdmin
 from app.teams.application.profiles import (
@@ -19,6 +26,43 @@ from app.teams.domain.automation import AutomationPolicy
 from app.teams.domain.profiles import AgentProfile, RoleKind
 
 router = APIRouter(prefix="/v2", tags=["engineering-v2"])
+
+
+class SessionChangeWrite(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    session_id: UUID
+    lifecycle_version: int = Field(ge=1)
+    profile_version: int = Field(ge=1)
+    mode: SessionChangeMode
+    reason: str = Field(min_length=3, max_length=500)
+
+
+@router.get("/tasks/{task_id}/session")
+async def developer_session(
+    task_id: UUID, store: SessionAdministration = Depends(session_administration)
+) -> SessionView | None:
+    try:
+        return await store.read(task_id)
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except SessionConflict as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@router.post("/tasks/{task_id}/session/change")
+async def change_developer_session(
+    task_id: UUID,
+    body: SessionChangeWrite,
+    store: SessionAdministration = Depends(session_administration),
+) -> SessionView:
+    try:
+        return await store.change(task_id, ChangeSession(**body.model_dump()))
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except SessionConflict as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
 
 
 class PriceWrite(BaseModel):

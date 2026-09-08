@@ -19,6 +19,7 @@ class TaskMessage(Base):
     __table_args__ = (
         Index("ix_task_messages_task_id_id", "task_id", "id"),
         Index("ix_task_messages_agent_id", "agent_id"),
+        Index("ix_task_messages_reply_to_id", "reply_to_id"),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)

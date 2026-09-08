@@ -53,7 +53,10 @@ class AgentKnowledgeSource(Base):
 
 class AgentKnowledgeChunk(Base):
     __tablename__ = "agent_knowledge_chunks"
-    __table_args__ = (Index("ix_agent_knowledge_chunks_role", "role"),)
+    __table_args__ = (
+        Index("ix_agent_knowledge_chunks_role", "role"),
+        Index("ix_agent_knowledge_chunks_source", "source_id"),
+    )
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     source_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("agent_knowledge_sources.id", ondelete="CASCADE")
@@ -94,7 +97,10 @@ class Role(Base):
 
 class AIAgent(Base):
     __tablename__ = "ai_agents"
-    __table_args__ = (UniqueConstraint("team_id", "name", name="uq_ai_agent_team_name"),)
+    __table_args__ = (
+        UniqueConstraint("team_id", "name", name="uq_ai_agent_team_name"),
+        Index("ix_ai_agents_role", "role_id"),
+    )
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     team_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("teams.id", ondelete="CASCADE"))
     role_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("roles.id", ondelete="RESTRICT"))

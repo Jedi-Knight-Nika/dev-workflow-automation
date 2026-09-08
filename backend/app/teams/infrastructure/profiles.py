@@ -10,6 +10,24 @@ from app.teams.application.profiles import ProfileConflict, ProfileView
 from app.teams.domain.profiles import AgentProfile, RoleKind
 
 
+async def initialize_profiles(
+    session: AsyncSession, team_id: UUID, profiles: tuple[AgentProfile, ...]
+) -> None:
+    """Seed missing fixed roles in the caller's Team-locked transaction.
+
+    Never overwrite a configured profile, and never commit half of Team setup.
+    """
+    existing = set(
+        await session.scalars(
+            select(TeamAgentProfile.role_kind).where(TeamAgentProfile.team_id == team_id)
+        )
+    )
+    for profile in profiles:
+        if profile.role_kind not in existing:
+            session.add(TeamAgentProfile(team_id=team_id, **asdict(profile)))
+    await session.flush()
+
+
 def view(row: TeamAgentProfile) -> ProfileView:
     fields = {key: getattr(row, key) for key in AgentProfile.__dataclass_fields__}
     fields["role_kind"] = RoleKind(row.role_kind)
@@ -41,11 +59,7 @@ class SqlTeamProfiles:
         self, team_id: UUID, profiles: tuple[AgentProfile, ...]
     ) -> list[ProfileView]:
         await self._team(team_id, lock=True)
-        existing = {row.profile.role_kind for row in await self.list_profiles(team_id)}
-        for profile in profiles:
-            if profile.role_kind not in existing:
-                self.session.add(TeamAgentProfile(team_id=team_id, **asdict(profile)))
-        await self.session.flush()
+        await initialize_profiles(self.session, team_id, profiles)
         result = await self.list_profiles(team_id)
         await self.session.commit()
         return result

@@ -31,6 +31,9 @@ from ._base import utcnow
 
 class Integration(Base):
     __tablename__ = "integrations"
+    __table_args__ = (
+        Index("ix_integrations_sync_due", "provider_name", "sync_status", "last_synced_at"),
+    )
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     provider_type: Mapped[str] = mapped_column(String(50))
     provider_name: Mapped[str] = mapped_column(String(50), unique=True)
@@ -84,6 +87,7 @@ class WebhookDelivery(Base):
     __tablename__ = "webhook_deliveries"
     __table_args__ = (
         UniqueConstraint("provider", "delivery_id", name="uq_webhook_provider_delivery"),
+        Index("ix_webhook_deliveries_pending", "provider", "status", "created_at"),
     )
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     provider: Mapped[str] = mapped_column(String(50))

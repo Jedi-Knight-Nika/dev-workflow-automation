@@ -46,18 +46,22 @@ distinction explicit. Nothing in this change resets historical usage or starts w
 - [x] Free UI notes/status and explicit execution commands without a legacy AI responder.
 - [x] Orphan inspection/stop for provably owned expired runners, retaining stopped-container evidence.
 - [x] Production V2 overlay, same-path binds, private Ollama and destination-restricted provider gateway.
-- [x] PostgreSQL tests of new migrations, reservations, lifecycle, feedback dedup and merge orchestration.
+- [x] One frozen initial schema and safe default entities; no incremental MVP upgrade chain.
+- [x] V2-only scheduler composition; no legacy model/patch dispatch or repository indexing loop.
+- [x] Explicit Codex model change and cross-harness handoff, preserving usage and stopped-task state.
+- [x] PostgreSQL tests of fresh setup, reservations, lifecycle, session changes and merge orchestration.
 - [ ] Real Docker isolation, dependency-image, cancellation and SDK/session/compaction smoke tests.
-- [ ] Production-shaped database upgrade/backup/restore test including the legacy pgvector schema.
+- [ ] Deployment-host backup/restore and native-state recovery smoke test.
 - [ ] Representative authorized 10–20-ticket functional, cost and recovery benchmark.
-- [ ] Optional paid Thinker/Reviewer dispatch and explicit cross-model/cross-harness session migration.
-- [ ] Legacy agent-configuration conversion with a reviewed ambiguity report.
-- [ ] Legacy runtime/table removal only after benchmark and retention approval.
+- [ ] Optional paid Thinker/Reviewer dispatch.
+- [ ] Remaining legacy API/read-model/runtime/table removal and related UI cleanup.
+- [ ] Wire backup/restore tooling to the V2 same-path checkout/native/control directories.
 
-The last two feature/migration items are not secretly implemented by the fixed profile
-editor. Those profiles can be configured, but the default executable lane is the native
-Developer plus interpretation and deterministic validation/delivery. A model/profile
-mismatch for an existing native session blocks instead of silently replacing the session.
+Optional paid roles are not secretly implemented by the fixed profile editor. The default
+executable lane is the native Developer plus interpretation and deterministic validation/delivery.
+A model/profile mismatch blocks until the operator explicitly applies a session change.
+Per the fresh-start decision, conversion of MVP agent configuration is no longer a requirement.
+The remaining shared/legacy tables are documented in [initial setup](initial-setup.md).
 
 ## Boundaries and ownership
 
@@ -121,6 +125,19 @@ uses the pinned notification interface to collect the actual metered turn.
 
 Concurrent requirement updates cannot be erased by a late old-turn receipt.
 Unknown native state/usage never starts a replacement session automatically.
+
+### Explicit session changes
+
+The ticket's **Native Developer session** panel supports a versioned, audited operator
+change while the task is suspended. Configure the target Team Developer profile first.
+Codex/OpenAI model changes may retain the same native thread; other combinations use a
+new generation with a bounded advisory handoff on the same checkout. No old transcript,
+native ID or cumulative usage baseline is imported into a different session.
+
+Historical runs remain billable and count toward task/Team limits. Active workers and
+unreconciled costs block a change. Neither operation calls an SDK, edits source files,
+resumes the task or changes its stage; resume remains a separate operator action.
+See [the exact procedure and constraints](initial-setup.md#explicit-model-and-harness-changes).
 
 ## Validation and GitHub delivery
 
@@ -258,6 +275,8 @@ Under `/api/v1`:
 - `GET /v2/teams/{id}/activity`
 - `GET/PUT /v2/teams/{id}/automation`
 - `POST /v2/tasks/{id}/enroll`
+- `GET /v2/tasks/{id}/session`
+- `POST /v2/tasks/{id}/session/change` with current session/task/profile versions
 - `POST /v2/tasks/{id}/retry-status-sync`
 - `GET /v2/statistics?team_id=<optional-id>&days=30`
 - `GET/POST /v2/pricing` (new immutable version, exact prices, effective date and source URL)
@@ -290,12 +309,13 @@ docker compose -f deploy/compose.production.yaml -f deploy/compose.v2.yaml --pro
 
 Configure required production secrets privately. Set an absolute `V2_DATA_ROOT`
 whose path is identical on the Docker host and inside the controller. This is essential
-because the controller asks the Docker daemon to bind those paths. Back up old database,
-workspaces and state before applying migrations `0058` and `0059`.
+because the controller asks the Docker daemon to bind those paths. Use a new empty database
+with `0001_initial`; see [initial setup](initial-setup.md). The old `0058`/`0059` upgrade
+chain is retired. Existing schemas are refused, not automatically converted or deleted.
 
 The overlay disables legacy execution and keeps `V2_SCHEDULER_ENABLED=false` by default.
-It does not delete legacy data. Start API/frontend without paid workers first; initialize
-profiles, publish verified prices, configure repository-specific validation commands,
+It does not delete existing data. Start API/frontend without paid workers first; inspect
+the automatically initialized profiles, publish verified prices and validation commands,
 then set Team/repository/actor policies and the approved USD limit.
 
 The provider gateway exposes only exact TLS CONNECT destinations
@@ -321,29 +341,29 @@ capture and process-group cancellation, including transport helpers.
 
 Verified in this checkout without paid AI calls:
 
-- Backend: 584 unit/application/domain/infrastructure/architecture tests passed;
-  Ruff check/format and mypy (381 source files) passed.
-- PostgreSQL: 32 integration tests passed, including new migration DDL, atomic
+- Backend: 598 unit/application/domain/infrastructure/architecture tests passed;
+  Ruff check/format and mypy (387 source files) passed.
+- PostgreSQL: all 44 integration tests passed on a fresh initial-schema database, including atomic
   reservations, stale-worker pause protection, orphan/late-receipt accounting,
   tracker status delivery and the mocked-provider PR/review/merge lifecycle.
-- Frontend: lint, formatting, type-check (zero errors/warnings), 35 unit tests and
+- Frontend: lint, formatting, type-check (zero errors/warnings), 36 unit tests and
   production build passed.
 - Production Compose overlay validation and `git diff --check` passed.
 - Real local Git object-copy/fsck tests passed; the remote push was mocked.
 
-One legacy repository-resource integration test was excluded from the available
-PostgreSQL run because the disposable non-vector schema has no `knowledge_chunks`
-table. A production-shaped pgvector upgrade remains required; this exclusion is
-not a claim that the complete production database suite passed.
+No PostgreSQL tests are excluded. Repository resources work without a vector table when
+RAG is disabled. The initial-revision tests reflect the actual PostgreSQL schema against
+ORM metadata, including indexes and constraints, and verify default entities and refusal
+of nonempty schemas. No MVP/pgvector upgrade is claimed or required by this baseline.
 
 Backend unit command: `cd backend && .venv/bin/pytest -q --ignore=tests/integration`.
 Database command, **only against a disposable test database**:
-`TEST_DATABASE_URL=<test-url> .venv/bin/pytest -q tests/integration --ignore=tests/integration/test_repository_resources.py`.
+`TEST_DATABASE_URL=<test-url> .venv/bin/pytest -q tests/integration`.
 Frontend command: `cd frontend && npm run check`.
 
-The PostgreSQL migration test executes the
-actual new revision functions in a rolled-back unique schema with minimal legacy
-prerequisites. It is not a full upgrade of a production-shaped pgvector database.
+The PostgreSQL setup tests execute the actual initial revision in rolled-back unique
+schemas. The full integration suite also runs against a disposable database initialized
+by `alembic upgrade head`, rather than a hand-built partial test schema.
 
 The lifecycle integration test uses real PostgreSQL records and mocked GitHub responses.
 It checks enrollment, phase sequencing, deduplication, same-session feedback, current-SHA

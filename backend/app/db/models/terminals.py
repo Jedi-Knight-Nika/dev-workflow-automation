@@ -31,6 +31,7 @@ from ._base import utcnow
 
 class TerminalSession(Base):
     __tablename__ = "terminal_sessions"
+    __table_args__ = (Index("ix_terminal_sessions_task", "task_id"),)
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     task_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tasks.id", ondelete="CASCADE"))
     node_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
