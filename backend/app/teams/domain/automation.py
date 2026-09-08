@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 from decimal import Decimal
+from typing import Literal
 from uuid import UUID
 
 
@@ -15,6 +16,7 @@ class AutomationPolicy:
     task_budget_usd: Decimal = Decimal(2)
     team_budget_usd: Decimal = Decimal(20)
     require_formal_approval: bool = True
+    reviewer_scope: Literal["allowlist", "any_human"] = "allowlist"
 
     def __post_init__(self) -> None:
         if (
@@ -25,8 +27,13 @@ class AutomationPolicy:
             raise ValueError("Budgets must be positive; task <= team <= 10000 USD")
         if self.enrollment_enabled and not self.repository_ids:
             raise ValueError("Enrollment requires explicitly allowed repositories")
-        if self.auto_merge and (not self.authorized_reviewer_ids or not self.required_checks):
-            raise ValueError("Auto-merge requires reviewer IDs and required CI check names")
+        if self.reviewer_scope not in {"allowlist", "any_human"}:
+            raise ValueError("Invalid reviewer scope")
+        if self.auto_merge and (
+            (self.reviewer_scope == "allowlist" and not self.authorized_reviewer_ids)
+            or not self.required_checks
+        ):
+            raise ValueError("Auto-merge requires a reviewer policy and required CI check names")
         if len(set(self.repository_ids)) != len(self.repository_ids):
             raise ValueError("Duplicate repositories")
         if any(

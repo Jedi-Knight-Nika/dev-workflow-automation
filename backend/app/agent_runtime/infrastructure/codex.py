@@ -1,4 +1,5 @@
 import asyncio
+import os
 from typing import Any
 
 from app.agent_runtime.application.harness import HarnessSettings, TurnReceipt
@@ -18,7 +19,13 @@ class CodexHarness:
         from openai_codex import AsyncCodex, CodexConfig
 
         self.settings = settings
-        self.client = AsyncCodex(CodexConfig(cwd=str(settings.workspace)))
+        self.client = AsyncCodex(
+            CodexConfig(
+                cwd=str(settings.workspace),
+                # Keep native sessions, not credentials, in the mounted task home.
+                config_overrides=('cli_auth_credentials_store="ephemeral"',),
+            )
+        )
         self.thread: Any = None
         self.turn: Any = None
         self.previous_usage = previous_usage
@@ -39,7 +46,16 @@ class CodexHarness:
             },
         }
 
+    async def _authenticate(self) -> None:
+        key = os.environ.get("OPENAI_API_KEY", "").strip()
+        if not key:
+            raise ValueError("Native Codex requires an injected OpenAI API key")
+        # App-server does not use OPENAI_API_KEY implicitly. This is a local
+        # login operation; it must finish before creating/resuming a paid turn.
+        await self.client.login_api_key(key)
+
     async def start(self) -> str:
+        await self._authenticate()
         self.thread = await self.client.thread_start(**self._options(), ephemeral=False)
         self.previous_usage = dict.fromkeys(
             (
@@ -56,6 +72,7 @@ class CodexHarness:
     async def resume(self, native_session_id: str) -> None:
         if not native_session_id:
             raise ValueError("An explicit native thread ID is required")
+        await self._authenticate()
         self.thread = await self.client.thread_resume(native_session_id, **self._options())
 
     async def run_turn(self, prompt: str) -> TurnReceipt:
@@ -110,15 +127,17 @@ class CodexHarness:
             raise RuntimeError("Native turn ended without completion evidence")
         usage = codex_usage(total, self.previous_usage)
         self.previous_usage = total or None
+        failure_code = _failure_code(completed.error) if completed.error else None
         return TurnReceipt(
             native_session_id=str(self.thread.id),
             native_turn_id=str(completed.id),
-            summary=summary,
+            summary=summary or (failure_code or ""),
             status="interrupted" if interrupted_for_budget else completed.status.value,
             usage=usage,
             raw_usage=total,
             cumulative_usage=total or None,
             provider_duration_ms=completed.duration_ms,
+            failure_code=failure_code,
         )
 
     async def compact(self) -> TurnReceipt:
@@ -157,3 +176,24 @@ class CodexHarness:
 
     async def close(self) -> None:
         await self.client.close()
+
+
+def _failure_code(error: Any) -> str:
+    """Persist only allowlisted metadata, never a provider error body or secret."""
+    info = error.codex_error_info
+    value = info.model_dump(mode="json") if info is not None else None
+    if isinstance(value, dict):
+        for detail in value.values():
+            if isinstance(detail, dict):
+                status = detail.get("httpStatusCode", detail.get("http_status_code"))
+                if status in {401, 403}:
+                    return "PROVIDER_AUTHENTICATION_FAILED"
+                if status == 429:
+                    return "PROVIDER_RATE_LIMIT"
+    return {
+        "unauthorized": "PROVIDER_AUTHENTICATION_FAILED",
+        "usageLimitExceeded": "PROVIDER_RATE_LIMIT",
+        "serverOverloaded": "PROVIDER_OUTAGE",
+        "contextWindowExceeded": "NATIVE_CONTEXT_EXHAUSTED",
+        "sessionBudgetExceeded": "NATIVE_BUDGET_EXHAUSTED",
+    }.get(value if isinstance(value, str) else "", "NATIVE_TURN_FAILED")

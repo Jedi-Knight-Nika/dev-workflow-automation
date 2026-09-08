@@ -143,6 +143,7 @@ class AutomationWrite(BaseModel):
     task_budget_usd: Decimal = Field(gt=0, le=10000, allow_inf_nan=False)
     team_budget_usd: Decimal = Field(gt=0, le=10000, allow_inf_nan=False)
     require_formal_approval: bool = True
+    reviewer_scope: Literal["allowlist", "any_human"] = "allowlist"
 
 
 @router.get("/teams/{team_id}/automation")

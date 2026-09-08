@@ -7,7 +7,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    # Compose leaves optional settings blank. Ignore those values so typed
+    # defaults apply; populated JSON must still parse and validate strictly.
+    model_config = SettingsConfigDict(env_file=".env", env_ignore_empty=True, extra="ignore")
     app_name: str = "Autonomous Engineering Worker"
     environment: str = "development"
     log_level: str = "INFO"

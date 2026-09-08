@@ -8,6 +8,7 @@ import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.agent_runtime.application.harness import WorkspaceUnavailable
 from app.agent_runtime.domain.session_changes import handoff_request
 from app.agent_runtime.infrastructure.accounting import SqlDevelopmentStore
 from app.agent_runtime.infrastructure.container import RunnerMounts, validation_container_spec
@@ -261,10 +262,19 @@ class SqlPhaseExecutor:
                     )
                 except DevelopmentBlocked as exc:
                     raise PhaseBlocked(WaitReason.BUDGET_EXHAUSTED, str(exc)) from exc
+                except WorkspaceUnavailable as exc:
+                    raise PhaseBlocked(WaitReason.MISSING_CONFIGURATION, str(exc)) from exc
                 if receipt.status != "completed":
+                    if receipt.failure_code == "PROVIDER_AUTHENTICATION_FAILED":
+                        raise PhaseBlocked(
+                            WaitReason.MISSING_CONFIGURATION,
+                            "Native provider authentication failed; verify the integration "
+                            "and runner login before resuming this session",
+                        )
                     raise PhaseBlocked(
                         WaitReason.MISSING_REQUIREMENT,
-                        "Developer did not finish; inspect its preserved session",
+                        "Developer did not finish; inspect its preserved session"
+                        + (f" ({receipt.failure_code})" if receipt.failure_code else ""),
                     )
                 if receipt.summary.strip().split("\n", 1)[0].strip() == "NEEDS_PLAN":
                     return Action.NEEDS_PLAN

@@ -13,7 +13,7 @@ RUN uv sync --frozen --extra dev --no-install-project
 
 FROM base AS api-system
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends git vim-tiny \
+    && apt-get install -y --no-install-recommends git \
     && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
 
 FROM api-system AS api

@@ -22,7 +22,7 @@
     void getAutomation(teamId)
       .then((value) => {
         if (disposed) return;
-        policy = value;
+        policy = { ...value, reviewer_scope: value.reviewer_scope ?? 'allowlist' };
         repositories = value.repository_ids.join('\n');
         reviewers = value.authorized_reviewer_ids.join('\n');
         checks = value.required_checks.join('\n');
@@ -97,11 +97,19 @@
         /></label
       >
       <label
-        ><input type="checkbox" bind:checked={policy.auto_merge} /> Auto-merge after current-SHA approval
-        and green CI</label
+        ><input type="checkbox" bind:checked={policy.auto_merge} /> Auto-merge after approval of the current
+        commit and green CI</label
       >
       <label
-        >Authorized GitHub reviewer numeric IDs (not logins)<textarea
+        >Who can approve on GitHub?<select bind:value={policy.reviewer_scope}>
+          <option value="allowlist">Listed reviewers</option>
+          <option value="any_human">Any human commenter (including the PR author)</option>
+        </select></label
+      >
+      <label
+        >{policy.reviewer_scope === 'allowlist'
+          ? 'Authorized GitHub reviewer numeric IDs (not logins)'
+          : 'GitHub IDs allowed to pause, resume or cancel tasks (optional)'}<textarea
           bind:value={reviewers}
           rows="3"
         ></textarea></label
@@ -112,11 +120,14 @@
       >
       <label
         ><input type="checkbox" bind:checked={policy.require_formal_approval} /> Require formal GitHub
-        review approval (otherwise an authorized /lgtm with the exact current SHA is also accepted)</label
+        review approval</label
       >
       <p>
-        Formal GitHub approval is required by default. Task text and AI output never grant merge
-        authority. An in-flight provider request may finish before an interruption takes effect.
+        When formal approval is off, human comments such as “LGTM” or “ready to merge” can approve
+        the PR. Other wording uses the configured Interpreter; uncertain messages need
+        clarification. Bots cannot approve. The comment must follow validation of the current commit
+        and remain unchanged. Required CI checks and blocking reviews are checked again before
+        merge.
       </p>
       <button disabled={busy}>Save policy</button>
     </form>
@@ -144,6 +155,7 @@
     align-items: center;
   }
   textarea,
+  select,
   input:not([type='checkbox']) {
     width: 100%;
     padding: 0.6rem;

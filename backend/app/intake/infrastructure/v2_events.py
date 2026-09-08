@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.agent_runtime.infrastructure.models import DeveloperSession
 from app.delivery.infrastructure.git_transport import github_token
 from app.delivery.infrastructure.github import GitHubDelivery, github_client
+from app.delivery.infrastructure.review_state import review_state
 from app.delivery.infrastructure.workflow import delivery_gate
 from app.engineering.domain.lifecycle import Action, WaitReason
 from app.engineering.infrastructure.controls import control_task
@@ -21,6 +22,7 @@ from app.engineering.infrastructure.task_models import Task, TaskEvent
 from app.intake.application.interpret import InterpretEvent
 from app.intake.domain.events import Event, Intent, requirement_fingerprint
 from app.intake.infrastructure.authorization import actor_allowed
+from app.intake.infrastructure.observed_reviews import observe_review_messages
 from app.repositories.infrastructure.models import Repository
 from app.teams.infrastructure.automation import read_policy
 
@@ -47,7 +49,11 @@ async def apply_pending_feedback(session: AsyncSession, task: Task) -> bool:
     authorized = []
     for row in rows:
         if await actor_allowed(
-            session, task, str(row.feedback.get("provider") or "github"), row.actor or ""
+            session,
+            task,
+            str(row.feedback.get("provider") or "github"),
+            row.actor or "",
+            actor_type=row.feedback.get("actor_type"),
         ):
             authorized.append(row)
         else:
@@ -133,7 +139,16 @@ async def github_event(
         "pull_request_review_comment",
         "pull_request_review",
     } and payload.get("action") in {"created", "edited", "submitted"}:
-        if actor not in policy.authorized_reviewer_ids or sha != task.current_revision:
+        if (
+            not await actor_allowed(
+                session,
+                task,
+                "github",
+                actor,
+                actor_type=(review.get("user") or payload.get("sender") or {}).get("type"),
+            )
+            or sha != task.current_revision
+        ):
             cycle.decision = "UNAUTHORIZED_OR_STALE"
             return
         if len(body) > 16000:
@@ -159,10 +174,15 @@ async def github_event(
                 f"{value.get('path', '')}:{value.get('line', '')}: {value.get('body', '')}"
                 for value in comments
             )
-        if formal_changes or (not formal_approval and not command_approval and body):
+        if formal_changes or (
+            policy.require_formal_approval and not formal_approval and not command_approval and body
+        ):
             # Ordinary prose is claimed separately, outside webhook/Task locks.
             if not formal_changes:
-                cycle.decision, cycle.feedback = "CLASSIFY_PENDING", {"body": body}
+                cycle.decision, cycle.feedback = (
+                    "CLASSIFY_PENDING",
+                    {"body": body, "actor_type": (review.get("user") or {}).get("type")},
+                )
                 return
             interpretation = await InterpretEvent().execute(
                 Event(
@@ -177,7 +197,10 @@ async def github_event(
                 )
             )
             if interpretation.intent in {Intent.FEEDBACK, Intent.REQUIREMENT_CHANGE}:
-                cycle.decision, cycle.feedback = "FEEDBACK_PENDING", {"body": body}
+                cycle.decision, cycle.feedback = (
+                    "FEEDBACK_PENDING",
+                    {"body": body, "actor_type": (review.get("user") or {}).get("type")},
+                )
                 await session.flush()
                 await apply_pending_feedback(session, task)
                 return
@@ -198,6 +221,7 @@ async def github_event(
     if await apply_pending_feedback(session, task):
         return
     merge_policy, checks, validated = await delivery_gate(session, task, repository)
+    reviewed, validated_at = await review_state(session, task)
     async with github_client(await github_token(session)) as api:
         evidence, pull = await GitHubDelivery(api, repository.owner, repository.name).evidence(
             task.pull_request_number,
@@ -206,7 +230,10 @@ async def github_event(
             merge_policy,
             checks,
             runnable=not task.archived_at,
+            reviewed_messages=reviewed,
+            validated_at=validated_at,
         )
+    await observe_review_messages(session, task, evidence.review_messages)
     if pull["head"]["sha"] != task.current_revision:
         cycle.decision = "HEAD_CHANGED"
         await record_transition(

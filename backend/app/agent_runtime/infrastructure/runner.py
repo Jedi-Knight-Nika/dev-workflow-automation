@@ -18,6 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.agent_runtime.application.harness import DeveloperHarness, HarnessSettings
 from app.agent_runtime.domain.usage import Pricing
+from app.agent_runtime.infrastructure.preflight import check_workspace
 from app.agent_runtime.infrastructure.workspace_lock import workspace_lock
 
 SYSTEM_CONTRACT = """You are the Developer for one engineering task. Inspect current files with
@@ -100,6 +101,7 @@ async def execute(manifest: Manifest) -> None:
         pricing=Pricing(**manifest.pricing) if manifest.pricing else None,  # type: ignore[arg-type]
         read_only=manifest.role_kind != "DEVELOPER",
     )
+    await check_workspace(settings.workspace, read_only=settings.read_only)
     harness: DeveloperHarness
     if manifest.harness == "codex":
         from app.agent_runtime.infrastructure.codex import CodexHarness

@@ -1,5 +1,7 @@
 from dataclasses import dataclass
 
+from app.delivery.domain.review import ReviewMessage
+
 
 @dataclass(frozen=True)
 class Approval:
@@ -21,6 +23,8 @@ class MergeEvidence:
     mergeable: bool | None
     task_runnable: bool
     approval: Approval | None
+    review_messages: tuple[ReviewMessage, ...] = ()
+    pending_review_messages: bool = False
 
 
 @dataclass(frozen=True)
@@ -29,6 +33,10 @@ class MergePolicy:
     repository_auto_merge: bool = False
     authorized_actor_ids: frozenset[str] = frozenset()
     require_formal_approval: bool = True
+    any_human_reviewer: bool = False
+
+    def allows_actor(self, actor_id: str) -> bool:
+        return bool(actor_id) and (self.any_human_reviewer or actor_id in self.authorized_actor_ids)
 
     def blockers(self, evidence: MergeEvidence) -> tuple[str, ...]:
         reasons: list[str] = []
@@ -44,6 +52,8 @@ class MergePolicy:
             reasons.append("CHECKS_NOT_GREEN")
         if evidence.blocking_review:
             reasons.append("BLOCKING_REVIEW")
+        if evidence.pending_review_messages:
+            reasons.append("REVIEW_MESSAGES_PENDING")
         if evidence.mergeable is not True:
             reasons.append("MERGEABILITY_UNCONFIRMED")
         if not evidence.task_runnable:
@@ -52,7 +62,7 @@ class MergePolicy:
         if approval is None or not approval.evidence_id:
             reasons.append("APPROVAL_MISSING")
         else:
-            if approval.actor_id not in self.authorized_actor_ids:
+            if not self.allows_actor(approval.actor_id):
                 reasons.append("APPROVER_UNAUTHORIZED")
             if approval.head_sha != evidence.current_sha:
                 reasons.append("APPROVAL_STALE")

@@ -7,11 +7,17 @@ from app.platform.integrations.models import Integration
 from app.teams.infrastructure.automation import read_policy
 
 
-async def actor_allowed(session: AsyncSession, task: Task, provider: str, actor: str) -> bool:
+async def actor_allowed(
+    session: AsyncSession, task: Task, provider: str, actor: str, *, actor_type: str | None = None
+) -> bool:
     if not actor or task.team_id is None:
         return False
     if provider == "github":
-        return actor in (await read_policy(session, task.team_id)).authorized_reviewer_ids
+        policy = await read_policy(session, task.team_id)
+        return actor_type != "Bot" and (
+            actor in policy.authorized_reviewer_ids
+            or (policy.reviewer_scope == "any_human" and actor_type == "User")
+        )
     if provider == "slack":
         return any(
             route.get("team_id") == str(task.team_id)

@@ -10,7 +10,7 @@ from uuid import UUID
 import httpx
 from pydantic import TypeAdapter
 
-from app.agent_runtime.application.harness import TurnReceipt
+from app.agent_runtime.application.harness import TurnReceipt, WorkspaceUnavailable
 from app.agent_runtime.infrastructure.container import RunnerMounts, developer_container_spec
 from app.agent_runtime.infrastructure.runner import Manifest
 
@@ -159,6 +159,10 @@ class DockerHarness:
                                 raise RunnerProtocolError("Invalid native receipt")
                             self.completed.set_result(receipt)
                         elif event.get("event") == "runner_failed":
+                            if event.get("failure_code") == "WorkspaceUnavailable":
+                                raise WorkspaceUnavailable(
+                                    "Check task checkout ownership and Git metadata for runner UID 10001"
+                                )
                             raise RunnerProtocolError(
                                 "Native runner failed; reconcile partial usage"
                             )

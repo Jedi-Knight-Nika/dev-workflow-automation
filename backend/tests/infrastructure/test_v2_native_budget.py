@@ -9,6 +9,11 @@ from app.agent_runtime.application.harness import HarnessSettings
 from app.agent_runtime.domain.usage import Pricing
 
 
+@pytest.fixture(autouse=True)
+def injected_key(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "acceptance-fake-key")
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("budget,interrupts", [(Decimal(1), 0), (Decimal("0.0001"), 1)])
 async def test_codex_stream_guard_uses_sdk_defaults_and_interrupts_at_budget(

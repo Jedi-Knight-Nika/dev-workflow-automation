@@ -36,6 +36,19 @@ def test_policy_allows_explicit_scoped_rollout() -> None:
     ).auto_merge
 
 
+def test_any_human_policy_does_not_require_an_allowlist_but_still_requires_ci() -> None:
+    assert AutomationPolicy(
+        auto_merge=True,
+        reviewer_scope="any_human",
+        require_formal_approval=False,
+        required_checks=("test",),
+    ).auto_merge
+    with pytest.raises(ValueError):
+        AutomationPolicy(auto_merge=True, reviewer_scope="any_human")
+    with pytest.raises(ValueError):
+        AutomationPolicy(reviewer_scope="anyone_including_bots")
+
+
 def test_fixed_pipeline_can_repair_review_and_finish_without_replanning() -> None:
     state = EngineeringState()
     for action in (

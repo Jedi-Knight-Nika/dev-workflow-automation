@@ -36,8 +36,8 @@
     <button disabled={busy} onclick={refresh}>Refresh statistics</button>
   </header>
   <p>
-    Native/API usage only. Legacy history remains in the main dashboard. Missing receipts or prices
-    are unavailable, not zero. Local inference is separate from paid tokens.
+    Native/API usage across the fixed workflow. Missing receipts or prices are unavailable, not
+    zero. Local inference is separate from paid tokens.
   </p>
   {#if error}<p role="alert">{error}</p>{/if}
   {#if data}

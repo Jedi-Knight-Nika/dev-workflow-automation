@@ -80,5 +80,25 @@ def classify(event: Event) -> Interpretation | None:
     feedback = re.fullmatch(r"/feedback\s+([A-Za-z0-9_-]+)\s+(.+)", event.body.strip(), re.DOTALL)
     if feedback and event.task_reference == feedback[1]:
         return Interpretation(Intent.FEEDBACK, 1, "Explicit feedback command", True)
-    # Plain text, including 'lgtm', is never an approval grant.
+    # An approval intent still requires authenticated human/current-SHA policy
+    # checks. Exact common phrases avoid an unnecessary model call; prose with
+    # conditions, negations or questions must go through bounded interpretation.
+    approval = event.body.strip().casefold().rstrip(".!").strip()
+    if (
+        event.provider == "github"
+        and event.head_sha
+        and approval
+        in {
+            "lgtm",
+            "looks good to me",
+            "approved",
+            "ready to merge",
+            "merge it",
+            "go ahead and merge",
+            "please merge",
+            "please merge it",
+            "ship it",
+        }
+    ):
+        return Interpretation(Intent.APPROVAL, 1, "Explicit human approval wording", True)
     return None
