@@ -50,6 +50,7 @@ class Action(StrEnum):
     PUBLISHED = "PUBLISHED"
     REVIEW_FIX = "REVIEW_FIX"
     REQUIREMENT_CHANGED = "REQUIREMENT_CHANGED"
+    REVISE_REQUIREMENT = "REVISE_REQUIREMENT"
     MERGE_AUTHORIZED = "MERGE_AUTHORIZED"
     MERGE_RECHECK = "MERGE_RECHECK"
     MERGED = "MERGED"
@@ -130,6 +131,14 @@ def transition(
             status=TaskStatus.PAUSED,
             manual_takeover=takeover,
             wait_reason=WaitReason.MANUAL_TAKEOVER if takeover else state.wait_reason,
+        )
+    if action == Action.REVISE_REQUIREMENT:
+        if state.status != TaskStatus.PAUSED:
+            raise InvalidTransition("Pause work before revising a requirement")
+        return replace(
+            state,
+            stage=Stage.INTAKE if state.stage == Stage.INTAKE else Stage.FIXING,
+            requirement_version=state.requirement_version + 1,
         )
     if action in {Action.RESUME, Action.RELEASE_TAKEOVER}:
         if state.status not in {

@@ -1,4 +1,4 @@
-"""PostgreSQL checks for durable fixed-phase jobs and legacy isolation."""
+"""PostgreSQL checks for durable fixed-phase jobs and lease recovery."""
 
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
@@ -7,12 +7,13 @@ import pytest
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.db.models import Job, JobState, Task, Team
 from app.engineering.application.jobs import PhaseLease
 from app.engineering.domain.lifecycle import Action
 from app.engineering.infrastructure.controls import control_task
 from app.engineering.infrastructure.jobs import SqlPhaseJobs, enqueue_phase
-from app.infrastructure.persistence.job_operations import claim_next_job, recover_expired_jobs
+from app.engineering.infrastructure.task_models import Job, Task
+from app.platform.scheduling.states import JobState
+from app.teams.infrastructure.team_models import Team
 
 pytestmark = pytest.mark.asyncio
 
@@ -29,7 +30,6 @@ async def test_phase_completion_is_atomic_and_stale_result_cannot_advance(
                 id=task_id,
                 team_id=team_id,
                 title="V2 unit",
-                execution_version=2,
                 status="NEW",
                 stage="INTAKE",
                 wait_reason="NONE",
@@ -68,7 +68,7 @@ async def test_phase_completion_is_atomic_and_stale_result_cannot_advance(
             await session.execute(delete(Team).where(Team.id == team_id))
 
 
-async def test_legacy_claim_and_recovery_cannot_replay_v2_jobs(
+async def test_expired_lease_blocks_without_replaying_paid_work(
     postgres_session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     task_id, team_id = uuid4(), uuid4()
@@ -80,7 +80,6 @@ async def test_legacy_claim_and_recovery_cannot_replay_v2_jobs(
                 id=task_id,
                 team_id=team_id,
                 title="V2 recovery",
-                execution_version=2,
                 status="NEW",
                 stage="INTAKE",
                 wait_reason="NONE",
@@ -90,8 +89,6 @@ async def test_legacy_claim_and_recovery_cannot_replay_v2_jobs(
             job = await enqueue_phase(session, task)
             assert job is not None
             job_id = job.id
-        async with postgres_session_factory() as session:
-            assert await claim_next_job(session, "legacy-test", 30) is None
         store = SqlPhaseJobs(postgres_session_factory, "v2-test", 30)
         lease = await store.claim()
         assert isinstance(lease, PhaseLease)
@@ -99,8 +96,6 @@ async def test_legacy_claim_and_recovery_cannot_replay_v2_jobs(
             job = await session.get(Job, job_id)
             assert job is not None
             job.lease_expires_at = datetime.now(UTC) - timedelta(seconds=1)
-        async with postgres_session_factory() as session:
-            assert await recover_expired_jobs(session) == 0
         await store.recover()
         async with postgres_session_factory() as session:
             task, job = await session.get(Task, task_id), await session.get(Job, job_id)

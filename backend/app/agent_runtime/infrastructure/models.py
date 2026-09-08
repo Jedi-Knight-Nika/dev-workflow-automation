@@ -16,7 +16,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.db.base import Base, utcnow
+from app.platform.persistence.base import Base, utcnow
 
 
 class DeveloperSession(Base):
@@ -88,6 +88,9 @@ class AIRun(Base):
     )
     job_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("jobs.id", ondelete="SET NULL"))
     native_turn_id: Mapped[str | None] = mapped_column(String(255))
+    native_session_id: Mapped[str | None] = mapped_column(String(255))
+    artifact: Mapped[str | None] = mapped_column(Text)
+    requirement_version: Mapped[int] = mapped_column(default=1, server_default="1")
     role_kind: Mapped[str] = mapped_column(String(24))
     provider: Mapped[str] = mapped_column(String(40))
     model: Mapped[str] = mapped_column(String(255))

@@ -13,18 +13,8 @@ from app.agent_runtime.infrastructure.accounting import SqlDevelopmentStore
 from app.agent_runtime.infrastructure.container import RunnerMounts, validation_container_spec
 from app.agent_runtime.infrastructure.container_job import run_container_job
 from app.agent_runtime.infrastructure.docker_harness import DockerHarness, atomic_json
+from app.agent_runtime.infrastructure.models import DeveloperSession, PricingCatalog
 from app.agent_runtime.infrastructure.runner import Manifest
-from app.config import Settings
-from app.db.models import (
-    DeveloperSession,
-    Integration,
-    PricingCatalog,
-    Repository,
-    Task,
-    Team,
-    TeamAgentProfile,
-    ValidationRun,
-)
 from app.delivery.infrastructure.git_runner import GitManifest
 from app.delivery.infrastructure.git_transport import github_token, run_git
 from app.delivery.infrastructure.github import GitHubDelivery, github_client
@@ -32,10 +22,18 @@ from app.delivery.infrastructure.workflow import delivery_gate, merge_phase
 from app.engineering.application.develop import DevelopmentBlocked, DevelopTask, SessionContext
 from app.engineering.application.jobs import PhaseBlocked, PhaseLease
 from app.engineering.domain.lifecycle import Action, WaitReason
+from app.engineering.infrastructure.consultation import consult, save_consultation_feedback
 from app.engineering.infrastructure.enrollment import prepare_directories
+from app.engineering.infrastructure.models import ValidationRun
+from app.engineering.infrastructure.task_models import Task
 from app.engineering.infrastructure.validator_runner import ValidationManifest
-from app.infrastructure.security.crypto import cipher
+from app.platform.configuration.settings import Settings
+from app.platform.integrations.models import Integration
+from app.platform.security.crypto import cipher
+from app.repositories.infrastructure.models import Repository
 from app.teams.infrastructure.automation import read_policy
+from app.teams.infrastructure.models import TeamAgentProfile
+from app.teams.infrastructure.team_models import Team
 
 
 class SqlPhaseExecutor:
@@ -128,6 +126,13 @@ class SqlPhaseExecutor:
             base_url="http://docker",
             timeout=self.settings.docker_api_timeout_seconds,
         ) as client:
+            if lease.action == "THINKER_TURN":
+                plan = await consult(
+                    self.sessions, self.settings, client, lease, task, native, "THINKER"
+                )
+                assert plan is not None
+                await save_consultation_feedback(self.sessions, lease, native, *plan)
+                return Action.PLAN_READY
             if lease.action == "INTERPRET_EVENT":
                 if repository is None:
                     raise PhaseBlocked(WaitReason.MISSING_CONFIGURATION, "Repository is missing")
@@ -261,12 +266,14 @@ class SqlPhaseExecutor:
                         WaitReason.MISSING_REQUIREMENT,
                         "Developer did not finish; inspect its preserved session",
                     )
+                if receipt.summary.strip().split("\n", 1)[0].strip() == "NEEDS_PLAN":
+                    return Action.NEEDS_PLAN
                 return Action.IMPLEMENTED
             if lease.action == "RUN_VALIDATION":
                 return await self._validate(client, lease, task, native, team)
         raise PhaseBlocked(
             WaitReason.MISSING_CONFIGURATION,
-            f"{lease.action} requires the verified V2 delivery adapter; no legacy routing fallback is allowed",
+            f"Unknown fixed-lifecycle action: {lease.action}",
         )
 
     async def _prepare(
@@ -383,6 +390,7 @@ class SqlPhaseExecutor:
             branch=task.branch_name,
             title=task.title,
             author_name=team.name,
+            base_sha=str(native.checkpoint.get("base_sha") or ""),
             commands=commands,
             timeout_seconds=self.settings.developer_turn_timeout_seconds,
         )
@@ -390,6 +398,7 @@ class SqlPhaseExecutor:
         atomic_json(mounts.manifest, manifest.model_dump(mode="json"))
         spec = validation_container_spec(mounts, image=self.settings.developer_container_image)
         spec["Labels"]["job_id"] = str(lease.job_id)
+        validation_started = datetime.now(UTC)
         result = await run_container_job(
             client,
             f"validation-{lease.job_id}-{lease.token}",
@@ -418,7 +427,12 @@ class SqlPhaseExecutor:
                         if check["exit_code"] == 0 and not check["timed_out"]
                         else "FAILED",
                         output_tail=check["output_tail"][-8000:],
-                        finished_at=datetime.now(UTC),
+                        started_at=datetime.fromisoformat(check["started_at"])
+                        if check.get("started_at")
+                        else validation_started,
+                        finished_at=datetime.fromisoformat(check["finished_at"])
+                        if check.get("finished_at")
+                        else datetime.now(UTC),
                     )
                 )
             current.current_revision = result["head_sha"]
@@ -442,4 +456,19 @@ class SqlPhaseExecutor:
                 WaitReason.MISSING_REQUIREMENT,
                 "Repeated validation failure without workspace progress; inspect before another paid turn",
             )
+        if passed:
+            task.current_revision = result["head_sha"]
+            review = await consult(
+                self.sessions,
+                self.settings,
+                client,
+                lease,
+                task,
+                native,
+                "REVIEWER",
+                change_context=str(result.get("change_context") or ""),
+            )
+            if review and review[0] == "REVIEW_CHANGES":
+                await save_consultation_feedback(self.sessions, lease, native, *review)
+                return Action.VALIDATION_FAILED
         return Action.VALIDATION_PASSED if passed else Action.VALIDATION_FAILED

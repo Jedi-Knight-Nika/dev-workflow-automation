@@ -12,16 +12,18 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.agent_runtime.domain.usage import Pricing, Usage
+from app.agent_runtime.infrastructure.models import AIRun, PricingCatalog
 from app.agent_runtime.infrastructure.reservations import reserve_budget
-from app.db.models import AIRun, Integration, LocalModelRun, PricingCatalog
-from app.infrastructure.security.crypto import cipher
 from app.intake.domain.events import Event, Interpretation
 from app.intake.infrastructure.cloud_wire import normalized_usage, request_body, response_text
+from app.intake.infrastructure.models import LocalModelRun
 from app.intake.infrastructure.ollama import (
     Classification,
     OllamaInterpreter,
     classification_messages,
 )
+from app.platform.integrations.models import Integration
+from app.platform.security.crypto import cipher
 
 
 class MeteredLocalInterpreter:

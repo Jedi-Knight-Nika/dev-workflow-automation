@@ -9,10 +9,13 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.agent_runtime.application.sessions import ChangeSession, SessionConflict, SessionView
 from app.agent_runtime.domain.session_changes import SessionChangeMode
 from app.agent_runtime.infrastructure.accounting import SqlDevelopmentStore
+from app.agent_runtime.infrastructure.models import AIRun, DeveloperSession
 from app.agent_runtime.infrastructure.sessions import SqlSessionAdministration
-from app.db.models import AIRun, DeveloperSession, Job, JobState, Task, TaskEvent, TeamAgentProfile
 from app.engineering.domain.lifecycle import Action
 from app.engineering.infrastructure.controls import control_task
+from app.engineering.infrastructure.task_models import Job, Task, TaskEvent
+from app.platform.scheduling.states import JobState
+from app.teams.infrastructure.models import TeamAgentProfile
 from tests.integration.test_v2_enrollment_and_costs import scenario
 
 pytestmark = pytest.mark.asyncio
@@ -182,7 +185,7 @@ async def test_unsafe_or_stale_session_changes_are_refused_without_mutation(
         assert before
         request = command(before)
         if blocker == "active_task":
-            task.status = "DEVELOPING"
+            task.status = "ACTIVE"
         elif blocker == "active_worker":
             native.state = "RUNNING"
         elif blocker == "running_receipt":

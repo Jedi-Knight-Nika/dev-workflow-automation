@@ -17,7 +17,7 @@ test('dashboard shows concurrent workers and updates elapsed time without refetc
     team_id: id,
     team_name: `Team ${i}`,
     agent_name: `Worker ${i}`,
-    role: 'EXECUTOR',
+    role: 'DEVELOPER',
     provider: 'openai',
     model: 'test-model',
     started_at: '2026-09-07T11:59:00Z',
@@ -77,131 +77,153 @@ test('dashboard shows concurrent workers and updates elapsed time without refetc
   await expect.poll(() => requests).toBeGreaterThan(initial);
 });
 
-test('only the active node glows; dragging autosaves layout without publishing wiring', async ({
+test('fullscreen map keeps the queue and milestones visible without workflow writes', async ({
   page
 }) => {
-  const nodes = ids.map((id, i) => ({
-    id,
-    role: i === 0 ? 'ORCHESTRATOR' : 'EXECUTOR',
-    label: ['Controller', 'Working executor', 'Idle executor'][i],
-    position_x: i * 350,
-    position_y: 150,
-    enabled: true,
-    activation_policy: 'any',
-    batch_window_seconds: 0,
-    integration_ids: [],
-    repository_ids: [],
-    provider: 'openai',
-    model: 'test-model',
-    model_validation_status: 'AVAILABLE',
-    agent_id: null,
-    node_type: 'AGENT',
-    system_node_type: null
-  }));
-  let layoutWrites = 0;
-  let graphWrites = 0;
+  let writes = 0;
   await page.route('**/api/v1/**', async (route) => {
-    const request = route.request();
-    const path = new URL(request.url()).pathname;
-    if (path.endsWith('/workflow/activity')) {
-      await route.fulfill({
-        json: ids.map((node_id, i) => ({
-          node_id,
-          active_jobs: i === 1 ? 1 : 0,
-          queued_jobs: 0,
-          waiting_jobs: 0,
-          current_job_action: i === 1 ? 'IMPLEMENT_PLAN' : null,
-          task_id: null
-        }))
-      });
-    } else if (path.endsWith('/workflow/layout')) {
-      layoutWrites++;
-      const body = request.postDataJSON();
-      expect(Object.keys(body).sort()).toEqual(['positions', 'version']);
-      expect(body.version).toBe(4);
-      for (const position of body.positions) {
-        const node = nodes.find((item) => item.id === position.node_id);
-        if (node) {
-          node.position_x = position.x;
-          node.position_y = position.y;
+    const request = route.request(),
+      path = new URL(request.url()).pathname;
+    if (request.method() !== 'GET') writes++;
+    if (path.endsWith('/events/stream')) return route.abort();
+    if (path.endsWith('/activity'))
+      return route.fulfill({
+        json: {
+          team_id: ids[0],
+          team_name: 'Test team',
+          enabled: true,
+          tasks: [
+            {
+              id: ids[1],
+              title: 'Implement feature',
+              priority: 2,
+              status: 'ACTIVE',
+              stage: 'DEVELOPING',
+              wait_reason: 'NONE',
+              requirement_version: 1
+            }
+          ],
+          milestones: [
+            {
+              id: ids[2],
+              task_id: ids[1],
+              stage: 'DEVELOPING',
+              status: 'ACTIVE',
+              actor: 'worker:1',
+              started_at: '2026-09-08T10:00:00Z',
+              finished_at: null
+            }
+          ]
         }
-      }
-      await route.fulfill({ status: 204 });
-    } else if (path.endsWith('/workflow')) {
-      if (request.method() === 'PUT') graphWrites++;
-      await route.fulfill({ json: { version: 4, nodes, edges: [] } });
-    } else if (path.endsWith('/events/stream')) {
-      await route.fulfill({ status: 200, contentType: 'text/event-stream', body: ': ready\n\n' });
-    } else {
-      await route.fulfill({ json: [] });
-    }
+      });
+    if (path.endsWith('/automation'))
+      return route.fulfill({
+        json: {
+          version: 1,
+          enrollment_enabled: false,
+          auto_merge: false,
+          repository_ids: [],
+          authorized_reviewer_ids: [],
+          required_checks: [],
+          task_budget_usd: '1',
+          team_budget_usd: '5',
+          require_formal_approval: true
+        }
+      });
+    if (path.endsWith('/statistics'))
+      return route.fulfill({ json: { cloud_runs: [], phases: [], local_runs: [] } });
+    return route.fulfill({ json: [] });
   });
-  await page.goto('/agents');
-  const working = page.locator(`[data-id="${ids[1]}"]`);
-  const idle = page.locator(`[data-id="${ids[2]}"]`);
-  await expect(working).toHaveClass(/running/);
-  await expect(idle).not.toHaveClass(/running/);
-  await expect(working.getByText('IMPLEMENT PLAN')).toBeVisible();
-  const beforeX = nodes[1].position_x;
-  const box = await working.boundingBox();
-  if (!box) throw new Error('Working node missing');
-  await page.mouse.move(box.x + 50, box.y + 25);
-  await page.mouse.down();
-  await page.mouse.move(box.x + 110, box.y + 75, { steps: 10 });
-  await page.mouse.up();
-  await expect.poll(() => layoutWrites).toBe(1);
-  expect(graphWrites).toBe(0);
-  expect(nodes[1].position_x).not.toBe(beforeX);
-  await expect(page.getByRole('button', { name: 'Saved', exact: true })).toBeDisabled();
-  await page.reload();
-  await expect(working).toHaveClass(/running/);
-  expect(graphWrites).toBe(0);
+  await page.goto('/teams/' + ids[0]);
+  await page.getByRole('button', { name: 'Fullscreen', exact: true }).click();
+  await expect.poll(() => page.evaluate(() => Boolean(document.fullscreenElement))).toBe(true);
+  await expect(page.getByRole('complementary', { name: 'Queue and task details' })).toBeVisible();
+  await expect(page.getByText('worker:1')).toBeVisible();
+  await page.getByRole('button', { name: 'Exit fullscreen (Esc)' }).click();
+  await expect.poll(() => page.evaluate(() => Boolean(document.fullscreenElement))).toBe(false);
+  expect(writes).toBe(0);
 });
 
-test('task detail keeps conversation visible, links short, and diagnostics expandable', async ({
+test('ticket displays native receipts, exact status actor/time and responsive notes', async ({
   page
 }) => {
-  const id = ids[0];
-  const sourceUrl = 'https://trello.com/c/abc/' + 'long-ticket-slug-'.repeat(20);
-  const task = {
-    id,
-    title: 'A readable task',
-    description: `Keep this acceptance criterion.\nTrello: ${sourceUrl}\nRead https://example.com/specification`,
-    state: 'NEEDS_HUMAN',
-    priority: 3,
-    team_name: 'Test team',
-    external_key: 'TRELLO-abc',
-    source: { provider: 'trello', identifier: 'TRELLO-abc', url: sourceUrl },
-    manual_takeover: false
-  };
+  const id = ids[0],
+    at = '2026-09-08T10:00:00Z';
   await page.route('**/api/v1/**', async (route) => {
     const path = new URL(route.request().url()).pathname;
-    if (path === `/api/v1/tasks/${id}`) await route.fulfill({ json: task });
-    else if (path.endsWith('/messages'))
-      await route.fulfill({ json: { items: [], next_before_id: null } });
-    else if (path.endsWith('/memory')) await route.fulfill({ json: null });
-    else if (path.endsWith('/events/stream'))
-      await route.fulfill({ status: 200, contentType: 'text/event-stream', body: ': ready\n\n' });
-    else await route.fulfill({ json: [] });
+    if (path.endsWith('/events/stream')) return route.abort();
+    if (path === '/api/v1/tasks/' + id)
+      return route.fulfill({
+        json: {
+          id,
+          title: 'A readable task',
+          description: 'Keep this acceptance criterion.',
+          status: 'PAUSED',
+          stage: 'DEVELOPING',
+          wait_reason: 'NONE',
+          priority: 3,
+          requirement_version: 1,
+          team_name: 'Test team',
+          manual_takeover: false
+        }
+      });
+    if (path.endsWith('/messages'))
+      return route.fulfill({ json: { items: [], next_before_id: null } });
+    if (path.endsWith('/session') || path.endsWith('/metrics'))
+      return route.fulfill({ json: null });
+    if (path.endsWith('/runs'))
+      return route.fulfill({
+        json: [
+          {
+            id: ids[1],
+            role_kind: 'DEVELOPER',
+            provider: 'openai',
+            model: 'unit-model',
+            harness: 'codex',
+            status: 'COMPLETED',
+            cost_usd: '0.012000',
+            input_tokens: 100,
+            output_tokens: 20,
+            cache_read_tokens: 80,
+            usage_complete: true,
+            artifact: 'IMPLEMENTED\nUpdated the API.',
+            started_at: at,
+            finished_at: at,
+            requirement_version: 1,
+            failure_code: null
+          }
+        ]
+      });
+    if (path.endsWith('/events'))
+      return route.fulfill({
+        json: [
+          {
+            id: 1,
+            event_type: 'TASK_LIFECYCLE_CHANGED',
+            source: 'system',
+            created_at: at,
+            payload: {
+              actor: 'operator',
+              from_status: 'ACTIVE',
+              to_status: 'PAUSED',
+              from_stage: 'DEVELOPING',
+              to_stage: 'DEVELOPING'
+            }
+          }
+        ]
+      });
+    return route.fulfill({ json: [] });
   });
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto(`/tasks/${id}`);
+  await page.goto('/tasks/' + id);
   await expect(page.getByRole('heading', { name: 'A readable task' })).toBeVisible();
-  const link = page.getByRole('link', { name: /trello · TRELLO-abc/ });
-  await expect(link).toHaveAttribute('href', sourceUrl);
-  await expect(page.getByText('Task conversation', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Resume work', exact: true })).toBeVisible();
+  await expect(page.getByText('Changed by operator')).toBeVisible();
+  await expect(page.getByText('$0.012000')).toBeVisible();
+  await page.getByText('Result / feedback', { exact: true }).click();
+  await expect(page.getByText('Updated the API.', { exact: false })).toBeVisible();
   await expect(page.getByRole('textbox').first()).toBeVisible();
-  await expect(page.getByRole('link', { name: 'example.com', exact: true })).toHaveAttribute(
-    'href',
-    'https://example.com/specification'
-  );
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
     true
   );
-  const history = page
-    .locator('details')
-    .filter({ has: page.locator('summary', { hasText: 'Execution history' }) });
-  await expect(history).not.toHaveAttribute('open');
-  await history.locator('summary').click();
-  await expect(history).toHaveAttribute('open');
 });

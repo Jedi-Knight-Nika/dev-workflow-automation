@@ -5,9 +5,12 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import Task, TaskPhaseRun, Team, TeamAgentProfile
+from app.engineering.infrastructure.models import TaskPhaseRun
+from app.engineering.infrastructure.task_models import Task
 from app.teams.application.profiles import ProfileConflict, ProfileView
 from app.teams.domain.profiles import AgentProfile, RoleKind
+from app.teams.infrastructure.models import TeamAgentProfile
+from app.teams.infrastructure.team_models import Team
 
 
 async def initialize_profiles(
@@ -96,7 +99,7 @@ class SqlTeamProfiles:
                 .where(
                     Task.team_id == team_id,
                     Task.archived_at.is_(None),
-                    Task.state.not_in(["MERGED", "CANCELLED", "FAILED"]),
+                    Task.status.not_in(["MERGED", "CANCELLED", "FAILED"]),
                 )
                 .order_by(Task.priority, Task.created_at)
                 .limit(100)
@@ -122,8 +125,6 @@ class SqlTeamProfiles:
                     "id": str(task.id),
                     "title": task.title,
                     "priority": task.priority,
-                    "execution_version": task.execution_version,
-                    "legacy_state": task.state.value,
                     "status": task.status,
                     "stage": task.stage,
                     "wait_reason": task.wait_reason,

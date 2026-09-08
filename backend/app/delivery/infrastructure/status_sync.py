@@ -10,8 +10,8 @@ from sqlalchemy import DateTime, ForeignKey, Index, String, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.db.base import Base, utcnow
 from app.delivery.domain.status import semantic_status
+from app.platform.persistence.base import Base, utcnow
 
 
 class ExternalStatusSync(Base):
@@ -48,10 +48,12 @@ async def enqueue_status(
 
 async def process_status_sync(sessions: async_sessionmaker[AsyncSession]) -> bool:
     # Imported after registry initialization: the outbox model has no DB facade dependency.
-    from app.db.models import ExternalTaskSnapshot, Integration, Task, TaskEvent
-    from app.infrastructure.security.crypto import cipher
-    from app.integrations.linear import LinearClient
-    from app.integrations.trello import TrelloClient
+    from app.engineering.infrastructure.task_models import Task, TaskEvent
+    from app.intake.infrastructure.linear_client import LinearClient
+    from app.intake.infrastructure.task_snapshot import ExternalTaskSnapshot
+    from app.intake.infrastructure.trello_client import TrelloClient
+    from app.platform.integrations.models import Integration
+    from app.platform.security.crypto import cipher
 
     async with sessions.begin() as session:
         task_id = await session.scalar(
@@ -73,7 +75,7 @@ async def process_status_sync(sessions: async_sessionmaker[AsyncSession]) -> boo
         row = await session.get(ExternalStatusSync, task_id, with_for_update=True)
         if row is None or row.status != "PENDING":
             return False
-        if task.execution_version != 2 or task.archived_at:
+        if task.archived_at:
             row.status = "SKIPPED"
             return True
         snapshot = await session.scalar(

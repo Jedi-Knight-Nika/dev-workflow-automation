@@ -9,8 +9,10 @@ import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.config import Settings
-from app.db.models import AIRun, DeveloperSession, Job, JobState, Task, TaskEvent
+from app.agent_runtime.infrastructure.models import AIRun, DeveloperSession
+from app.engineering.infrastructure.task_models import Job, Task, TaskEvent
+from app.platform.configuration.settings import Settings
+from app.platform.scheduling.states import JobState
 
 UUID_PATTERN = r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
 NAME = re.compile(rf"/(?:developer|validation|prepare|publish)-({UUID_PATTERN})-({UUID_PATTERN})")
@@ -38,7 +40,7 @@ async def sweep(client: httpx.AsyncClient, sessions: async_sessionmaker[AsyncSes
             if job is None or container.get("Labels", {}).get("task_id") != str(job.task_id):
                 continue  # May belong to another installation; never guess ownership.
             task = await session.get(Task, job.task_id)
-            if task is None or task.execution_version != 2:
+            if task is None:
                 continue
             if (
                 job.lease_token == token

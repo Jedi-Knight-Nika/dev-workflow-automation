@@ -1,1 +1,0 @@
-"""Fixed team profile context."""

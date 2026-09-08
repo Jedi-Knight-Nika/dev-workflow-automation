@@ -7,14 +7,17 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import Settings
-from app.db.models import AIRun, PricingCatalog, SettingsAuditEvent, Task, TaskEvent, Team
+from app.agent_runtime.infrastructure.models import AIRun, PricingCatalog
 from app.delivery.infrastructure.status_sync import enqueue_status
 from app.engineering.infrastructure.enrollment import enroll
+from app.engineering.infrastructure.task_models import Task, TaskEvent
+from app.platform.configuration.models import SettingsAuditEvent
+from app.platform.configuration.settings import Settings
 from app.teams.application.profiles import ProfileConflict
 from app.teams.domain.automation import AutomationPolicy
 from app.teams.infrastructure.automation import TeamAutomationPolicy, policy_payload, read_policy
 from app.teams.infrastructure.statistics import statistics
+from app.teams.infrastructure.team_models import Team
 
 
 class SqlAutomationAdmin:
@@ -25,7 +28,7 @@ class SqlAutomationAdmin:
         task = await self.session.get(Task, task_id, with_for_update=True)
         if task is None:
             raise LookupError("Task not found")
-        if task.execution_version != 2 or task.archived_at:
+        if task.archived_at:
             raise ProfileConflict("Status synchronization requires an unarchived V2 task")
         await enqueue_status(
             self.session, task.id, task.lifecycle_version, task.status or "", task.stage or ""

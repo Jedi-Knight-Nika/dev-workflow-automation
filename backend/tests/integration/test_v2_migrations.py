@@ -11,8 +11,8 @@ from alembic.operations import Operations
 from sqlalchemy import Connection, inspect, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-import app.db.models  # noqa: F401 - register the complete application metadata
-from app.db.base import Base
+import app.platform.persistence.registry  # noqa: F401 - register the complete application metadata
+from app.platform.persistence.base import Base
 
 DEFAULT_TEAM = UUID("00000000-0000-0000-0000-000000000001")
 
@@ -64,11 +64,9 @@ def exercise_fresh_setup(connection: Connection) -> None:
         assert configuration["auto_merge"] is False
         assert configuration["repository_ids"] == []
         settings = connection.execute(
-            text(
-                "SELECT auto_index_repositories, incremental_index_after_merge, default_worker_runtime FROM account_settings"
-            )
+            text("SELECT timezone, default_task_view, settings_version FROM account_settings")
         ).one()
-        assert settings == (False, False, "DOCKER")
+        assert settings == ("UTC", "board", 1)
         assert connection.scalar(text("SELECT count(*) FROM integrations")) == 7
         assert (
             connection.scalar(
@@ -81,9 +79,6 @@ def exercise_fresh_setup(connection: Connection) -> None:
             "jobs",
             "ai_runs",
             "pricing_catalog",
-            "roles",
-            "ai_agents",
-            "workflow_definitions",
         ):
             assert connection.scalar(text(f"SELECT count(*) FROM {table}")) == 0
         with pytest.raises(RuntimeError, match="empty database/schema"):

@@ -2,6 +2,7 @@ import asyncio
 import os
 import signal
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 
 
@@ -11,6 +12,8 @@ class CheckResult:
     exit_code: int | None
     output_tail: str
     timed_out: bool = False
+    started_at: str | None = None
+    finished_at: str | None = None
 
     @property
     def passed(self) -> bool:
@@ -27,6 +30,7 @@ async def run_check(
     """
     if not command or not workspace.is_dir() or timeout < 1 or output_limit < 1:
         raise ValueError("Invalid validation command or limits")
+    started_at = datetime.now(UTC).isoformat()
     process = await asyncio.create_subprocess_exec(
         *command,
         cwd=workspace,
@@ -57,4 +61,11 @@ async def run_check(
         if isinstance(exc, asyncio.CancelledError):
             raise
         timed_out = True
-    return CheckResult(command, process.returncode, tail.decode(errors="replace"), timed_out)
+    return CheckResult(
+        command,
+        process.returncode,
+        tail.decode(errors="replace"),
+        timed_out,
+        started_at,
+        datetime.now(UTC).isoformat(),
+    )

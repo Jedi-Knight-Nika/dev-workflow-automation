@@ -1,357 +1,78 @@
 <script lang="ts">
   import Button from '$lib/components/Button.svelte';
-  import PixelAgentAvatar from '$lib/components/agents/PixelAgentAvatar.svelte';
   import type { TaskMessage } from '$lib/types';
-  import { tick } from 'svelte';
 
   let {
     messages,
-    taskState,
-    resumeOnSend,
-    hasOlder,
-    loadingOlder,
-    sending,
+    taskStatus,
+    hasOlder = false,
+    loadingOlder = false,
+    sending = false,
     onLoadOlder,
-    onSend,
-    onReact,
-    onEdit,
-    onDelete
+    onSend
   }: {
     messages: TaskMessage[];
-    taskState: string;
-    resumeOnSend: boolean;
-    hasOlder: boolean;
-    loadingOlder: boolean;
-    sending: boolean;
-    onLoadOlder: () => Promise<void>;
-    onSend: (body: string, replyToId?: number) => Promise<void>;
-    onReact: (messageId: number, reaction: string) => Promise<void>;
-    onEdit: (messageId: number, body: string) => Promise<void>;
-    onDelete: (messageId: number) => Promise<void>;
+    taskStatus: string;
+    hasOlder?: boolean;
+    loadingOlder?: boolean;
+    sending?: boolean;
+    onLoadOlder?: () => void;
+    onSend: (body: string, replyTo?: number) => Promise<void>;
   } = $props();
-
   let draft = $state('');
-  let showRoutine = $state(false);
-  let replyingTo = $state<TaskMessage | null>(null);
-  let editingMessage = $state<TaskMessage | null>(null);
-  let menu = $state<{ message: TaskMessage; x: number; y: number } | null>(null);
-  let feed: HTMLDivElement;
-  let previousLastId = $state<number | null>(null);
-
-  function isBlocker(message: TaskMessage): boolean {
-    const result = String(message.context.result ?? '');
-    return ['BLOCKED', 'NEEDS_HUMAN', 'NEEDS_CONTEXT'].includes(result);
-  }
-
-  function needsResponse(message: TaskMessage): boolean {
-    return isBlocker(message) && ['NEEDS_HUMAN', 'CONTEXT_PENDING'].includes(taskState);
-  }
-
-  function isRoutine(message: TaskMessage): boolean {
-    return (
-      message.author_type === 'AGENT' &&
-      ['EVENT_INTERPRETED', 'PLAN_READY'].includes(String(message.context.result ?? ''))
-    );
-  }
-
-  const reactionMeanings: Record<string, string> = {
-    '✅': 'Approved or confirmed',
-    '💩': 'This is bad, broken, or needs correction',
-    '😂': 'Amusing or lighthearted approval',
-    '👍': 'Agree',
-    '👎': 'Disagree',
-    '❤️': 'Appreciate',
-    '👀': 'Seen or reviewing'
-  };
-
-  function hasReaction(message: TaskMessage, reaction: string): boolean {
-    return (
-      Array.isArray(message.context.user_reactions) &&
-      message.context.user_reactions.some((value) => String(value) === reaction)
-    );
-  }
-
-  let hiddenRoutineCount = $derived(messages.filter(isRoutine).length);
-  let visibleMessages = $derived(
-    showRoutine ? messages : messages.filter((item) => !isRoutine(item))
-  );
-
-  $effect(() => {
-    const lastId = messages.at(-1)?.id ?? null;
-    if (lastId === null || lastId === previousLastId) return;
-    const shouldScroll =
-      previousLastId === null || feed.scrollHeight - feed.scrollTop < feed.clientHeight + 180;
-    previousLastId = lastId;
-    if (shouldScroll)
-      void tick().then(() => feed.scrollTo({ top: feed.scrollHeight, behavior: 'smooth' }));
-  });
-
+  let error = $state('');
   async function submit() {
-    const body = draft.trim();
-    if (!body || sending) return;
-    if (editingMessage) await onEdit(editingMessage.id, body);
-    else await onSend(body, replyingTo?.id);
-    draft = '';
-    replyingTo = null;
-    editingMessage = null;
-  }
-
-  function keydown(event: KeyboardEvent) {
-    if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
-      event.preventDefault();
-      void submit();
+    if (!draft.trim() || sending) return;
+    error = '';
+    try {
+      await onSend(draft.trim());
+      draft = '';
+    } catch (cause) {
+      error = String(cause);
     }
   }
 </script>
 
-<section class="border-line overflow-hidden rounded-xl border xl:col-span-2">
-  <header class="border-line flex items-center justify-between border-b px-5 py-4">
-    <div>
-      <h2 class="font-semibold">Task conversation</h2>
-      <p class="text-muted mt-0.5 text-xs">Internal context shared with agents on future runs.</p>
-    </div>
-    <span
-      class="bg-brand/10 text-brand rounded-full px-2.5 py-1 text-[10px] font-bold tracking-wider"
-      >INTERNAL</span
-    >
-  </header>
-
-  <div
-    bind:this={feed}
-    class="conversation-feed bg-input/35 max-h-[32rem] min-h-48 overflow-y-auto px-4 py-5 sm:px-6"
-  >
-    {#if hasOlder}
-      <div class="mb-5 flex justify-center">
-        <Button size="sm" disabled={loadingOlder} onclick={() => void onLoadOlder()}>
-          {loadingOlder ? 'Loading…' : 'Load earlier messages'}
-        </Button>
-      </div>
-    {/if}
-    {#if hiddenRoutineCount}
-      <button
-        type="button"
-        class="border-line bg-panel text-muted mx-auto mb-5 block rounded-full border px-3 py-1.5 text-[10px] font-semibold hover:text-heading"
-        onclick={() => (showRoutine = !showRoutine)}
-      >
-        {showRoutine
-          ? 'Hide routine workflow updates'
-          : `${hiddenRoutineCount} routine workflow updates hidden`}
-      </button>
-    {/if}
-    {#if messages.length === 0}
-      <div class="text-muted grid min-h-36 place-content-center text-center text-sm">
-        <p class="text-heading font-medium">No internal messages yet</p>
-        <p class="mt-1 max-w-md text-xs">
-          Ask a question or leave context. Agent summaries will appear here after important work.
+<section class="rounded-xl border border-line bg-panel p-5">
+  <h2 class="font-semibold">Task notes and feedback</h2>
+  <p class="my-2 text-xs text-muted">
+    Notes do not start AI work. Explicit /feedback, /pause, /resume and /cancel commands include the
+    task ID. Current status: {taskStatus}.
+  </p>
+  {#if hasOlder}<Button disabled={loadingOlder} onclick={onLoadOlder}
+      >{loadingOlder ? 'Loading…' : 'Earlier notes'}</Button
+    >{/if}
+  <div class="my-4 space-y-4">
+    {#each messages as message (message.id)}
+      <article class="border-l border-line pl-3">
+        <p class="text-xs text-muted">
+          {message.author_name} · {message.author_role || message.author_type}
+          ·
+          <time datetime={message.created_at}>{new Date(message.created_at).toLocaleString()}</time>
         </p>
-      </div>
-    {:else}
-      <div class="space-y-5">
-        {#each visibleMessages as message (message.id)}
-          <article
-            class="flex gap-3 {message.author_type === 'USER' ? 'flex-row-reverse' : ''}"
-            oncontextmenu={(event) => {
-              event.preventDefault();
-              menu = { message, x: event.clientX, y: event.clientY };
-            }}
-          >
-            {#if message.author_type === 'AGENT'}
-              <PixelAgentAvatar
-                seed={message.agent_id ?? message.author_name}
-                label={message.author_name}
-                size={34}
-              />
-            {:else}
-              <div
-                class="bg-brand/15 text-brand grid size-[34px] shrink-0 place-items-center rounded-lg text-xs font-black"
-              >
-                YOU
-              </div>
-            {/if}
-            <div
-              class="max-w-[min(42rem,85%)] {message.author_type === 'USER'
-                ? 'items-end'
-                : 'items-start'} flex flex-col"
-            >
-              <div class="text-muted mb-1 flex items-center gap-2 text-[11px]">
-                <strong class="text-heading">{message.author_name}</strong>
-                {#if message.author_role}<span>{message.author_role}</span>{/if}
-                {#if message.kind === 'STATUS_UPDATE'}<span class="text-accent">UPDATE</span>{/if}
-                <time>{new Date(message.created_at).toLocaleString()}</time>
-                {#if message.edited_at}<span>edited</span>{/if}
-              </div>
-              <div
-                class="whitespace-pre-wrap rounded-2xl border px-4 py-3 text-sm leading-relaxed shadow-sm {needsResponse(
-                  message
-                )
-                  ? 'border-warning/50 bg-warning/10 rounded-tl-sm'
-                  : message.author_type === 'USER'
-                    ? 'border-line bg-brand/12 rounded-tr-sm'
-                    : 'border-line bg-panel rounded-tl-sm'}"
-              >
-                {#if message.reply_to_id}
-                  {@const parent = messages.find((item) => item.id === message.reply_to_id)}
-                  <div class="border-line text-muted mb-2 border-l-2 pl-2 text-[11px]">
-                    Reply to {parent?.author_name || 'message'} · {parent?.body.slice(0, 90) ||
-                      'Unavailable'}
-                  </div>
-                {/if}
-                {message.body}
-              </div>
-              {#if Array.isArray(message.context.user_reactions) && message.context.user_reactions.length}
-                <div class="mt-2 flex flex-wrap gap-1.5">
-                  {#each message.context.user_reactions as reaction (String(reaction))}
-                    <button
-                      type="button"
-                      class="border-brand/45 bg-brand/12 hover:bg-brand/20 focus-visible:ring-brand/50 grid size-7 place-items-center rounded-full border text-sm shadow-sm transition duration-150 ease-out motion-safe:hover:-translate-y-0.5 motion-safe:hover:scale-110 active:scale-90 focus-visible:ring-2 focus-visible:outline-none"
-                      title={reactionMeanings[String(reaction)] ?? 'Reaction'}
-                      aria-label={`Remove ${reactionMeanings[String(reaction)] ?? 'reaction'}`}
-                      onclick={() => void onReact(message.id, String(reaction))}
-                      >{String(reaction)}</button
-                    >
-                  {/each}
-                </div>
-              {/if}
-              {#if isBlocker(message)}
-                <span
-                  class="mt-1.5 rounded-full px-2 py-1 text-[10px] font-bold {needsResponse(message)
-                    ? 'bg-warning/15 text-warning'
-                    : 'bg-accent/10 text-accent'}"
-                  >{needsResponse(message) ? 'REPLY NEEDED' : 'RESOLVED'} · {String(
-                    message.context.result
-                  ).replaceAll('_', ' ')}</span
-                >
-              {/if}
-              {#if message.context.task_state}
-                <span class="text-muted mt-1.5 text-[10px]"
-                  >Task state · {String(message.context.task_state).replaceAll('_', ' ')}</span
-                >
-              {/if}
-            </div>
-          </article>
-        {/each}
-      </div>
-    {/if}
+        <p class="mt-1 whitespace-pre-wrap break-words text-sm">{message.body}</p>
+      </article>
+    {:else}<p class="text-sm text-muted">No notes yet.</p>{/each}
   </div>
-
   <form
-    class="border-line bg-panel border-t p-4"
     onsubmit={(event) => {
       event.preventDefault();
       void submit();
     }}
+    class="space-y-2"
   >
-    {#if editingMessage}
-      <div
-        class="border-line bg-input mb-2 flex items-center gap-2 rounded-lg border px-3 py-2 text-xs"
-      >
-        <span class="text-muted">Editing your message</span>
-        <button
-          type="button"
-          class="ml-auto"
-          aria-label="Cancel edit"
-          onclick={() => {
-            editingMessage = null;
-            draft = '';
-          }}>×</button
-        >
-      </div>
-    {:else if replyingTo}
-      <div
-        class="border-line bg-input mb-2 flex items-center gap-2 rounded-lg border px-3 py-2 text-xs"
-      >
-        <span class="text-muted">Replying to</span><strong>{replyingTo.author_name}</strong>
-        <span class="text-muted min-w-0 flex-1 truncate">{replyingTo.body}</span>
-        <button type="button" aria-label="Cancel reply" onclick={() => (replyingTo = null)}
-          >×</button
-        >
-      </div>
-    {/if}
+    <label class="sr-only" for="task-note">Note or explicit command</label>
     <textarea
+      id="task-note"
       bind:value={draft}
-      onkeydown={keydown}
-      maxlength="8000"
-      rows="3"
-      aria-label="Write an internal task message"
-      placeholder="Reply with context, a decision, or a question for the next agent run…"
-      class="border-line bg-input focus:border-brand/70 min-h-20 w-full resize-y rounded-xl border px-3.5 py-3 text-sm outline-none transition-colors"
+      maxlength={8000}
+      rows={3}
+      class="w-full rounded-lg border border-line bg-panel-alt p-3 text-sm"
+      placeholder="Add context or a note…"
     ></textarea>
-    <div class="mt-2 flex items-center justify-between gap-3">
-      <span class="text-muted text-[10px]"
-        >Ctrl/⌘ + Enter to send · {resumeOnSend
-          ? 'Your reply will resume this task'
-          : 'Not synced to Trello or Linear'}</span
-      >
-      <Button variant="primary" size="sm" type="submit" disabled={sending || !draft.trim()}
-        >{sending
-          ? 'Saving…'
-          : editingMessage
-            ? 'Save edit'
-            : resumeOnSend
-              ? 'Send & resume'
-              : 'Send message'}</Button
-      >
-    </div>
+    {#if error}<p role="alert" class="text-sm text-danger">{error}</p>{/if}
+    <Button type="submit" disabled={sending || !draft.trim()}
+      >{sending ? 'Saving…' : 'Save note'}</Button
+    >
   </form>
 </section>
-
-{#if menu}
-  <button
-    class="fixed inset-0 z-[80] cursor-default"
-    aria-label="Close message menu"
-    onclick={() => (menu = null)}
-  ></button>
-  <div
-    class="border-line bg-panel fixed z-[81] w-[min(18rem,calc(100vw-1rem))] rounded-xl border p-1.5 text-sm shadow-2xl"
-    style={`left:${Math.max(8, Math.min(menu.x, window.innerWidth - 296))}px;top:${Math.max(8, Math.min(menu.y, window.innerHeight - 250))}px`}
-  >
-    <button
-      class="hover:bg-input w-full rounded-lg px-3 py-2 text-left"
-      onclick={() => {
-        replyingTo = menu!.message;
-        menu = null;
-      }}>Reply</button
-    >
-    <div class="border-line my-1 border-y px-1 py-2">
-      <p class="text-muted mb-1.5 px-1 text-[10px] font-semibold tracking-wider uppercase">React</p>
-      <div class="grid grid-cols-7 gap-1">
-        {#each ['✅', '💩', '😂', '👍', '👎', '❤️', '👀'] as reaction (reaction)}
-          <button
-            class="focus-visible:ring-brand/50 grid size-8 place-items-center rounded-lg text-lg transition duration-150 ease-out motion-safe:hover:-translate-y-0.5 motion-safe:hover:scale-110 active:scale-90 focus-visible:ring-2 focus-visible:outline-none {hasReaction(
-              menu.message,
-              reaction
-            )
-              ? 'bg-brand/20 ring-brand/40 shadow-sm ring-1'
-              : 'hover:bg-input'}"
-            title={reactionMeanings[reaction]}
-            aria-label={`${hasReaction(menu.message, reaction) ? 'Remove' : 'Add'} ${reactionMeanings[reaction]}`}
-            aria-pressed={hasReaction(menu.message, reaction)}
-            onclick={() => {
-              void onReact(menu!.message.id, reaction);
-              menu = null;
-            }}>{reaction}</button
-          >
-        {/each}
-      </div>
-    </div>
-    {#if menu.message.author_type === 'USER' && !menu.message.deleted_at}
-      <button
-        class="hover:bg-input w-full rounded-lg px-3 py-2 text-left"
-        onclick={() => {
-          editingMessage = menu!.message;
-          replyingTo = null;
-          draft = menu!.message.body;
-          menu = null;
-          void tick();
-        }}>Edit</button
-      >
-      <button
-        class="hover:bg-danger/10 text-danger w-full rounded-lg px-3 py-2 text-left"
-        onclick={() => {
-          void onDelete(menu!.message.id);
-          menu = null;
-        }}>Delete</button
-      >
-    {/if}
-  </div>
-{/if}

@@ -1,6 +1,6 @@
 from decimal import Decimal
 
-from app.application.task_usage import UsageSample, task_usage
+from app.engineering.application.task_usage import UsageSample, task_usage
 
 
 def test_task_usage_combines_history_and_native_turns_without_losing_missing_cost() -> None:

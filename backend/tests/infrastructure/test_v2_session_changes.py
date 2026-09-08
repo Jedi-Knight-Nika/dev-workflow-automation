@@ -11,8 +11,8 @@ from fastapi import FastAPI
 from app.agent_runtime.application.sessions import SessionConflict
 from app.agent_runtime.domain.session_changes import can_keep_native, handoff_request
 from app.agent_runtime.infrastructure.versions import HARNESS_VERSIONS
-from app.api.v2 import router
 from app.bootstrap.v2 import session_administration
+from app.interfaces.http.routes.v2 import router
 
 
 def test_session_versions_match_locked_runner_dependency_pins() -> None:

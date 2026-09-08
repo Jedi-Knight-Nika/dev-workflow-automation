@@ -6,7 +6,7 @@ from sqlalchemy import JSON, ForeignKey
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.db.base import Base
+from app.platform.persistence.base import Base
 from app.teams.domain.automation import AutomationPolicy
 
 

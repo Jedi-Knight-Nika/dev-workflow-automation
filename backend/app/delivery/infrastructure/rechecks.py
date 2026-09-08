@@ -3,8 +3,10 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.db.models import Repository, Task, TaskEvent, Team
+from app.engineering.infrastructure.task_models import Task, TaskEvent
 from app.intake.infrastructure.v2_events import github_event
+from app.repositories.infrastructure.models import Repository
+from app.teams.infrastructure.team_models import Team
 
 
 async def recheck_review(sessions: async_sessionmaker[AsyncSession]) -> bool:
@@ -19,7 +21,6 @@ async def recheck_review(sessions: async_sessionmaker[AsyncSession]) -> bool:
             select(Task)
             .join(Team)
             .where(
-                Task.execution_version == 2,
                 Task.status == "WAITING_EXTERNAL",
                 Task.stage == "REVIEWING",
                 Task.manual_takeover.is_(False),

@@ -29,7 +29,7 @@ class CodexHarness:
         return {
             "cwd": str(self.settings.workspace),
             "model": self.settings.model,
-            "sandbox": Sandbox.workspace_write,
+            "sandbox": Sandbox.read_only if self.settings.read_only else Sandbox.workspace_write,
             "approval_mode": ApprovalMode.deny_all,
             "developer_instructions": self.settings.instructions,
             "config": {
@@ -100,7 +100,7 @@ class CodexHarness:
                     elif isinstance(payload, ItemCompletedNotification):
                         item = payload.item.root
                         if isinstance(item, AgentMessageThreadItem):
-                            summary = item.text[-8000:]
+                            summary = item.text[:8000]
                     elif isinstance(payload, TurnCompletedNotification):
                         completed = payload.turn
         except (TimeoutError, asyncio.CancelledError):

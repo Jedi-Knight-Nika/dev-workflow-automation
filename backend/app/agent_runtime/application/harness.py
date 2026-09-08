@@ -16,6 +16,7 @@ class HarnessSettings:
     max_cost_usd: Decimal = Decimal(5)
     timeout_seconds: int = 1200
     pricing: Pricing | None = None
+    read_only: bool = False
 
     def __post_init__(self) -> None:
         if not self.workspace.is_absolute() or not self.model.strip():

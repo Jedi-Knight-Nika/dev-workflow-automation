@@ -1,6 +1,6 @@
 import pytest
 
-from app.application.process_deliveries import ProcessDeliveries
+from app.intake.application.process_deliveries import ProcessDeliveries
 
 
 class FakeDeliveryProcessor:

@@ -5,37 +5,33 @@ from pathlib import Path
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.agent_runtime.infrastructure.models import DeveloperSession
 from app.agent_runtime.infrastructure.versions import HARNESS_VERSIONS
-from app.config import Settings
-from app.db.models import (
-    DeveloperSession,
-    Job,
-    JobState,
-    Repository,
-    Task,
-    TaskEvent,
-    TaskPhaseRun,
-    TaskState,
-    Team,
-    TeamAgentProfile,
-)
 from app.delivery.infrastructure.status_sync import enqueue_status
 from app.engineering.infrastructure.jobs import enqueue_phase
+from app.engineering.infrastructure.models import TaskPhaseRun
+from app.engineering.infrastructure.task_models import Job, Task, TaskEvent
 from app.intake.domain.events import requirement_fingerprint
+from app.platform.configuration.settings import Settings
+from app.platform.scheduling.states import JobState
+from app.repositories.infrastructure.models import Repository
 from app.teams.infrastructure.automation import read_policy
+from app.teams.infrastructure.models import TeamAgentProfile
+from app.teams.infrastructure.team_models import Team
 
 
 async def enroll(session: AsyncSession, task: Task, settings: Settings, *, actor: str) -> None:
-    if task.execution_version == 2:
+    if await session.scalar(select(DeveloperSession.id).where(DeveloperSession.task_id == task.id)):
         return
-    if not settings.new_fixed_lifecycle or task.team_id is None or task.repository_id is None:
-        raise ValueError("V2 needs its feature flag, Team and unambiguous repository")
+    if task.team_id is None or task.repository_id is None:
+        raise ValueError("A task needs a Team and unambiguous repository")
     team = await session.get(Team, task.team_id)
     repository = await session.get(Repository, task.repository_id)
     policy = await read_policy(session, task.team_id)
     if (
         not team
         or not team.enabled
+        or team.execution_paused
         or team.archived_at
         or not repository
         or not repository.enabled
@@ -47,8 +43,8 @@ async def enroll(session: AsyncSession, task: Task, settings: Settings, *, actor
     if team.repository_ids and str(repository.id) not in team.repository_ids:
         raise ValueError("Repository is outside the Team's scope")
     if task.workspace_path or task.pull_request_number or task.manual_takeover or task.archived_at:
-        raise ValueError("Existing work requires explicit migration, not a fresh enrollment")
-    if task.state not in {TaskState.NEW, TaskState.PAUSED, TaskState.NEEDS_HUMAN}:
+        raise ValueError("Existing task directories must be registered before starting work")
+    if task.status not in {"NEW", "PAUSED", "WAITING_HUMAN"}:
         raise ValueError("Only new or suspended unstarted tasks can enroll")
     running = await session.scalar(
         select(Job.id).where(
@@ -82,8 +78,7 @@ async def enroll(session: AsyncSession, task: Task, settings: Settings, *, actor
     native_state = settings.harness_state_root.resolve() / str(task.id)
     if workspace.exists() or native_state.exists():
         raise ValueError("Unregistered task directories require inspection before enrollment")
-    task.execution_version, task.status, task.stage, task.wait_reason = 2, "NEW", "INTAKE", "NONE"
-    task.state = TaskState.NEW
+    task.status, task.stage, task.wait_reason = "NEW", "INTAKE", "NONE"
     task.lifecycle_version += 1
     session.add(
         TaskPhaseRun(

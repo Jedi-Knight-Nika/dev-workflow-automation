@@ -14,10 +14,7 @@
     activity.tasks.find((task) => task.id === selectedId) ?? activity.tasks[0]
   );
   let nodes = $derived(lifecycleNodes(activity.tasks, selected));
-  const describe = (task: EngineeringTask) =>
-    task.execution_version === 2
-      ? `${task.status} · ${task.stage}`
-      : `Legacy · ${task.legacy_state}`;
+  const describe = (task: EngineeringTask) => `${task.status} · ${task.stage}`;
 
   async function toggleFullscreen() {
     error = '';
@@ -94,7 +91,7 @@
             >{new Date(milestone.started_at).toLocaleString()}</time
           >
         </p>
-      {:else}<p>No V2 milestones recorded. Legacy history remains on the ticket.</p>{/each}
+      {:else}<p>No milestones recorded yet.</p>{/each}
     </aside>
   </div>
 </div>

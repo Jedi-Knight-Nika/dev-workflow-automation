@@ -22,8 +22,6 @@ export type EngineeringTask = {
   id: string;
   title: string;
   priority: number;
-  execution_version: number;
-  legacy_state: string;
   status: string | null;
   stage: string | null;
   wait_reason: string | null;

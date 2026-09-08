@@ -14,7 +14,7 @@
 </script>
 
 <section class="border-line rounded-xl border p-5 xl:col-span-2">
-  <h2 class="mb-4 font-semibold">{t('taskDetail.githubValidation')}</h2>
+  <h2 class="mb-4 font-semibold">Validation evidence</h2>
   {#if validations.length === 0}
     <p class="text-muted text-sm">{t('taskDetail.noValidationEvidence')}</p>
   {:else}
@@ -32,6 +32,20 @@
               >
             </div>
             <small class="text-muted">{validation.kind} · {validation.revision.slice(0, 12)}</small>
+            <p class="mt-1 text-xs text-muted">
+              Started {new Date(validation.created_at).toLocaleString()}{validation.finished_at
+                ? ' · Finished ' + new Date(validation.finished_at).toLocaleString()
+                : ''}{validation.exit_code !== null && validation.exit_code !== undefined
+                ? ' · Exit ' + validation.exit_code
+                : ''}
+            </p>
+            {#if validation.output_tail}
+              <details class="mt-2 text-sm">
+                <summary class="cursor-pointer text-brand">Test output</summary>
+                <pre
+                  class="mt-2 max-h-80 overflow-auto whitespace-pre-wrap break-words text-xs">{validation.output_tail}</pre>
+              </details>
+            {/if}
             {#if validation.details_url}<!-- eslint-disable svelte/no-navigation-without-resolve -->
               <a
                 class="ml-3 text-xs text-brand underline"

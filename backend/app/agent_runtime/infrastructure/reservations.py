@@ -5,10 +5,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent_runtime.infrastructure.models import AIRun
-from app.db.models.tasks import Task
-from app.db.models.teams import Team
 from app.engineering.application.develop import DevelopmentBlocked
+from app.engineering.infrastructure.task_models import Task
 from app.teams.infrastructure.automation import read_policy
+from app.teams.infrastructure.team_models import Team
 
 
 async def reserve_budget(
@@ -28,6 +28,7 @@ async def reserve_budget(
     if (
         team is None
         or not team.enabled
+        or team.execution_paused
         or team.archived_at is not None
         or task is None
         or task.archived_at is not None

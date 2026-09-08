@@ -5,13 +5,23 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import Job, JobState, ReviewCycle, Task
-from app.engineering.domain.lifecycle import Action
+from app.engineering.domain.lifecycle import Action, InvalidTransition
 from app.engineering.infrastructure.jobs import enqueue_phase
 from app.engineering.infrastructure.lifecycle import record_transition
+from app.engineering.infrastructure.models import ReviewCycle
+from app.engineering.infrastructure.task_models import Job, Task
+from app.platform.scheduling.states import JobState
+from app.teams.infrastructure.team_models import Team
 
 
 async def control_task(session: AsyncSession, task: Task, action: Action, *, actor: str) -> None:
+    if action in {Action.RESUME, Action.RELEASE_TAKEOVER}:
+        team = await session.get(Team, task.team_id) if task.team_id else None
+        if not team or not team.enabled or team.archived_at or team.execution_paused:
+            raise InvalidTransition("Enable execution for this Team before resuming its task")
+        if task.status == "NEW" and not task.manual_takeover:
+            await enqueue_phase(session, task)
+            return
     await record_transition(
         session, task.id, action, expected_version=task.lifecycle_version, actor=actor
     )

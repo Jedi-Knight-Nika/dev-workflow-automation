@@ -4,8 +4,8 @@ import signal
 import structlog
 
 from app.bootstrap.scheduler import create_scheduler
-from app.config import get_settings
-from app.logging import configure_logging
+from app.platform.configuration.settings import get_settings
+from app.platform.telemetry.logging import configure_logging
 
 
 async def run() -> None:

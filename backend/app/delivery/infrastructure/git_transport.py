@@ -7,11 +7,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.agent_runtime.infrastructure.container import RunnerMounts, developer_container_spec
 from app.agent_runtime.infrastructure.container_job import run_container_job
 from app.agent_runtime.infrastructure.docker_harness import atomic_json
-from app.config import Settings
-from app.db.models import Integration
 from app.delivery.infrastructure.git_runner import GitManifest
-from app.infrastructure.security.crypto import cipher
-from app.integrations.github_auth import resolve_github_auth
+from app.platform.configuration.settings import Settings
+from app.platform.integrations.github_auth import resolve_github_auth
+from app.platform.integrations.models import Integration
+from app.platform.security.crypto import cipher
 
 
 async def github_token(session: AsyncSession) -> str:

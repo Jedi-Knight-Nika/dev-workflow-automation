@@ -5,7 +5,7 @@ from typing import Any
 from sqlalchemy import JSON, DateTime, ForeignKey, Index, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.db.base import Base, utcnow
+from app.platform.persistence.base import Base, utcnow
 
 
 class TaskPhaseRun(Base):

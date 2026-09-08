@@ -1,400 +1,88 @@
-# V2 implementation and operations
+# Task execution, token accounting and recovery
 
-The [V2 architecture specification](../autonomous_engineering_worker_v2_technical_architecture.md)
-takes precedence over legacy workflow documentation.
+## Normal path
 
-## Current status
+A ticket is created without inference. Eligible ingestion or an explicit Start work action checks Team/repository scope, enrollment policy and Developer configuration. Missing configuration creates a visible wait instead of starting a planning retry loop.
 
-The main fixed workflow is implemented:
+Enrollment creates one DeveloperSession record and deterministic phase job. Intake checks scope and prepares current source. The Developer runs inside a separate Docker container using the pinned Codex or Claude SDK. Its own tools inspect, edit and test the checkout.
 
-1. A scoped, deduplicated import explicitly enrolls an eligible task.
-2. A Git-only container prepares the current repository base branch.
-3. The Developer uses its native Codex or Claude session to inspect, edit, and test.
-4. A separate credential-free, network-disabled container validates and commits.
-5. A Git-only container pushes the validated commit; the controller creates or reuses its PR.
-6. Authorized review feedback resumes the same native Developer session with a new delta.
-7. Current-SHA validation, CI, approval, repository policy, and mergeability are rechecked.
-8. A conditional GitHub merge uses that exact SHA, then records completion.
-9. A durable tracker-status outbox updates the source ticket's explicitly configured Done destination.
+The native ID is persisted before the controller acknowledges permission to execute. On continuation the controller resumes that ID and supplies only new feedback. The native harness retains its history; the application does not reconstruct and resend a complete transcript.
 
-`PUBLISH_PR` and `MERGE_PR` are connected; they no longer deliberately block
-as unfinished phases. The default controller lane does not invoke a mandatory
-Deliverer → Thinker → Executor → Tester model chain.
+## Optional planning and review
 
-**This is not yet a production-accepted V2 installation.** Docker was stopped during
-verification. Real container/SDK runs and the authorized 10–20-ticket benchmark
-have not been performed. The capabilities endpoint reports
-`rollout: operator-gated-validation` and `execution_ready: false` to make that
-distinction explicit. Nothing in this change resets historical usage or starts workers.
+Developer output can request NEEDS_PLAN. An enabled Thinker runs read-only with its own native home and receipt, returns PLAN_READY plus a bounded artifact, and the Developer continues with that artifact. A completed plan for the same requirement is not repeatedly purchased.
 
-## Implementation checklist
+After deterministic validation, an enabled Reviewer reads source in a separate read-only native session. REVIEW_CHANGES returns bounded feedback to the existing Developer session. REVIEW_OK permits publication, not merge authorization. These roles need their own explicit profile limits and count against the same task/Team allowance. They are off by default.
 
-- [x] Fixed lifecycle, independent status/stage/wait reason, optimistic versions and audit.
-- [x] Native Codex/Claude adapters with persisted session IDs and bounded feedback deltas.
-- [x] Explicit Team/repository enrollment; existing tickets are never silently converted.
-- [x] Signed GitHub, Linear, Trello and Slack ingestion with durable delivery deduplication.
-- [x] Linear V2 polling independent of legacy workflow nodes.
-- [x] Linear structured webhook assignment/state eligibility; durable Trello/Linear semantic status sync.
-- [x] Isolated checkout, deterministic validation/commit, branch push and idempotent PR lookup.
-- [x] Authorized, deduplicated review/fix loop; current-SHA conditional merge.
-- [x] Missed review/CI webhook rechecks without AI calls.
-- [x] Task/Team cost reservations shared by development and cloud interpretation.
-- [x] Streaming Codex budget interruption; Claude SDK query budget; incomplete usage preserved.
-- [x] Separately metered native compaction; native automatic compaction remains available.
-- [x] Local interpreter accounting separate from paid tokens; bounded DeepSeek/OpenAI fallbacks.
-- [x] Team/global native cost, time, phase and compaction statistics; legacy dashboard aggregation retained.
-- [x] Free UI notes/status and explicit execution commands without a legacy AI responder.
-- [x] Orphan inspection/stop for provably owned expired runners, retaining stopped-container evidence.
-- [x] Production V2 overlay, same-path binds, private Ollama and destination-restricted provider gateway.
-- [x] One frozen initial schema and safe default entities; no incremental MVP upgrade chain.
-- [x] V2-only scheduler composition; no legacy model/patch dispatch or repository indexing loop.
-- [x] Explicit Codex model change and cross-harness handoff, preserving usage and stopped-task state.
-- [x] PostgreSQL tests of fresh setup, reservations, lifecycle, session changes and merge orchestration.
-- [ ] Real Docker isolation, dependency-image, cancellation and SDK/session/compaction smoke tests.
-- [ ] Deployment-host backup/restore and native-state recovery smoke test.
-- [ ] Representative authorized 10–20-ticket functional, cost and recovery benchmark.
-- [ ] Optional paid Thinker/Reviewer dispatch.
-- [ ] Remaining legacy API/read-model/runtime/table removal and related UI cleanup.
-- [ ] Wire backup/restore tooling to the V2 same-path checkout/native/control directories.
+No application-side JSON file-generation/patch-repair loop exists. Native tool failures can be corrected within the ongoing coding turn.
 
-Optional paid roles are not secretly implemented by the fixed profile editor. The default
-executable lane is the native Developer plus interpretation and deterministic validation/delivery.
-A model/profile mismatch blocks until the operator explicitly applies a session change.
-Per the fresh-start decision, conversion of MVP agent configuration is no longer a requirement.
-The remaining shared/legacy tables are documented in [initial setup](initial-setup.md).
+## Validation and publication
 
-## Boundaries and ownership
+Validation runs administrator-configured argv commands in a separate no-network, credential-free container. Its image must already contain required languages, packages and caches. A timeout kills its process group; output is bounded. Tests that modify source invalidate the checked result.
 
-| Package | Responsibility |
-| --- | --- |
-| `engineering/domain` | Fixed transitions and suspension semantics; no framework/provider imports |
-| `engineering/application` | Leased phase execution and the native-session development use case |
-| `engineering/infrastructure` | Enrollment, durable jobs, lifecycle records, validation and phase controller |
-| `agent_runtime/application` | Provider-neutral harness settings and usage receipts |
-| `agent_runtime/infrastructure` | SDK adapters, Docker protocol, task lock, reservations, accounting, orphan stop |
-| `intake` | Deterministic classification, source authorization, bounded interpretation and event dedup |
-| `delivery` | Git-only transfer, authoritative GitHub evidence, conditional merge and periodic rechecks |
-| `teams` | Fixed profiles, explicit automation policy, pricing administration and statistics |
+Passing checks create a commit. A Git-only transfer container exports the validated objects and pushes only the task branch. The controller creates or reconciles the matching PR. GitHub credentials are not provided to the Developer or validator.
 
-Application/domain code does not import SDKs or database models. Bootstrap composes
-adapters. The API and controller do not execute repository code or instantiate a native
-coding SDK. The developer image contains the optional, pinned harness dependencies.
+Provider approval and CI are not inferred from local test success. Remote evidence is fetched again and tied to the exact head SHA and requirement version.
 
-## Enrollment and current source
+## Review and merge
 
-An enabled Team policy lists explicit repository UUIDs. Eligible imports can enroll
-automatically; existing tickets use the explicit enrollment endpoint/button.
-The same policy checks apply to both. Enrollment refuses active legacy execution,
-existing workspaces/PRs, manual takeover, archived resources and ambiguous scope.
+Signed events are durably deduplicated. Structured reviews/checks and exact commands are handled deterministically. Relevant authorized free-text feedback may use the local interpreter and explicitly configured cloud fallback.
 
-A new task gets its own standalone repository, controller directory and persistent
-native-state directory. Initial checkout fetches the configured base branch at execution
-time, not an old RAG index. Its base SHA is persisted. Later feedback keeps the task's
-branch/session; it does not silently replace the branch with a newer main/master checkout.
-Future tasks fetch the newer branch. Repository RAG is disabled by default and never
-required by this V2 path.
+Feedback received during an active phase is deferred; paused tasks stay paused. Actionable feedback resumes the same Developer with a delta. Requirement changes increment version, record actor/history and invalidate prior evidence.
 
-Existing tasks with work or a PR need a reviewed migration/recovery decision.
-Do not flip `execution_version` in SQL, delete workspaces, or reset usage to bypass checks.
+Merge requires all configured gates: enabled Team, runnable task/lease, allowed repository, auto-merge policy, exact current SHA, current local validation, required successful CI checks, authorized human review and mergeability. Formal approval is the default. If policy explicitly permits nonformal approval, only the supported exact current-SHA /lgtm command is accepted.
 
-## Native editing, feedback and compaction
+The final GitHub merge request includes the expected SHA. If evidence changes, the task returns to review wait. Waiting/polling does not create paid planning runs.
 
-Codex and Claude use their own native tools, including terminal/Bash operations,
-inside the task container. There is no platform-written patch-generation retry loop
-and no web terminal required for coding. Failed edits/tests can be corrected in that
-same native turn.
+## Cost contract
 
-The runner first emits its native session ID. The controller persists it and writes a
-fresh acknowledgement into a read-only controller mount before paid work begins.
-The next turn explicitly resumes that ID. Only the new feedback is supplied by the
-controller, not another accumulated plan/transcript/source bundle.
+AIRun records role, provider, model, native IDs, requirement version, timestamps, reservation, usage completeness, token categories, provider/calculated cost, failure and bounded artifact. Local Ollama runs are separate and not counted as paid API tokens.
 
-This does **not** mean every provider request bills only the new delta. The native
-harness still manages model context and caching. Cache reads remain billable according
-to provider pricing. No measured percentage or dollar saving is claimed without a
-real benchmark.
+Before paid inference, the controller reserves against current role, task and Team cumulative allowances. A running or unreconciled unknown-cost run prevents an unsafe second admission. Known pre-inference failures can be zero; lost receipts remain unknown until explicitly reconciled with evidence.
 
-Native automatic compaction is accounted in its turn usage. Optional
-`DEVELOPER_COMPACT_BEFORE_FEEDBACK_TOKENS` triggers a separate Codex compaction run
-before a long-session continuation; zero disables platform-triggered compaction.
-The SDK compaction turn has its own reservation, receipt, duration and
-`v2.compaction.1` run record. It preserves pending feedback and the existing session.
-Claude's explicit compaction adapter dispatches its native `/compact` command.
-Codex's pinned high-level compact API returns a start acknowledgement, so the adapter
-uses the pinned notification interface to collect the actual metered turn.
+Codex streaming usage is watched against configured pricing and the turn allowance. Claude uses the SDK budget plus normalized receipts. An in-flight provider request can overshoot the requested limit before interruption/receipt arrives; this is not a guarantee of an exact provider invoice cap.
 
-Concurrent requirement updates cannot be erased by a late old-turn receipt.
-Unknown native state/usage never starts a replacement session automatically.
+Native compaction usage is metered. Optional platform-triggered compaction has its own reservation and receipt and preserves pending feedback. The default threshold is zero, leaving native automatic context management in place.
 
-### Explicit session changes
+A pause, resume, Team wake or model change never resets historical usage. Changing a model/harness requires a suspended task, version checks and explicit operator reason. A compatible same-harness model change can retain its native ID; a cross-harness change creates a generation with a bounded handoff, not an imported transcript.
 
-The ticket's **Native Developer session** panel supports a versioned, audited operator
-change while the task is suspended. Configure the target Team Developer profile first.
-Codex/OpenAI model changes may retain the same native thread; other combinations use a
-new generation with a bounded advisory handoff on the same checkout. No old transcript,
-native ID or cumulative usage baseline is imported into a different session.
+## Why this uses fewer avoidable tokens
 
-Historical runs remain billable and count toward task/Team limits. Active workers and
-unreconciled costs block a change. Neither operation calls an SDK, edits source files,
-resumes the task or changes its stage; resume remains a separate operator action.
-See [the exact procedure and constraints](initial-setup.md#explicit-model-and-harness-changes).
+- No mandatory multi-role model chain for routine work.
+- No repository index/embedding dependency or whole-source prompt injection.
+- Current files are read only when native tools need them.
+- Native edit/test correction happens in the same coding session.
+- Feedback is a bounded delta, not repeated plans and memory.
+- Deterministic routing, polling and UI notes are free.
+- Optional consultations are bounded and separately metered.
+- Missing tools/configuration and unknown spending stop with evidence instead of blind retry.
 
-## Validation and GitHub delivery
+These remove identifiable overhead, but do not promise a measured saving. Native context, tools, cache reads and compaction still cost tokens. Compare completed task cost and success rate, not just whether a budget stopped a run.
 
-Validation commands are administrator-configured argv arrays keyed by repository
-UUID. The validator has no model/GitHub/database credentials and no network. It
-captures a bounded output tail, kills timed-out process groups, and detects source
-changes made by tests. Passing checks create a local commit; tests that modify source
-cannot silently publish an unvalidated change.
+## Stopping and resuming
 
-**Dependency preparation is an operator prerequisite:** the runner image must already
-contain the selected repository's supported tools and dependency caches/environment.
-The stock controller image cannot supply every project's Python/Node dependencies.
-Build a repository-specific image and use that image for both Developer and validation.
-Do not grant validation internet or production secrets to make a dependency error pass.
+Ticket pause revokes current leases and preserves phase/source/session. Cancellation is terminal; archive hides terminal tickets without erasing evidence. Manual takeover stops automation until explicitly released.
 
-The credentialed publisher executes fixed Git commands, not project hooks/config.
-It exports only validated Git objects into a fresh bare repository, rejects symlinks,
-does not import alternates, and pushes only the task branch without force.
-The Developer never receives GitHub push credentials. No persistent/global Git identity
-or credentials are written by this transfer path.
+Team Stop work sets execution_paused, revokes leases and pauses tickets while keeping the Team enabled. Workers observe lease loss and stop owned runners. Enable execution clears admission pause but does not automatically resume suspended tasks.
 
-PR creation first looks up the exact head/base pair. Ambiguous results or mismatched
-head SHA stop. Lost responses are reconciled by subsequent lookup, not blind write retries.
+No control can instantly undo an external request already accepted by a provider. Cancellation is coordinated through leases, heartbeat interruption and owned-container cleanup; current-SHA checks prevent a late stale result from advancing the task.
 
-GitHub webhooks trigger fresh authoritative reads. Merge requires:
+## Diagnostics
 
-- Team auto-merge enabled and repository explicitly allowed.
-- Current head exactly matching the task revision and local validation requirement version.
-- Every configured CI check present and successful; missing/ambiguous evidence fails closed.
-- An authorized immutable numeric human reviewer ID, excluding the PR author.
-- Current-SHA formal approval, no blocking change request, and confirmed mergeability.
-- An unsuspended task, available Team, and valid execution lease.
+Use the ticket's status history, latest job failure, validation output and AI run artifact. Job SUCCEEDED means its execution unit completed; MERGED is the delivery outcome.
 
-If formal approval is explicitly disabled in policy, an authorized issue comment containing
-exactly `/lgtm <current-sha>` is also accepted. Plain “lgtm”, model output, bot identities
-and old-SHA comments are not approval. Dismissed/change-requested reviews invalidate the
-nonformal fallback for that actor. The final merge request includes the expected SHA.
-
-If evidence changes between review and merge, the task returns to external review wait,
-not a paid planning loop. Missed webhooks are rechecked at most once per five minutes
-per waiting task. Paused tasks are not resumed by polling.
-
-## Sources and the small interpreter
-
-Signatures are verified over the original bounded body (maximum 1 MB). Delivery IDs and
-source/review fingerprints suppress redelivery. A valid provider signature is not
-sufficient actor authority.
-
-- GitHub: review/CI/PR webhooks; formal reviews are deterministic. Configured reviewer IDs
-  govern actionable comments.
-- Trello: signed events wake the authoritative card poller. Authorized comment actors
-  come from integration configuration `v2_actor_ids`.
-- Linear: signed issue/comment events plus fixed-source polling. V2 polling reads
-  `v2_assignee_id` and `v2_source_state_ids` from integration configuration, once per minute.
-  Comment actors require `v2_actor_ids`.
-- Slack: signed Events API callbacks, configured workspace/channel/actor routing.
-  Send `task <description>` or `@app task <description>` in the configured channel.
-  Thread replies attach to the existing task. This is not a Slack interactive
-  slash-command endpoint.
-
-`SLACK_TEAM_ROUTES` is a JSON object keyed by `workspace-id:channel-id`; each route
-contains `team_id`, `repository_id` and comma-separated `actor_ids`.
-
-Structured events and explicit commands do not need a model. Free text is claimed
-separately from webhook transactions. Deferred comments do not interrupt a developing
-task just to classify it. Authorization and task/SHA relevance are rechecked before action.
-
-When enabled, local Qwen/Ollama is attempted first. Optional
-`INTERPRETER_CLOUD_MODELS` contains at most two explicit entries such as
-`deepseek/<configured-model>` and `openai/<configured-model>`.
-No model name or price is guessed. An explicitly budgeted Team Interpreter cloud profile
-can select the first fallback. A configured Ollama profile supplies the local model.
-
-The interpreter gets only bounded event text/reference, no repository, RAG, transcript,
-tools or merge authority. Each cloud attempt has a 512-output-token ceiling, a short
-timeout, and an admitted cost reservation. There is no repair loop for malformed JSON.
-Low-confidence/unavailable interpretation requests explicit human classification.
-Local model time/tokens live in `local_model_runs`, not paid API totals.
-
-An in-flight classification does not hold up unrelated queued comments. A classification
-claim lost for 15 minutes is marked for human review, not replayed. Expired cloud runs
-retain unknown billing until reconciled. A configured Interpreter hard budget is cumulative
-per task across cloud fallbacks, in addition to request/task/Team admission limits.
-
-### Source-ticket completion
-
-Each lifecycle change updates a durable `external_status_syncs` outbox in the same
-transaction. The controller separately writes only configured semantic destinations:
-`todo`, `in_progress`, `in_review`, `blocked`, `paused`, `cancelled`, and `done`.
-Trello integration keys end in `_list_id`; Linear keys end in `_state_id`.
-For example, set `done_list_id` or `done_state_id` to the exact completed destination.
-Paused/cancelled tasks are never silently reported as Done.
-
-Missing configuration is recorded for operator attention. Provider errors back off and
-stop after five attempts; they do not trigger an AI run or undo a confirmed merge.
-After correcting configuration, `POST /v2/tasks/{id}/retry-status-sync` queues a free
-deterministic retry. Repeating an absolute tracker-state update is idempotent.
-
-## Costs and recovery
-
-`ai_runs` keeps normalized input/output/cache/reasoning counters, provider-reported and
-catalog-calculated cost, pricing provenance, reserved cost and timing separately.
-Missing values remain null. Input includes cache reads/writes; reasoning is a subset
-of output, not an extra token category to add again.
-
-A Team lock serializes spending admission. Running reservations count toward task/Team
-limits. Suspended tasks/Teams cannot admit new spending. Unknown stopped-run costs block
-further Team spending until explicitly reconciled. Reservations are not retrospectively
-reported as actual consumption.
-
-Codex streams usage and requests interruption at its configured ceiling; Claude gets
-the SDK query budget. **These are interruption/admission controls, not an exact invoice
-cap:** an already in-flight provider request can finish or overshoot before interruption.
-Use provider-side organization/project limits as an additional financial control.
-Long-context/service-tier billing must be represented conservatively in the configured
-pricing; this version only selects the catalog's explicit standard-tier entries.
-
-On lost controller leases, owned runners are stopped; workspaces/native state and
-stopped-container evidence are retained. There is no automatic paid replay.
-A genuine late billing receipt can reconcile an orphan-stopped run without resuming
-the task or consuming newer feedback.
-An operator can reconcile an unknown stopped run through
-`POST /v2/runs/{id}/reconcile-cost`, supplying the actual USD amount and receipt/reference.
-This records an audit trail, does not invent token counters, and cannot overwrite a
-known cost. Never enter zero simply to unlock a task.
-
-## API and UI
-
-Under `/api/v1`:
-
-- `GET /v2/capabilities`
-- `GET /v2/teams/{id}/profiles`
-- `POST /v2/teams/{id}/profiles/initialize`
-- `PUT /v2/teams/{id}/profiles/{role}` with optimistic version
-- `GET /v2/teams/{id}/activity`
-- `GET/PUT /v2/teams/{id}/automation`
-- `POST /v2/tasks/{id}/enroll`
-- `GET /v2/tasks/{id}/session`
-- `POST /v2/tasks/{id}/session/change` with current session/task/profile versions
-- `POST /v2/tasks/{id}/retry-status-sync`
-- `GET /v2/statistics?team_id=<optional-id>&days=30`
-- `GET/POST /v2/pricing` (new immutable version, exact prices, effective date and source URL)
-- `POST /v2/runs/{id}/reconcile-cost`
-
-Teams → Open team lifecycle shows fixed profiles, enrollment/policy, queue, task
-details, fullscreen canvas and phase milestones. Escape exits native fullscreen.
-Team and global statistics separate native/cloud/local measurements and show missing
-costs as unavailable. The existing main dashboard and ticket CSV retain historical usage.
-
-Ordinary V2 task-conversation notes make no AI call. Explicit local commands:
-
-- `/status <task-uuid>`: deterministic status response.
-- `/pause <task-uuid>`, `/resume <task-uuid>`, `/cancel <task-uuid>`: audited controls.
-- `/feedback <task-uuid> <new instructions>`: saves a bounded delta and pauses work;
-  inspect interrupted usage, then use Resume. It does not recreate a plan.
-
-The installation retains its existing local-operator access model. Put the API behind
-trusted authentication/access controls; this work does not introduce public multi-tenant
-authorization. Never expose the Docker socket, private Ollama, or native state publicly.
-
-## Deployment
-
-Use the explicit overlay:
+Read-only monitoring:
 
 ```sh
-docker compose -f deploy/compose.production.yaml -f deploy/compose.v2.yaml config --quiet
-docker compose -f deploy/compose.production.yaml -f deploy/compose.v2.yaml --profile images build
+python scripts/validate_real_workflow.py TRELLO-example --poll-seconds 15
 ```
 
-Configure required production secrets privately. Set an absolute `V2_DATA_ROOT`
-whose path is identical on the Docker host and inside the controller. This is essential
-because the controller asks the Docker daemon to bind those paths. Use a new empty database
-with `0001_initial`; see [initial setup](initial-setup.md). The old `0058`/`0059` upgrade
-chain is retired. Existing schemas are refused, not automatically converted or deleted.
+The observer performs GET requests only. It never starts, resumes, retries, resets budgets or merges. It prints task state and metering/evidence when work finishes or suspends.
 
-The overlay disables legacy execution and keeps `V2_SCHEDULER_ENABLED=false` by default.
-It does not delete existing data. Start API/frontend without paid workers first; inspect
-the automatically initialized profiles, publish verified prices and validation commands,
-then set Team/repository/actor policies and the approved USD limit.
+## Verification and remaining deployment acceptance
 
-The provider gateway exposes only exact TLS CONNECT destinations
-`api.openai.com`, `api.anthropic.com`, and `github.com` to private task runners.
-It has no keys, database or Docker socket. TLS is not intercepted; it restricts destinations,
-not the semantics of an allowed provider request. Actual egress/isolation must still be
-tested on the deployment host.
+Local verification covers backend architecture/types/lint, unit and PostgreSQL integration tests, frontend checks/build, and mocked-API browser flows including fullscreen and receipts.
 
-Ollama runs on a private network with no published port, bounded resources and a persistent
-model volume. Supply a verified `OLLAMA_IMAGE` tag/digest and prepopulate the chosen model
-volume through a separately approved provisioning step; the private service cannot
-download arbitrary models from the internet. Do not silently download multi-GB models.
+Docker was unavailable during this refactor. Still required on the deployment host: build the runner/dependency image, verify native start/resume/compaction/cancellation with each configured harness, run an offline backup/restore smoke test, then benchmark 10–20 explicitly authorized low-risk tasks. Record completion rate, cost per completed task, context/cache/compaction usage, latency and failure categories.
 
-The worker alone needs the Docker socket. Treat it as highly privileged. Runner
-UID/GID is 10001, with a read-only rootfs, dropped capabilities, bounded CPU/RAM/PIDs,
-fresh read-only authorization mount and shared task file lock. This configuration
-requires real host testing; it is not a security certification.
-Validation has no native-state bind: it receives an empty, temporary home directory,
-so repository tests cannot read persisted SDK state. Git plumbing uses bounded output
-capture and process-group cancellation, including transport helpers.
-
-## Verification and acceptance
-
-Verified in this checkout without paid AI calls:
-
-- Backend: 598 unit/application/domain/infrastructure/architecture tests passed;
-  Ruff check/format and mypy (387 source files) passed.
-- PostgreSQL: all 44 integration tests passed on a fresh initial-schema database, including atomic
-  reservations, stale-worker pause protection, orphan/late-receipt accounting,
-  tracker status delivery and the mocked-provider PR/review/merge lifecycle.
-- Frontend: lint, formatting, type-check (zero errors/warnings), 36 unit tests and
-  production build passed.
-- Production Compose overlay validation and `git diff --check` passed.
-- Real local Git object-copy/fsck tests passed; the remote push was mocked.
-
-No PostgreSQL tests are excluded. Repository resources work without a vector table when
-RAG is disabled. The initial-revision tests reflect the actual PostgreSQL schema against
-ORM metadata, including indexes and constraints, and verify default entities and refusal
-of nonempty schemas. No MVP/pgvector upgrade is claimed or required by this baseline.
-
-Backend unit command: `cd backend && .venv/bin/pytest -q --ignore=tests/integration`.
-Database command, **only against a disposable test database**:
-`TEST_DATABASE_URL=<test-url> .venv/bin/pytest -q tests/integration`.
-Frontend command: `cd frontend && npm run check`.
-
-The PostgreSQL setup tests execute the actual initial revision in rolled-back unique
-schemas. The full integration suite also runs against a disposable database initialized
-by `alembic upgrade head`, rather than a hand-built partial test schema.
-
-The lifecycle integration test uses real PostgreSQL records and mocked GitHub responses.
-It checks enrollment, phase sequencing, deduplication, same-session feedback, current-SHA
-merge admission and one merge write. It does not claim a real SDK edited a real repository.
-
-Before deleting remaining legacy runtime, benchmark 10–20 explicitly selected tickets.
-Record ticket complexity, provider/model/harness version, completion, input/output/cache
-tokens, actual cost, provider/wall/phase time, repairs, compactions, review cycles, and
-recovery outcome. Include small docs/UI work, backend changes, tests that fail initially,
-a review fix, paused work, provider failure, stale approval and a merge conflict.
-
-Do not infer savings from old usage deletion or compare unlike task scopes. Include
-failed attempts and unknown costs; reconcile those before accepting a benchmark.
-
-Required operator inputs remain: Docker available without waking old paid workers;
-a disposable GitHub repository and selected Trello/Linear task; approved provider and
-total USD spend; permission for branch/PR writes and any approved merge; verified prices,
-validation image/commands, and reviewer/check policy. No production writes or paid
-benchmark runs were performed during this implementation.
-
-## Verified interfaces
-
-The OpenAI Docs skill guided native SDK/session/compaction integration; the installed
-pinned SDK is also inspected and contract-tested.
-
-- [Codex SDK](https://learn.chatgpt.com/docs/codex-sdk)
-- [Codex app-server](https://learn.chatgpt.com/docs/app-server)
-- [Claude SDK commands and compaction](https://code.claude.com/docs/en/agent-sdk/slash-commands)
-- [GitHub pull-request merge API](https://docs.github.com/en/rest/pulls/pulls#merge-a-pull-request)
-- [GitHub review API](https://docs.github.com/en/rest/pulls/reviews#list-reviews-for-a-pull-request)
-- [Trello webhook verification](https://developer.atlassian.com/cloud/trello/guides/rest-api/webhooks/)
-- [Slack request verification](https://docs.slack.dev/authentication/verifying-requests-from-slack/)
-- [Ollama chat API](https://docs.ollama.com/api/chat)
-- [DeepSeek JSON output](https://api-docs.deepseek.com/guides/json_mode/)
+Model discovery for the optional DeepSeek interpreter uses its [documented GET /models endpoint](https://api-docs.deepseek.com/api/list-models/). Provider model availability/prices must be verified by the operator; no static discovery list or price is guessed.

@@ -13,6 +13,7 @@ class RunnerMounts:
     tasks_root: Path
     state_root: Path
     control_root: Path
+    state_namespace: UUID | None = None
 
     @property
     def lock_path(self) -> Path:
@@ -40,7 +41,12 @@ class RunnerMounts:
             raise ValueError("Broad mounts are forbidden")
         if not self.workspace.resolve().is_relative_to(task_root):
             raise ValueError("Only this task's checkout can be mounted")
-        if self.state.resolve() != state_root:
+        expected_state = (
+            state_root / "helpers" / str(self.state_namespace)
+            if self.state_namespace
+            else state_root
+        )
+        if self.state.resolve() != expected_state:
             raise ValueError("Harness state must be isolated by task ID")
         control = self.control_root.resolve() / str(self.task_id)
         if not self.manifest.resolve().is_relative_to(control):
@@ -69,8 +75,11 @@ def developer_container_spec(
     image: str,
     network: str,
     provider_environment: dict[str, str],
+    read_only: bool = False,
 ) -> dict[str, Any]:
     mounts.validate()
+    if mounts.state_namespace and not read_only:
+        raise ValueError("Helper workspaces must be read-only")
     if network in {"host", "bridge", "none", "default", ""}:
         raise ValueError("An explicitly isolated provider-egress network is required")
     allowed = {"OPENAI_API_KEY", "ANTHROPIC_API_KEY", "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY"}
@@ -95,7 +104,7 @@ def developer_container_spec(
             "ReadonlyRootfs": True,
             "Privileged": False,
             "Binds": [
-                f"{mounts.workspace}:/workspace:rw",
+                f"{mounts.workspace}:/workspace:{'ro' if read_only else 'rw'}",
                 f"{mounts.state}:/home/runner:rw",
                 f"{mounts.manifest.parent}:/run/control:ro",
                 f"{mounts.lock_path}:/run/workspace.lock:ro",

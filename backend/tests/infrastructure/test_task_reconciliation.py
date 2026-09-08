@@ -1,6 +1,6 @@
-from app.application.ports.task_reconciliation import ReconciliationResult
-from app.application.reconcile_tasks import ReconcileExternalTasks
-from app.infrastructure.task_reconciliation import CompositeTaskReconciliation
+from app.intake.application.ports.task_reconciliation import ReconciliationResult
+from app.intake.application.reconcile_tasks import ReconcileExternalTasks
+from app.intake.infrastructure.reconciliation import CompositeTaskReconciliation
 
 
 class StubReconciliationGateway:

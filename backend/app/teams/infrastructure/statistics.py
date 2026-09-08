@@ -5,8 +5,11 @@ from uuid import UUID
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import AIRun, LocalModelRun, Task, TaskPhaseRun
-from app.infrastructure.persistence.usage_query import complete_cost
+from app.agent_runtime.infrastructure.models import AIRun
+from app.engineering.infrastructure.models import TaskPhaseRun
+from app.engineering.infrastructure.task_models import Task
+from app.intake.infrastructure.models import LocalModelRun
+from app.platform.telemetry.usage_query import complete_cost
 
 
 async def statistics(session: AsyncSession, team_id: UUID | None, days: int = 30) -> dict[str, Any]:

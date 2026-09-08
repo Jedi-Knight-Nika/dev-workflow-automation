@@ -6,12 +6,12 @@
   import TeamBadge from '$lib/components/TeamBadge.svelte';
   import Skeleton from '$lib/components/Skeleton.svelte';
   import { listRepositories } from '$lib/services/repositories';
-  import { getExecutionPolicy, saveExecutionPolicy } from '$lib/services/execution-policy';
   import {
     archiveTeam,
     createTeam,
     listTeams,
     shutdownTeam,
+    wakeTeam,
     updateTeam
   } from '$lib/services/teams';
   import type { Repository, Team } from '$lib/types';
@@ -30,23 +30,6 @@
     description = $state(''),
     concurrency = $state(1);
   let repositoryIds = $state<string[]>([]);
-  let policyMode = $state<'CONSERVATIVE' | 'AUTONOMOUS' | 'CUSTOM'>('AUTONOMOUS');
-  let policySettings = $state<Record<string, 'ALLOW' | 'DENY' | 'REQUIRE_HUMAN'>>({});
-  let approvedHosts = $state('');
-  let commandTimeout = $state(1200);
-  let isolation = $state('Not measured');
-  const policyCapabilities = [
-    ['WRITE_REPOSITORY', 'Write repository'],
-    ['DELETE_FILES', 'Delete files'],
-    ['RUN_COMMANDS', 'Run commands'],
-    ['RUN_TESTS', 'Run tests'],
-    ['INSTALL_DEPENDENCIES', 'Install dependencies'],
-    ['CREATE_COMMIT', 'Create commits'],
-    ['PUSH_TASK_BRANCH', 'Push task branch'],
-    ['CREATE_PR', 'Create pull requests'],
-    ['MERGE_PR', 'Merge pull requests'],
-    ['NETWORK_APPROVED_HOSTS', 'Approved network hosts']
-  ];
   const integer = new Intl.NumberFormat();
   const money = new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD' });
 
@@ -65,25 +48,9 @@
     description = team?.description ?? '';
     concurrency = team?.max_concurrent_tasks ?? 1;
     repositoryIds = [...(team?.repository_ids ?? [])];
-    policyMode = 'AUTONOMOUS';
-    policySettings = {};
-    approvedHosts = '';
-    commandTimeout = 1200;
-    isolation = 'Not measured';
     showForm = true;
-    if (team) {
-      try {
-        const policy = await getExecutionPolicy(team.id);
-        policyMode = policy.mode;
-        policySettings = policy.settings;
-        approvedHosts = policy.approved_hosts.join(', ');
-        commandTimeout = policy.max_command_timeout_seconds;
-        isolation = `${policy.execution_environment} · ${policy.isolation_level} isolation`;
-      } catch (cause) {
-        error = String(cause);
-      }
-    }
   }
+
   function toggleRepository(id: string) {
     repositoryIds = repositoryIds.includes(id)
       ? repositoryIds.filter((item) => item !== id)
@@ -101,17 +68,8 @@
       repository_ids: repositoryIds
     };
     try {
-      const savedTeam = editing ? await updateTeam(editing.id, input) : await createTeam(input);
-      await saveExecutionPolicy(savedTeam.id, {
-        mode: policyMode,
-        settings: policySettings,
-        approved_hosts: approvedHosts
-          .split(',')
-          .map((host) => host.trim())
-          .filter(Boolean),
-        max_command_timeout_seconds: commandTimeout,
-        max_output_bytes: 1_000_000
-      });
+      if (editing) await updateTeam(editing.id, input);
+      else await createTeam(input);
       showForm = false;
       await load();
     } catch (cause) {
@@ -188,7 +146,6 @@
       {/each}
     {/if}
     {#each teams as team (team.id)}
-      {@const hasActiveWork = team.running_tasks > 0 || team.queued_tasks > 0}
       <article class="team-card" class:active={team.running_tasks > 0}>
         <header class="card-header">
           <div class="team-identity">
@@ -245,13 +202,34 @@
             ><span>Open team lifecycle</span><b aria-hidden="true">→</b></a
           >
           <div class="operation-actions">
+            {#if team.execution_paused}
+              <button
+                class="edit"
+                disabled={busy}
+                onclick={async () => {
+                  busy = true;
+                  try {
+                    await wakeTeam(team.id);
+                    await load();
+                    statusMessage =
+                      'Team is accepting new work. Paused tickets still require explicit Resume.';
+                  } catch (cause) {
+                    error = String(cause);
+                  } finally {
+                    busy = false;
+                  }
+                }}>Enable execution</button
+              >
+            {/if}
             <span
               class="button-help"
-              title={!hasActiveWork ? 'No running or queued work to stop' : undefined}
+              title={team.execution_paused
+                ? 'Execution is paused'
+                : 'Stop running work and prevent new claims'}
             >
               <button
                 class="stop"
-                disabled={shuttingDownId === team.id || !hasActiveWork}
+                disabled={shuttingDownId === team.id || team.execution_paused}
                 onclick={() => void shutdown(team)}
                 ><span aria-hidden="true">■</span>{shuttingDownId === team.id
                   ? 'Stopping…'
@@ -344,60 +322,17 @@
                   onchange={() => toggleRepository(repository.id)}
                 /><span
                   ><strong>{repository.owner}/{repository.name}</strong><small
-                    >{repository.index_status} · {repository.chunk_count} chunks</small
+                    >{repository.default_branch} · {repository.enabled
+                      ? 'Enabled'
+                      : 'Disabled'}</small
                   ></span
                 ></label
               >{/each}
           </div>{/if}
       </fieldset>
-      <fieldset>
-        <legend>Execution policy</legend>
-        <p>
-          Ordinary engineering work can run automatically. Platform hard-denies cannot be
-          overridden.<br /><strong>{isolation}</strong>
-        </p>
-        <label
-          ><span>Mode</span><select bind:value={policyMode}
-            ><option value="AUTONOMOUS">Autonomous</option><option value="CONSERVATIVE"
-              >Conservative</option
-            ><option value="CUSTOM">Custom</option></select
-          ></label
-        >
-        <div class="policy-grid">
-          {#each policyCapabilities as capability (capability[0])}
-            <label
-              ><span>{capability[1]}</span><select
-                value={policySettings[capability[0]] || ''}
-                onchange={(event) => {
-                  const value = event.currentTarget.value;
-                  if (value)
-                    policySettings[capability[0]] = value as 'ALLOW' | 'DENY' | 'REQUIRE_HUMAN';
-                  else delete policySettings[capability[0]];
-                  policySettings = { ...policySettings };
-                }}
-                ><option value="">Mode default</option><option value="ALLOW">Auto</option><option
-                  value="REQUIRE_HUMAN">Require human</option
-                ><option value="DENY">Deny</option></select
-              ></label
-            >
-          {/each}
-        </div>
-        <label
-          ><span>Approved network hosts</span><input
-            bind:value={approvedHosts}
-            placeholder="registry.npmjs.org, pypi.org"
-          /><small>Comma-separated. Arbitrary network and production access remain denied.</small
-          ></label
-        >
-        <label
-          ><span>Maximum command timeout</span><input
-            bind:value={commandTimeout}
-            type="number"
-            min="10"
-            max="7200"
-          /><small>Seconds; every command still has its own smaller timeout.</small></label
-        >
-      </fieldset>
+      <p>
+        Configure native profiles, validation and merge policy from the Team workspace after saving.
+      </p>
     </div>
     <footer>
       <button class="cancel" onclick={() => (showForm = false)}>Cancel</button>
@@ -849,8 +784,7 @@
     gap: 0.4rem;
   }
   .body input,
-  .body textarea,
-  .body select {
+  .body textarea {
     border: 1px solid var(--color-line);
     border-radius: 0.6rem;
     background: var(--color-panel);
@@ -863,18 +797,6 @@
     border: 1px solid var(--color-line);
     border-radius: 0.75rem;
     padding: 0.9rem;
-  }
-  fieldset > label,
-  .policy-grid label {
-    display: grid;
-    gap: 0.35rem;
-    color: var(--color-muted);
-    font-size: 0.72rem;
-  }
-  .policy-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 0.55rem;
   }
   .body small,
   fieldset > p {

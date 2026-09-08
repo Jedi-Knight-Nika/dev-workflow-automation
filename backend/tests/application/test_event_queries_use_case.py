@@ -2,8 +2,8 @@ import uuid
 
 import pytest
 
-from app.application.ports.event_queries import EventView
-from app.application.query_events import QueryEvents
+from app.engineering.application.ports.event_queries import EventView
+from app.engineering.application.query_events import QueryEvents
 
 
 class FakeEventQueries:

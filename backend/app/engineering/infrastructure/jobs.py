@@ -4,24 +4,19 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.db.models import (
-    AIRun,
-    DeveloperSession,
-    Job,
-    JobRole,
-    JobState,
-    ReviewCycle,
-    Task,
-    TaskEvent,
-    Team,
-)
+from app.agent_runtime.infrastructure.models import AIRun, DeveloperSession
 from app.engineering.application.jobs import PhaseLease
 from app.engineering.domain.lifecycle import Action, Stage, TaskStatus, WaitReason
+from app.engineering.infrastructure.job_queue import claim_next_job
 from app.engineering.infrastructure.lifecycle import record_transition, state_of
-from app.infrastructure.persistence.job_operations import claim_next_job
+from app.engineering.infrastructure.models import ReviewCycle
+from app.engineering.infrastructure.task_models import Job, Task, TaskEvent
+from app.platform.scheduling.states import JobState
+from app.teams.infrastructure.team_models import Team
 
 PHASE_ACTIONS = {
     Stage.INTAKE: "INTERPRET_EVENT",
+    Stage.PLANNING: "THINKER_TURN",
     Stage.DEVELOPING: "DEVELOPER_TURN",
     Stage.FIXING: "DEVELOPER_TURN",
     Stage.VALIDATING: "RUN_VALIDATION",
@@ -48,11 +43,9 @@ async def enqueue_phase(session: AsyncSession, task: Task) -> Job | None:
         return existing
     job = Job(
         task_id=task.id,
-        # Compatibility column for historical job readers; never used for V2 dispatch.
-        role=JobRole.ORCHESTRATOR,
         action=action,
         priority=task.priority,
-        payload={"execution_version": 2, "lifecycle_version": task.lifecycle_version},
+        payload={"lifecycle_version": task.lifecycle_version},
     )
     session.add(job)
     await session.flush()
@@ -85,9 +78,7 @@ class SqlPhaseJobs:
 
     async def claim(self) -> PhaseLease | None:
         async with self.sessions() as session:
-            job = await claim_next_job(
-                session, self.worker_id, self.lease_seconds, execution_version=2
-            )
+            job = await claim_next_job(session, self.worker_id, self.lease_seconds)
             if job is None:
                 return None
             assert job.lease_token is not None
@@ -114,7 +105,6 @@ class SqlPhaseJobs:
         if (
             task is None
             or job is None
-            or task.execution_version != 2
             or job.task_id != task.id
             or job.lease_token != lease.token
             or job.state not in {JobState.CLAIMED, JobState.RUNNING}
@@ -135,9 +125,9 @@ class SqlPhaseJobs:
                 or task.status not in {"NEW", "ACTIVE"}
                 or task.manual_takeover
                 or task.archived_at is not None
-                or task.state.value in {"PAUSED", "CANCELLED"}
                 or team is None
                 or not team.enabled
+                or team.execution_paused
                 or team.archived_at is not None
                 or job.lease_expires_at is None
                 or job.lease_expires_at <= now
@@ -165,7 +155,8 @@ class SqlPhaseJobs:
             # Validate which step is allowed to advance; a model cannot return MERGED.
             allowed = {
                 "INTERPRET_EVENT": {Action.START},
-                "DEVELOPER_TURN": {Action.IMPLEMENTED},
+                "DEVELOPER_TURN": {Action.IMPLEMENTED, Action.NEEDS_PLAN},
+                "THINKER_TURN": {Action.PLAN_READY},
                 "RUN_VALIDATION": {Action.VALIDATION_PASSED, Action.VALIDATION_FAILED},
                 "PUBLISH_PR": {Action.PUBLISHED},
                 "MERGE_PR": {Action.MERGED, Action.MERGE_RECHECK},
@@ -231,7 +222,6 @@ class SqlPhaseJobs:
                     select(Job)
                     .join(Task)
                     .where(
-                        Task.execution_version == 2,
                         Job.state.in_([JobState.CLAIMED, JobState.RUNNING]),
                         Job.lease_expires_at < datetime.now(UTC),
                     )

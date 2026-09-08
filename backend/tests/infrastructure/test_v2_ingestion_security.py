@@ -5,9 +5,9 @@ from fastapi import HTTPException
 from starlette.requests import Request
 
 from app.agent_runtime.infrastructure.egress_proxy import destination
-from app.api.webhooks import bounded_body
-from app.application.ports.webhook_ingestion import WebhookPayloadInvalid
-from app.infrastructure.webhook_ingestion import SqlAlchemyWebhookIngestionWorkflow
+from app.intake.application.ports.webhook_ingestion import WebhookPayloadInvalid
+from app.intake.infrastructure.webhook_ingestion import SqlAlchemyWebhookIngestionWorkflow
+from app.interfaces.http.routes.webhooks import bounded_body
 
 
 @pytest.mark.parametrize("host", ["api.openai.com", "api.anthropic.com", "github.com"])

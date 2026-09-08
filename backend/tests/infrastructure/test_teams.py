@@ -2,8 +2,8 @@ import uuid
 
 import pytest
 
-from app.application.manage_teams import ManageTeams
-from app.application.ports.team_management import SaveTeamCommand, TeamNotFound
+from app.teams.application.manage_teams import ManageTeams
+from app.teams.application.ports.team_management import SaveTeamCommand, TeamNotFound
 
 
 class EmptyTeams:

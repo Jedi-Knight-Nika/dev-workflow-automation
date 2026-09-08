@@ -6,15 +6,13 @@ from typing import Any
 import httpx
 import pytest
 
-from app.db.models import TaskState
-from app.domain.webhooks.linear import (
+from app.intake.domain.linear import (
     configured_repository_id,
     issue_labels,
     linear_comment,
     linear_priority,
 )
-from app.infrastructure.external_task_sync import external_status_configuration_key
-from app.integrations.linear import LinearClient, verify_linear_signature
+from app.intake.infrastructure.linear_client import LinearClient, verify_linear_signature
 
 
 def test_linear_signature_and_timestamp_are_verified() -> None:
@@ -52,24 +50,6 @@ def test_linear_comment_is_normalized_for_intake() -> None:
     assert result is not None
     assert result[0] == "CIT-42"
     assert result[1]["raw_text"] == "Do not implement caching yet."
-
-
-def test_linear_state_mapping_covers_operational_lifecycle() -> None:
-    assert external_status_configuration_key("linear", TaskState.NEW) == "todo_state_id"
-    assert (
-        external_status_configuration_key("linear", TaskState.IMPLEMENTING)
-        == "in_progress_state_id"
-    )
-    assert (
-        external_status_configuration_key("linear", TaskState.WAITING_GITHUB)
-        == "in_review_state_id"
-    )
-    assert external_status_configuration_key("linear", TaskState.NEEDS_HUMAN) == "blocked_state_id"
-    assert external_status_configuration_key("linear", TaskState.MERGED) == "done_state_id"
-    assert external_status_configuration_key("linear", TaskState.CANCELLED) == "done_state_id"
-    assert (
-        external_status_configuration_key("trello", TaskState.IMPLEMENTING) == "in_progress_list_id"
-    )
 
 
 @pytest.mark.asyncio

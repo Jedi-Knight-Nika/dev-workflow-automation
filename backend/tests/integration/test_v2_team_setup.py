@@ -4,12 +4,13 @@ import pytest
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.application.ports.team_management import SaveTeamCommand
-from app.db.models import Team, TeamAgentProfile, WorkflowDefinition
-from app.infrastructure.persistence.team_management import SqlAlchemyTeamManagementWorkflow
+from app.teams.application.ports.team_management import SaveTeamCommand
 from app.teams.domain.profiles import default_profiles
 from app.teams.infrastructure.automation import read_policy
+from app.teams.infrastructure.management import SqlAlchemyTeamManagementWorkflow
+from app.teams.infrastructure.models import TeamAgentProfile
 from app.teams.infrastructure.profiles import SqlTeamProfiles
+from app.teams.infrastructure.team_models import Team
 
 
 @pytest.mark.asyncio
@@ -42,9 +43,6 @@ async def test_new_team_has_fixed_profiles_and_disabled_policy_atomically(
             policy = await read_policy(session, team_id)
             assert not policy.enrollment_enabled and not policy.auto_merge
             assert policy.repository_ids == ()
-            assert not await session.scalar(
-                select(WorkflowDefinition.id).where(WorkflowDefinition.team_id == team_id)
-            )
             developer = next(row for row in profiles if row.role_kind == "DEVELOPER")
             developer.model = "operator-configured"
             await session.commit()

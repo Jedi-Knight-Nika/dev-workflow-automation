@@ -5,10 +5,13 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import get_settings
-from app.db.models import ExternalTaskSnapshot, Integration, Task, WebhookDelivery
-from app.engineering.infrastructure.enrollment import enroll
+from app.engineering.infrastructure.job_queue import request_execution
+from app.engineering.infrastructure.task_models import Task
+from app.intake.infrastructure.task_snapshot import ExternalTaskSnapshot
 from app.intake.infrastructure.tracker_comments import tracker_comment
+from app.intake.infrastructure.webhook_models import WebhookDelivery
+from app.platform.configuration.settings import get_settings
+from app.platform.integrations.models import Integration
 
 
 async def process_source_delivery(session: AsyncSession) -> bool:
@@ -69,7 +72,6 @@ async def process_source_delivery(session: AsyncSession) -> bool:
                 actor = str(event.get("user") or "")
                 if (
                     not route
-                    or not settings.new_fixed_lifecycle
                     or event.get("bot_id")
                     or event.get("subtype")
                     or event.get("type") not in {"message", "app_mention"}
@@ -128,7 +130,7 @@ async def process_source_delivery(session: AsyncSession) -> bool:
                             )
                             session.add(task)
                             await session.flush()
-                            await enroll(session, task, settings, actor=f"slack:{actor}")
+                            await request_execution(session, task, actor=f"slack:{actor}")
                             session.add(
                                 ExternalTaskSnapshot(
                                     task_id=task.id,

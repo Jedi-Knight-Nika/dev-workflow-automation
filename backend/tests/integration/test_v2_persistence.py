@@ -5,12 +5,14 @@ import pytest
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.db.models import Task, TaskEvent, TaskPhaseRun, Team
 from app.engineering.domain.lifecycle import Action
 from app.engineering.infrastructure.lifecycle import LifecycleConflict, record_transition
+from app.engineering.infrastructure.models import TaskPhaseRun
+from app.engineering.infrastructure.task_models import Task, TaskEvent
 from app.teams.application.profiles import ManageProfiles, ProfileConflict
 from app.teams.domain.profiles import RoleKind
 from app.teams.infrastructure.profiles import SqlTeamProfiles
+from app.teams.infrastructure.team_models import Team
 
 pytestmark = pytest.mark.asyncio
 
@@ -59,7 +61,6 @@ async def test_transition_audit_and_version_are_atomic(
                 Task(
                     id=task_id,
                     title="V2 transition test",
-                    execution_version=2,
                     status="NEW",
                     stage="INTAKE",
                     wait_reason="NONE",

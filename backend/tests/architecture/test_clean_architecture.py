@@ -4,8 +4,9 @@ from typing import Any
 
 import pytest
 
-from app.application.tasks import CreateTask, CreateTaskCommand
-from app.domain.tasks import Task, TaskState
+from app.engineering.application.create_task import CreateTask, CreateTaskCommand
+from app.engineering.domain.lifecycle import TaskStatus
+from app.engineering.domain.task import Task
 
 BACKEND_ROOT = Path(__file__).parents[2]
 
@@ -78,11 +79,11 @@ async def test_create_task_use_case_coordinates_domain_through_ports() -> None:
     unit_of_work = FakeUnitOfWork()
 
     task = await CreateTask(unit_of_work).execute(  # type: ignore[arg-type]
-        CreateTaskCommand(title="  Isolate business rules  ", priority=2)
+        CreateTaskCommand(title="  Isolate business rules  ", priority=2, start_work=True)
     )
 
     assert task.title == "Isolate business rules"
-    assert task.state == TaskState.NEW
+    assert task.status == TaskStatus.NEW
     assert unit_of_work.tasks.added == [task]
     assert unit_of_work.jobs.enqueued == [(task, {"source": "dashboard"})]
     assert unit_of_work.events.added[0][1:] == (
@@ -92,6 +93,17 @@ async def test_create_task_use_case_coordinates_domain_through_ports() -> None:
     )
     assert unit_of_work.commits == 1
     assert unit_of_work.rollbacks == 0
+
+
+@pytest.mark.asyncio
+async def test_creation_is_free_unless_start_is_explicit() -> None:
+    from app.interfaces.http.schemas.tasks import TaskCreate
+
+    unit_of_work = FakeUnitOfWork()
+    assert not TaskCreate(title="Draft task").start_work
+    await CreateTask(unit_of_work).execute(CreateTaskCommand(title="Draft task"))  # type: ignore[arg-type]
+    assert unit_of_work.jobs.enqueued == []
+    assert unit_of_work.commits == 1
 
 
 @pytest.mark.asyncio
@@ -111,100 +123,82 @@ async def test_create_task_use_case_rolls_back_as_one_transaction() -> None:
     assert unit_of_work.rollbacks == 1
 
 
-def test_domain_layer_has_no_framework_or_infrastructure_imports() -> None:
-    domain_root = BACKEND_ROOT / "app" / "domain"
-    forbidden = {
-        "fastapi",
-        "sqlalchemy",
-        "httpx",
-        "pydantic",
-        "app.application",
-        "app.infrastructure",
-    }
-
-    for source_path in domain_root.rglob("*.py"):
-        imports = imported_modules(source_path)
-        assert not any(
-            imported == forbidden_name or imported.startswith(f"{forbidden_name}.")
-            for imported in imports
-            for forbidden_name in forbidden
-        ), f"{source_path} imports outside the domain boundary"
-
-
-def test_application_layer_has_no_transport_or_infrastructure_imports() -> None:
-    application_root = BACKEND_ROOT / "app" / "application"
-    forbidden = {
-        "fastapi",
-        "sqlalchemy",
-        "httpx",
-        "pydantic",
-        "app.api",
-        "app.bootstrap",
-        "app.db",
-        "app.infrastructure",
-        "app.integrations",
-        "app.services",
-    }
-
-    for source_path in application_root.rglob("*.py"):
-        imports = imported_modules(source_path)
-        assert not any(
-            imported == forbidden_name or imported.startswith(f"{forbidden_name}.")
-            for imported in imports
-            for forbidden_name in forbidden
-        ), f"{source_path} imports an outer-layer dependency"
-
-
-def test_legacy_service_namespace_stays_empty() -> None:
-    services_root = BACKEND_ROOT / "app" / "services"
-
-    assert not list(services_root.glob("*.py")), (
-        "Place business rules in domain/application and external implementations in infrastructure"
-    )
-
-
-def test_transport_schemas_do_not_import_persistence_models() -> None:
-    schemas_root = BACKEND_ROOT / "app" / "schemas"
-    for schema_path in schemas_root.rglob("*.py"):
-        imports = imported_modules(schema_path)
-        assert not any(name == "app.db" or name.startswith("app.db.") for name in imports)
-
-
-def test_http_routes_depend_on_application_ports_not_persistence_adapters() -> None:
-    api_root = BACKEND_ROOT / "app" / "api"
-    forbidden = {"sqlalchemy", "app.db", "app.integrations", "app.infrastructure.persistence"}
-
-    for source_path in api_root.rglob("*.py"):
-        imports = imported_modules(source_path)
-        assert not any(
-            imported == forbidden_name or imported.startswith(f"{forbidden_name}.")
-            for imported in imports
-            for forbidden_name in forbidden
-        ), f"{source_path} couples HTTP transport to a persistence adapter"
-
-
-@pytest.mark.parametrize("context", ["engineering", "agent_runtime", "delivery", "teams", "intake"])
+@pytest.mark.parametrize(
+    "context", ["engineering", "agent_runtime", "delivery", "teams", "intake", "repositories"]
+)
 @pytest.mark.parametrize("layer", ["domain", "application"])
-def test_v2_inner_layers_do_not_import_frameworks_or_adapters(context: str, layer: str) -> None:
+def test_inner_layers_are_framework_independent(context: str, layer: str) -> None:
     root = BACKEND_ROOT / "app" / context / layer
-    forbidden = (
-        "fastapi",
-        "sqlalchemy",
-        "httpx",
-        "pydantic",
-        "openai_codex",
-        "claude_agent_sdk",
-        "app.db",
-        "app.api",
-        "app.bootstrap",
-        "app.infrastructure",
-        "app.integrations",
-    )
     for path in root.rglob("*.py"):
         for imported in imported_modules(path):
+            assert imported.split(".")[0] not in {
+                "fastapi",
+                "sqlalchemy",
+                "httpx",
+                "pydantic",
+                "openai_codex",
+                "claude_agent_sdk",
+            }, path
             assert not any(
-                imported == prefix or imported.startswith(prefix + ".") for prefix in forbidden
+                part in imported.split(".")
+                for part in ("infrastructure", "interfaces", "bootstrap")
             ), path
-            assert ".infrastructure" not in imported, path
             if layer == "domain":
                 assert ".application" not in imported, path
+
+
+def test_http_uses_ports_not_database_adapters():
+    for path in (BACKEND_ROOT / "app/interfaces/http").rglob("*.py"):
+        for imported in imported_modules(path):
+            assert "infrastructure" not in imported.split("."), path
+            assert not imported.startswith("sqlalchemy"), path
+
+
+def test_adapters_never_import_http_contracts():
+    for path in (BACKEND_ROOT / "app").rglob("*.py"):
+        if "infrastructure" not in path.parts:
+            continue
+        assert not any("app.interfaces" in name for name in imported_modules(path)), path
+
+
+def test_no_parallel_horizontal_runtime():
+    root = BACKEND_ROOT / "app"
+    for folder in [
+        "domain",
+        "application",
+        "infrastructure",
+        "services",
+        "api",
+        "schemas",
+        "db",
+        "providers",
+        "integrations",
+    ]:
+        assert not list((root / folder).rglob("*.py")), folder
+
+
+def test_schema_contains_only_current_context_entities():
+    from app.platform.persistence import registry  # noqa: F401
+    from app.platform.persistence.base import Base
+
+    forbidden = {
+        "workflow_definitions",
+        "workflow_nodes",
+        "ai_agents",
+        "worker_runs",
+        "repository_chunks",
+        "repository_indexes",
+        "task_memories",
+        "roles",
+    }
+    assert not forbidden.intersection(Base.metadata.tables)
+    assert {
+        "tasks",
+        "ai_runs",
+        "developer_sessions",
+        "team_agent_profiles",
+        "task_phase_runs",
+    }.issubset(Base.metadata.tables)
+    assert not {"state", "execution_version", "workflow_id", "workflow_node_id"}.intersection(
+        Base.metadata.tables["tasks"].columns.keys()
+    )

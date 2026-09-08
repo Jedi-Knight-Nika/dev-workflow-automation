@@ -11,13 +11,16 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.agent_runtime.application.harness import TurnReceipt
 from app.agent_runtime.domain.usage import Usage
 from app.agent_runtime.infrastructure.accounting import SqlDevelopmentStore
+from app.agent_runtime.infrastructure.models import AIRun, DeveloperSession
 from app.agent_runtime.infrastructure.orphans import sweep
 from app.agent_runtime.infrastructure.reservations import reserve_budget
-from app.db.models import AIRun, DeveloperSession, Job, JobState, ReviewCycle, Task
 from app.engineering.application.develop import DevelopmentBlocked
 from app.engineering.domain.lifecycle import Action
 from app.engineering.infrastructure.lifecycle import LifecycleConflict, record_transition
+from app.engineering.infrastructure.models import ReviewCycle
+from app.engineering.infrastructure.task_models import Job, Task
 from app.intake.infrastructure.review_text import process_review_text
+from app.platform.scheduling.states import JobState
 from tests.integration.test_v2_enrollment_and_costs import scenario
 
 pytestmark = pytest.mark.asyncio

@@ -1,6 +1,6 @@
 import pytest
 
-from app.domain.webhooks import DeliveryRetryPolicy
+from app.platform.integrations.retry import DeliveryRetryPolicy
 
 
 def test_delivery_retry_policy_exhaustion_boundary() -> None:

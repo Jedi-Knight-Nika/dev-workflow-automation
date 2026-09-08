@@ -18,10 +18,17 @@ describe('fixed lifecycle map', () => {
       lifecycleEdges.some((edge) => edge.source === 'REVIEWING' && edge.target === 'FIXING')
     ).toBe(true);
   });
-  it('does not present legacy activity as native Developer execution', () => {
-    const task = { execution_version: 1, stage: 'DEVELOPING', status: 'ACTIVE' } as EngineeringTask;
-    expect(lifecycleNodes([task], task).some((node) => node.selected || node.style)).toBe(false);
-    task.execution_version = 2;
+  it('shows the selected task and active stage', () => {
+    const task = {
+      id: 'task-1',
+      title: 'Task',
+      priority: 3,
+      stage: 'DEVELOPING',
+      status: 'ACTIVE',
+      wait_reason: 'NONE',
+      requirement_version: 1,
+      pull_request_url: null
+    } as EngineeringTask;
     const developer = lifecycleNodes([task], task).find((node) => node.id === 'DEVELOPING');
     expect(developer?.selected).toBe(true);
     expect(developer?.data.label).toContain('1 active');

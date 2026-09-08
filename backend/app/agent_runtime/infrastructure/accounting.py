@@ -6,10 +6,12 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.agent_runtime.application.harness import TurnReceipt
-from app.agent_runtime.domain.usage import Pricing
+from app.agent_runtime.infrastructure.models import AIRun, DeveloperSession, PricingCatalog
+from app.agent_runtime.infrastructure.receipts import apply_receipt, known_no_inference
 from app.agent_runtime.infrastructure.reservations import reserve_budget
-from app.db.models import AIRun, DeveloperSession, Job, JobState, PricingCatalog, Task
 from app.engineering.application.develop import checkpoint_payload
+from app.engineering.infrastructure.task_models import Job, Task
+from app.platform.scheduling.states import JobState
 
 
 class SqlDevelopmentStore:
@@ -53,7 +55,6 @@ class SqlDevelopmentStore:
             or job.state != JobState.RUNNING
             or job.lease_expires_at is None
             or job.lease_expires_at <= now
-            or task.execution_version != 2
             or task.status != "ACTIVE"
             or task.stage not in {"DEVELOPING", "FIXING"}
             or task.manual_takeover
@@ -111,6 +112,7 @@ class SqlDevelopmentStore:
                 session_id=native.id,
                 job_id=self.job_id,
                 role_kind="DEVELOPER",
+                requirement_version=requirement_version,
                 provider=native.provider,
                 model=native.model,
                 harness=native.harness,
@@ -143,26 +145,8 @@ class SqlDevelopmentStore:
             assert native is not None
             if native.native_session_id != receipt.native_session_id:
                 raise ValueError("Receipt belongs to a different native session")
-            usage = receipt.usage
-            row.native_turn_id = receipt.native_turn_id
-            row.input_tokens, row.output_tokens = usage.input_tokens, usage.output_tokens
-            row.cache_read_tokens, row.cache_write_tokens = (
-                usage.cache_read_input_tokens,
-                usage.cache_write_input_tokens,
-            )
-            row.reasoning_tokens, row.usage_complete = usage.reasoning_tokens, usage.complete
-            row.provider_cost_usd, row.raw_usage = usage.provider_cost_usd, receipt.raw_usage
-            row.provider_duration_ms = receipt.provider_duration_ms
             price = await session.get(PricingCatalog, self.pricing_id) if self.pricing_id else None
-            if price is not None and price.provider == row.provider and price.model == row.model:
-                row.pricing_id = price.id
-                row.calculated_cost_usd = Pricing(
-                    price.input_per_million,
-                    price.output_per_million,
-                    price.cached_input_per_million,
-                    price.cache_write_per_million,
-                ).calculate(usage)
-            row.finished_at, row.status = datetime.now(UTC), receipt.status.upper()
+            apply_receipt(row, receipt, price)
             if late_receipt:
                 # Accept genuine billing that raced orphan recovery. This does
                 # not revive work, consume feedback, or change task/phase state.
@@ -179,6 +163,7 @@ class SqlDevelopmentStore:
                 **checkpoint_payload(receipt, native.requirement_version),
             }
             if self.operation == "compaction":
+                assert row.finished_at is not None
                 checkpoint["summary"] = native.checkpoint.get("summary", "")
                 checkpoint["compaction_count"] = (
                     int(native.checkpoint.get("compaction_count", 0)) + 1
@@ -209,12 +194,7 @@ class SqlDevelopmentStore:
                 if not inference_started:
                     # The controller never authorized run_turn. This is known non-usage,
                     # unlike a lost receipt after a paid request was sent.
-                    row.input_tokens = row.output_tokens = row.cache_read_tokens = (
-                        row.cache_write_tokens
-                    ) = row.reasoning_tokens = 0
-                    row.usage_complete = True
-                    row.calculated_cost_usd = Decimal(0)
-                    row.raw_usage = {"inference_started": False}
+                    known_no_inference(row)
                 # Unknown provider usage is intentionally not overwritten with 0.
                 native = await session.get(DeveloperSession, self.session_id, with_for_update=True)
                 if native:

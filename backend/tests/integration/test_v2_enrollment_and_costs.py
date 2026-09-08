@@ -13,37 +13,29 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.agent_runtime.application.harness import TurnReceipt
 from app.agent_runtime.domain.usage import Usage
 from app.agent_runtime.infrastructure.accounting import SqlDevelopmentStore
-from app.config import Settings
-from app.db.models import (
-    AIRun,
-    DeveloperSession,
-    Integration,
-    Job,
-    JobRole,
-    PricingCatalog,
-    Repository,
-    ReviewCycle,
-    Task,
-    Team,
-    TeamAgentProfile,
-    ValidationRun,
-    WorkerRun,
-)
+from app.agent_runtime.infrastructure.models import AIRun, DeveloperSession, PricingCatalog
 from app.delivery.infrastructure import workflow as delivery_workflow
 from app.engineering.application.develop import DevelopmentBlocked
 from app.engineering.domain.lifecycle import Action
+from app.engineering.infrastructure.conversation import SqlAlchemyTaskConversationStore
 from app.engineering.infrastructure.enrollment import enroll
 from app.engineering.infrastructure.jobs import SqlPhaseJobs
-from app.infrastructure.persistence.dashboard_queries import SqlAlchemyDashboardQueries
-from app.infrastructure.persistence.task_conversation import SqlAlchemyTaskConversationStore
-from app.infrastructure.security.crypto import cipher
+from app.engineering.infrastructure.models import ReviewCycle, ValidationRun
+from app.engineering.infrastructure.task_models import Job, Task
 from app.intake.domain.events import Event, Intent
 from app.intake.infrastructure import v2_events
 from app.intake.infrastructure.metered import CloudInterpreter
+from app.platform.configuration.settings import Settings
+from app.platform.integrations.models import Integration
+from app.platform.security.crypto import cipher
+from app.platform.telemetry.dashboard import SqlAlchemyDashboardQueries
+from app.repositories.infrastructure.models import Repository
 from app.teams.domain.automation import AutomationPolicy
 from app.teams.infrastructure.automation import TeamAutomationPolicy, policy_payload
 from app.teams.infrastructure.automation_admin import SqlAutomationAdmin
+from app.teams.infrastructure.models import TeamAgentProfile
 from app.teams.infrastructure.statistics import statistics
+from app.teams.infrastructure.team_models import Team
 from tests.infrastructure.test_v2_delivery import SHA, fixture_payloads
 
 pytestmark = pytest.mark.asyncio
@@ -250,7 +242,7 @@ async def test_enrollment_is_idempotent_and_does_not_create_another_planner(
             jobs = list(await session.scalars(select(Job).where(Job.task_id == task_id)))
             assert len(natives) == len(jobs) == 1
             assert jobs[0].action == "INTERPRET_EVENT"
-            assert task.execution_version == 2 and task.status == "NEW"
+            assert task.status == "NEW"
             assert not Path(natives[0].workspace_path).exists()
 
 
@@ -290,25 +282,13 @@ async def test_reservation_is_atomic_and_unknown_cost_blocks_team(
             )
 
 
-async def test_dashboard_combines_native_and_legacy_and_preserves_unknown(
+async def test_dashboard_reports_native_usage_without_duplicate_accounting(
     postgres_session_factory: async_sessionmaker[AsyncSession], tmp_path: Path
 ) -> None:
     async with scenario(postgres_session_factory, tmp_path) as (_team_id, _, task_id, _):
         async with postgres_session_factory.begin() as session:
             job = await session.scalar(select(Job).where(Job.task_id == task_id))
             assert job
-            session.add(
-                WorkerRun(
-                    job_id=job.id,
-                    role=JobRole.EXECUTOR,
-                    provider="openai",
-                    model="legacy",
-                    input_tokens=100,
-                    output_tokens=20,
-                    estimated_cost_usd=0.1,
-                    duration_ms=20,
-                )
-            )
             session.add(
                 AIRun(
                     task_id=task_id,
@@ -326,9 +306,8 @@ async def test_dashboard_combines_native_and_legacy_and_preserves_unknown(
             query = SqlAlchemyDashboardQueries(session)
             start = datetime.now(UTC) - timedelta(days=1)
             tokens, cost = await query._usage_total(start)
-            assert tokens == 180 and cost == pytest.approx(0.12)
+            assert tokens == 60 and cost == pytest.approx(0.02)
             assert {row.key for row in await query._usage(start, "role")} == {
-                "EXECUTOR",
                 "DEVELOPER",
             }
             assert len(await query._usage(start, "team")) == 1

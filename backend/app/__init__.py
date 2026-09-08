@@ -1,1 +1,0 @@
-"""Autonomous Engineering Worker backend."""

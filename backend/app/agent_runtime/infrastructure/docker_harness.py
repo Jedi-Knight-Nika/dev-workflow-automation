@@ -107,6 +107,7 @@ class DockerHarness:
             image=self.image,
             network=self.network,
             provider_environment=self.environment,
+            read_only=self.manifest.role_kind != "DEVELOPER",
         )
         spec["Labels"].update({"job_id": str(self.job_id), "execution_name": self.name})
         loop = asyncio.get_running_loop()

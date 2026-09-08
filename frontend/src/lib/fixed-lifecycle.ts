@@ -29,14 +29,12 @@ const positions = [
 
 export function lifecycleNodes(tasks: EngineeringTask[], selected?: EngineeringTask): Node[] {
   return STAGES.map((stage, index) => {
-    const active = tasks.filter(
-      (task) => task.execution_version === 2 && task.stage === stage && task.status === 'ACTIVE'
-    ).length;
+    const active = tasks.filter((task) => task.stage === stage && task.status === 'ACTIVE').length;
     return {
       id: stage,
       position: { x: positions[index][0], y: positions[index][1] },
       data: { label: `${stage.replaceAll('_', ' ')}${active ? ` · ${active} active` : ''}` },
-      selected: selected?.execution_version === 2 && selected.stage === stage,
+      selected: selected?.stage === stage,
       draggable: false,
       connectable: false,
       deletable: false,

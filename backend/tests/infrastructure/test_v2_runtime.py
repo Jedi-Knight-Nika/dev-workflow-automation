@@ -121,6 +121,7 @@ async def test_validation_is_real_subprocess_and_output_is_bounded(tmp_path: Pat
         (sys.executable, "-c", "print('x'*20000)"), workspace=tmp_path, output_limit=100
     )
     assert result.passed
+    assert result.started_at and result.finished_at and result.started_at <= result.finished_at
     assert len(result.output_tail.encode()) == 100
     failed = await run_check((sys.executable, "-c", "raise SystemExit(2)"), workspace=tmp_path)
     assert not failed.passed

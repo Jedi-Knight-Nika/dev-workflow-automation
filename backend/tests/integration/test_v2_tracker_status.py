@@ -5,11 +5,17 @@ import pytest
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.db.models import ExternalStatusSync, ExternalTaskSnapshot, Integration, Task
-from app.delivery.infrastructure.status_sync import enqueue_status, process_status_sync
-from app.infrastructure.security.crypto import cipher
-from app.integrations.linear import LinearClient
-from app.integrations.trello import TrelloClient
+from app.delivery.infrastructure.status_sync import (
+    ExternalStatusSync,
+    enqueue_status,
+    process_status_sync,
+)
+from app.engineering.infrastructure.task_models import Task
+from app.intake.infrastructure.linear_client import LinearClient
+from app.intake.infrastructure.task_snapshot import ExternalTaskSnapshot
+from app.intake.infrastructure.trello_client import TrelloClient
+from app.platform.integrations.models import Integration
+from app.platform.security.crypto import cipher
 from tests.integration.test_v2_enrollment_and_costs import scenario
 
 pytestmark = pytest.mark.asyncio

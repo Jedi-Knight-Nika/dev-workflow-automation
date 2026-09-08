@@ -13,7 +13,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.db.base import Base, utcnow
+from app.platform.persistence.base import Base, utcnow
 
 
 class TeamAgentProfile(Base):

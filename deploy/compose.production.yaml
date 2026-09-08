@@ -5,6 +5,8 @@ services:
     image: caddy:2.10-alpine
     environment:
       DOMAIN: ${DOMAIN:?Set DOMAIN to the public hostname}
+      OPERATOR_USER: ${OPERATOR_USER:?Set the console operator username}
+      OPERATOR_PASSWORD_HASH: ${OPERATOR_PASSWORD_HASH:?Set a Caddy bcrypt password hash}
     ports:
       - "80:80"
       - "443:443"
@@ -49,7 +51,6 @@ services:
       LINEAR_WEBHOOK_SECRET: ${LINEAR_WEBHOOK_SECRET:?Set LINEAR_WEBHOOK_SECRET}
       WORKSPACE_ROOT: /data/workspaces
       SCHEDULER_ENABLED: "false"
-      REPOSITORY_RAG_ENABLED: ${REPOSITORY_RAG_ENABLED:-false}
       SCHEDULER_POLL_SECONDS: ${SCHEDULER_POLL_SECONDS:-1.0}
       SCHEDULER_MAX_CONCURRENT_JOBS: ${SCHEDULER_MAX_CONCURRENT_JOBS:-2}
       WORKER_LEASE_SECONDS: ${WORKER_LEASE_SECONDS:-330}
@@ -77,7 +78,6 @@ services:
       <<: *backend-environment
       # Native execution is opt-in through compose.v2.yaml after configuration.
       SCHEDULER_ENABLED: "false"
-      REPOSITORY_RAG_ENABLED: ${REPOSITORY_RAG_ENABLED:-false}
       DOCKER_SOCKET: /var/run/docker.sock
     depends_on:
       backend:
@@ -114,12 +114,12 @@ services:
       PGDATABASE: ${POSTGRES_DB:-engineering_worker}
       PGUSER: ${POSTGRES_USER:-engineering_worker}
       PGPASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
-      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-14}
+      CONFIRM_QUIESCENT: ${CONFIRM_QUIESCENT:-}
     depends_on:
       postgres:
         condition: service_healthy
     volumes:
-      - workspaces:/workspaces:ro
+      - ${V2_DATA_ROOT:?Set V2_DATA_ROOT}:/engineering-data:ro
       - ${BACKUP_DIR:-./backups}:/backups
       - ./backup.sh:/usr/local/bin/backup:ro
     entrypoint: ["/bin/sh", "/usr/local/bin/backup"]
@@ -131,14 +131,15 @@ services:
       PGHOST: postgres
       PGUSER: ${POSTGRES_USER:-engineering_worker}
       PGPASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
-      RESTORE_DATABASE: ${POSTGRES_DB:-engineering_worker}
+      RESTORE_DATABASE: ${RESTORE_DATABASE:-}
+      CONFIRM_QUIESCENT: ${CONFIRM_QUIESCENT:-}
       BACKUP_SET: ${BACKUP_SET:-}
       CONFIRM_RESTORE: ${CONFIRM_RESTORE:-}
     depends_on:
       postgres:
         condition: service_healthy
     volumes:
-      - workspaces:/workspaces
+      - ${V2_DATA_ROOT:?Set V2_DATA_ROOT}:/engineering-data
       - ${BACKUP_DIR:-./backups}:/backups:ro
       - ./restore.sh:/usr/local/bin/restore:ro
     entrypoint: ["/bin/sh", "/usr/local/bin/restore"]
@@ -157,7 +158,7 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    entrypoint: [".venv/bin/python", "-m", "app.infrastructure.security.credential_rotation"]
+    entrypoint: [".venv/bin/python", "-m", "app.platform.security.credential_rotation"]
 
 volumes:
   postgres_data:

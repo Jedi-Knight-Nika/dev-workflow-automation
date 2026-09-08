@@ -1,7 +1,6 @@
 """Initial schema and safe default entities for a fresh installation.
 
-This replaces the discarded MVP upgrade chain, not an existing database. The
-SQL snapshots are frozen so changing a Python model cannot rewrite this revision.
+The SQL snapshots are frozen so changing a Python model cannot rewrite this revision.
 """
 
 from pathlib import Path

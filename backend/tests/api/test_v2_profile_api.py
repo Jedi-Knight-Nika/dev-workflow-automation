@@ -8,8 +8,8 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from app.api.v2 import router
 from app.bootstrap.v2 import team_profiles
+from app.interfaces.http.routes.v2 import router
 from app.teams.application.profiles import ProfileConflict, ProfileView, TeamProfiles
 from app.teams.domain.profiles import default_profiles
 
@@ -67,17 +67,3 @@ def test_stale_profile_update_returns_conflict(profile_api: tuple) -> None:
     body["version"] = 1
     store.save.side_effect = ProfileConflict("Reload")
     assert client.put(f"/v2/teams/{row.team_id}/profiles/DEVELOPER", json=body).status_code == 409
-
-
-def test_capabilities_do_not_claim_preview_is_executable(profile_api: tuple) -> None:
-    client, _, _ = profile_api
-    assert client.get("/v2/capabilities").json()["execution_ready"] is False
-
-
-def test_web_terminal_routes_are_retired_but_history_tables_remain() -> None:
-    from app.db.base import Base
-    from app.main import app
-
-    paths = {getattr(route, "path", "") for route in app.routes}
-    assert not any("/terminal" in path for path in paths)
-    assert "terminal_sessions" in Base.metadata.tables

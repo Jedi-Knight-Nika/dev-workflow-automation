@@ -5,8 +5,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent_runtime.application.sessions import SessionAdministration
 from app.agent_runtime.infrastructure.sessions import SqlSessionAdministration
-from app.config import get_settings
-from app.db.session import get_session
+from app.platform.configuration.settings import get_settings
+from app.platform.persistence.session import get_session
 from app.teams.application.automation import AutomationAdmin
 from app.teams.application.profiles import TeamProfiles
 from app.teams.infrastructure.automation_admin import SqlAutomationAdmin

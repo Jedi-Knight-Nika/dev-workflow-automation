@@ -4,13 +4,16 @@ from typing import Any
 
 import pytest
 
-from app.api.control_plane import github_install_callback, github_install_url
-from app.application.ports.github_installation import GitHubInstallationResult
-from app.config import Settings
-from app.db.models import Integration, IntegrationStatus
-from app.infrastructure.github_installation import EncryptedGitHubInstallationWorkflow
-from app.infrastructure.security.crypto import cipher
-from app.integrations.github_auth import create_install_state
+from app.interfaces.http.routes.control_plane import github_install_callback, github_install_url
+from app.platform.configuration.settings import Settings
+from app.platform.integrations.application.ports.github_installation import GitHubInstallationResult
+from app.platform.integrations.github_auth import create_install_state
+from app.platform.integrations.infrastructure.github_installation import (
+    EncryptedGitHubInstallationWorkflow,
+)
+from app.platform.integrations.models import Integration
+from app.platform.scheduling.states import IntegrationStatus
+from app.platform.security.crypto import cipher
 
 
 class FakeInstallationWorkflow:
@@ -74,8 +77,13 @@ async def test_github_install_workflow_encrypts_installation_and_connects(
         async def list_repositories(self) -> list[object]:
             return []
 
-    monkeypatch.setattr("app.infrastructure.github_installation.resolve_github_auth", resolve_auth)
-    monkeypatch.setattr("app.infrastructure.github_installation.GitHubClient", Client)
+    monkeypatch.setattr(
+        "app.platform.integrations.infrastructure.github_installation.resolve_github_auth",
+        resolve_auth,
+    )
+    monkeypatch.setattr(
+        "app.platform.integrations.infrastructure.github_installation.GitHubClient", Client
+    )
     workflow = EncryptedGitHubInstallationWorkflow(
         session,
         Settings(

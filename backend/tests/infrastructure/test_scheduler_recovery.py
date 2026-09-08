@@ -5,9 +5,9 @@ from uuid import uuid4
 
 import pytest
 
-from app.config import Settings
 from app.engineering.application.jobs import PhaseLease
-from app.infrastructure.scheduler import Scheduler
+from app.platform.configuration.settings import Settings
+from app.platform.scheduling.scheduler import Scheduler
 
 
 def controller() -> Scheduler:

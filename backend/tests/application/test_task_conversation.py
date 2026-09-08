@@ -3,12 +3,13 @@ from typing import cast
 
 import pytest
 
-from app.application.manage_task_conversation import (
+from app.engineering.application.manage_task_conversation import (
     AddTaskMessage,
-    EditTaskMessage,
-    ReactToTaskMessage,
 )
-from app.application.ports.task_conversation import TaskConversationStore, TaskMessageView
+from app.engineering.application.ports.task_conversation import (
+    TaskConversationStore,
+    TaskMessageView,
+)
 
 
 class RecordingConversationStore:
@@ -49,24 +50,3 @@ async def test_blank_user_message_is_rejected() -> None:
 
     with pytest.raises(ValueError, match="empty"):
         await AddTaskMessage(cast(TaskConversationStore, store)).execute(uuid.uuid4(), "  ")
-
-
-@pytest.mark.asyncio
-async def test_user_message_edit_is_trimmed() -> None:
-    store = RecordingConversationStore()
-
-    await EditTaskMessage(cast(TaskConversationStore, store)).execute(
-        uuid.uuid4(), 42, "  corrected context  "
-    )
-
-    assert store.body == "corrected context"
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("reaction", ["✅", "💩", "😂", "👍", "👎", "❤️", "👀"])
-async def test_supported_reactions_have_domain_meaning(reaction: str) -> None:
-    store = RecordingConversationStore()
-
-    await ReactToTaskMessage(cast(TaskConversationStore, store)).execute(uuid.uuid4(), 42, reaction)
-
-    assert store.body == reaction

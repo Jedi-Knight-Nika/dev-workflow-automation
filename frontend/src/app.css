@@ -345,3 +345,18 @@
     }
   }
 }
+@layer components {
+  .input {
+    @apply rounded-lg border border-line bg-panel px-3 py-2 text-sm text-heading outline-none focus:border-brand;
+  }
+  .btn-primary,
+  .btn-secondary {
+    @apply min-h-9 cursor-pointer rounded-lg border px-3 py-2 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-40;
+  }
+  .btn-primary {
+    @apply border-brand bg-brand text-white hover:opacity-90;
+  }
+  .btn-secondary {
+    @apply border-line bg-panel text-heading hover:border-brand;
+  }
+}

@@ -1,24 +1,19 @@
-import uuid
-
 import pytest
 from pydantic import ValidationError
 
-from app.db.models import JobRole
-from app.schemas import TaskCreate, WorkerResult
+from app.interfaces.http.schemas.tasks import TaskCreate
 
 
-def test_task_priority_is_bounded() -> None:
+def test_task_priority_is_bounded():
     with pytest.raises(ValidationError):
-        TaskCreate(title="x", priority=6)
+        TaskCreate(title="Task", priority=6)
 
 
-def test_worker_result_protocol() -> None:
-    result = WorkerResult(
-        job_id=uuid.uuid4(),
-        task_id=uuid.uuid4(),
-        role=JobRole.THINKER,
-        result="PLAN_READY",
-        summary="done",
-    )
-    assert result.protocol_version == 1
-    assert result.data == {}
+@pytest.mark.parametrize("value", [None, 0, 0.5, 1, 7.25])
+def test_estimates_are_nullable_relative_numbers(value):
+    assert TaskCreate(title="Task", estimate=value).estimate == value
+
+
+def test_estimate_is_not_negative():
+    with pytest.raises(ValidationError):
+        TaskCreate(title="Task", estimate=-1)

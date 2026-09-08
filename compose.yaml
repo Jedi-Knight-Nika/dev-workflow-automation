@@ -32,7 +32,6 @@ services:
       LINEAR_WEBHOOK_SECRET: ${LINEAR_WEBHOOK_SECRET:-}
       WORKSPACE_ROOT: /data/workspaces
       SCHEDULER_ENABLED: "false"
-      REPOSITORY_RAG_ENABLED: ${REPOSITORY_RAG_ENABLED:-false}
       SCHEDULER_POLL_SECONDS: ${SCHEDULER_POLL_SECONDS:-1.0}
       SCHEDULER_MAX_CONCURRENT_JOBS: ${SCHEDULER_MAX_CONCURRENT_JOBS:-2}
       WORKER_LEASE_SECONDS: ${WORKER_LEASE_SECONDS:-330}
@@ -44,7 +43,7 @@ services:
       - workspaces:/data/workspaces
       - ${GITHUB_APP_PRIVATE_KEY_FILE_HOST:-./github-app.private-key.pem}:/run/secrets/github_app_private_key:ro
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/ready')"]
       interval: 10s
@@ -62,7 +61,6 @@ services:
       WORKSPACE_ROOT: /data/workspaces
       # Base Compose starts the UI/API only. Use the V2 overlay for native runners.
       SCHEDULER_ENABLED: "false"
-      REPOSITORY_RAG_ENABLED: ${REPOSITORY_RAG_ENABLED:-false}
       SCHEDULER_POLL_SECONDS: ${SCHEDULER_POLL_SECONDS:-1.0}
       SCHEDULER_MAX_CONCURRENT_JOBS: ${SCHEDULER_MAX_CONCURRENT_JOBS:-2}
       WORKER_LEASE_SECONDS: ${WORKER_LEASE_SECONDS:-330}
@@ -91,7 +89,7 @@ services:
       backend:
         condition: service_healthy
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
 
 volumes:
   postgres_data:

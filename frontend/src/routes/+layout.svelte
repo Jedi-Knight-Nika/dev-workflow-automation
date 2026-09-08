@@ -10,7 +10,6 @@
   import LanguageToggle from '$lib/components/LanguageToggle.svelte';
   import CursorGlow from '$lib/components/CursorGlow.svelte';
   import ClickBurst from '$lib/components/ClickBurst.svelte';
-  import NotificationCenter from '$lib/components/NotificationCenter.svelte';
   import { NAV_ITEMS, isActiveNavItem } from '$lib/nav';
   import { t } from '$lib/i18n/index.svelte';
 
@@ -65,7 +64,6 @@
 
 <CursorGlow />
 <ClickBurst />
-<NotificationCenter />
 
 <div class="min-h-screen md:grid" style="grid-template-columns: {sidebarWidth}px 1fr">
   <MobileNav />

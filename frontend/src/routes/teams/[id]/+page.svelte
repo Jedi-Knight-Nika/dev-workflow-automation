@@ -116,7 +116,6 @@
   {#if activity}<FixedLifecycleCanvas {activity} />{/if}
   {#if activity}{#key activity.team_id}<AutomationPolicyEditor
         teamId={activity.team_id}
-        tasks={activity.tasks}
       />{/key}{/if}
   {#if activity}{#key activity.team_id}<V2StatisticsPanel teamId={activity.team_id} />{/key}{/if}
   <section class="profiles">

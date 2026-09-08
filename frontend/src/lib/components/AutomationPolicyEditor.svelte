@@ -3,11 +3,9 @@
   import {
     getAutomation,
     saveAutomation,
-    enrollTask,
-    type AutomationPolicy,
-    type EngineeringTask
+    type AutomationPolicy
   } from '$lib/services/engineering-v2';
-  let { teamId, tasks }: { teamId: string; tasks: EngineeringTask[] } = $props();
+  let { teamId }: { teamId: string } = $props();
   let policy = $state<AutomationPolicy | null>(null);
   let repositories = $state('');
   let reviewers = $state('');
@@ -47,24 +45,7 @@
         required_checks: split(checks)
       });
       policy.version = result.version;
-      message = 'Policy saved. Existing tickets were not migrated.';
-    } catch (error) {
-      message = String(error);
-    } finally {
-      busy = false;
-    }
-  }
-  async function enroll(task: EngineeringTask) {
-    if (
-      !confirm(
-        `Enroll “${task.title}” in V2? An enabled worker may start paid development under this Team’s configured USD budget.`
-      )
-    )
-      return;
-    busy = true;
-    try {
-      await enrollTask(task.id);
-      message = 'Task enrolled; activity will refresh shortly.';
+      message = 'Policy saved. Task usage and native sessions are unchanged.';
     } catch (error) {
       message = String(error);
     } finally {
@@ -74,7 +55,7 @@
 </script>
 
 <section>
-  <h2>V2 rollout and merge policy</h2>
+  <h2>Automation and merge policy</h2>
   <p>
     Opt-in per Team and repository. Keep disabled until your isolated runtime and approved spending
     limits have been verified.
@@ -89,7 +70,7 @@
     >
       <label
         ><input type="checkbox" bind:checked={policy.enrollment_enabled} /> Enroll new eligible imports
-        into V2</label
+        automatically</label
       >
       <label
         >Allowed repository UUIDs (one per line)<textarea bind:value={repositories} rows="3"
@@ -139,19 +120,6 @@
       </p>
       <button disabled={busy}>Save policy</button>
     </form>
-    {#if policy.enrollment_enabled}
-      <h3>Explicit enrollment</h3>
-      <p>
-        Only unstarted tickets without an existing workspace/PR are eligible. History is retained.
-      </p>
-      {#each tasks.filter((task) => task.execution_version !== 2) as task (task.id)}
-        <div class="ticket">
-          <span>{task.title}</span><button disabled={busy} onclick={() => enroll(task)}
-            >Enroll in V2</button
-          >
-        </div>
-      {/each}
-    {/if}
   {/if}
 </section>
 
@@ -187,12 +155,5 @@
   button {
     padding: 0.6rem 1rem;
     cursor: pointer;
-  }
-  .ticket {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 1rem;
-    padding: 0.5rem 0;
   }
 </style>

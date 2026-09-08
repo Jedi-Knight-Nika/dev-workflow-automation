@@ -4,9 +4,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import Task, TaskEvent, TaskPhaseRun
 from app.delivery.infrastructure.status_sync import enqueue_status
-from app.domain.tasks import TaskState
 from app.engineering.domain.lifecycle import (
     Action,
     EngineeringState,
@@ -15,11 +13,12 @@ from app.engineering.domain.lifecycle import (
     WaitReason,
     transition,
 )
+from app.engineering.infrastructure.models import TaskPhaseRun
+from app.engineering.infrastructure.task_models import Task, TaskEvent
+from app.teams.infrastructure.team_models import TaskAssignment
 
 
 def state_of(task: Task) -> EngineeringState:
-    if task.execution_version != 2 or task.status is None or task.stage is None:
-        raise ValueError("Task has not been explicitly migrated to V2")
     return EngineeringState(
         TaskStatus(task.status),
         Stage(task.stage),
@@ -31,32 +30,6 @@ def state_of(task: Task) -> EngineeringState:
 
 class LifecycleConflict(ValueError):
     pass
-
-
-def legacy_projection(state: EngineeringState) -> TaskState:
-    """One-way read compatibility for existing dashboards, never a routing input."""
-    statuses = {
-        TaskStatus.PAUSED: TaskState.PAUSED,
-        TaskStatus.CANCELLED: TaskState.CANCELLED,
-        TaskStatus.MERGED: TaskState.MERGED,
-        TaskStatus.FAILED: TaskState.FAILED,
-        TaskStatus.WAITING_HUMAN: TaskState.NEEDS_HUMAN,
-        TaskStatus.WAITING_EXTERNAL: TaskState.WAITING_GITHUB,
-    }
-    if state.status in statuses:
-        return statuses[state.status]
-    stages = {
-        Stage.INTAKE: TaskState.NEW,
-        Stage.PLANNING: TaskState.PLANNING,
-        Stage.DEVELOPING: TaskState.IMPLEMENTING,
-        Stage.FIXING: TaskState.IMPLEMENTING,
-        Stage.VALIDATING: TaskState.LOCAL_VALIDATION,
-        Stage.PUBLISHING: TaskState.IMPLEMENTING,
-        Stage.REVIEWING: TaskState.WAITING_GITHUB,
-        Stage.MERGING: TaskState.READY_TO_MERGE,
-        Stage.COMPLETE: TaskState.MERGED,
-    }
-    return stages[state.stage]
 
 
 async def record_transition(
@@ -104,11 +77,27 @@ async def record_transition(
         after.requirement_version,
         after.manual_takeover,
     )
-    task.state = legacy_projection(after)
     if after.status == TaskStatus.ACTIVE and task.started_at is None:
         task.started_at = now
     if after.status == TaskStatus.MERGED:
         task.completed_at = now
+    assignments = await session.scalars(
+        select(TaskAssignment)
+        .where(
+            TaskAssignment.task_id == task_id,
+            TaskAssignment.status.in_(["QUEUED", "RUNNING"]),
+        )
+        .with_for_update()
+    )
+    for assignment in assignments:
+        if after.status == TaskStatus.ACTIVE:
+            assignment.status = "RUNNING"
+            assignment.started_at = assignment.started_at or now
+        elif after.status in {TaskStatus.MERGED, TaskStatus.CANCELLED, TaskStatus.FAILED}:
+            assignment.status = (
+                "COMPLETED" if after.status == TaskStatus.MERGED else after.status.value
+            )
+            assignment.completed_at = now
     task.lifecycle_version += 1
     await enqueue_status(
         session, task_id, task.lifecycle_version, after.status.value, after.stage.value

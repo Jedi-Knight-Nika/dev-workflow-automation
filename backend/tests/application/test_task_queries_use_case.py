@@ -3,9 +3,11 @@ from datetime import UTC, datetime
 
 import pytest
 
-from app.application.ports.task_queries import TaskListFilters, TaskView
-from app.application.tasks import GetTask, ListTasks, TaskNotFound
-from app.domain.tasks import Task, TaskState
+from app.engineering.application.change_lifecycle import TaskNotFound
+from app.engineering.application.ports.task_queries import TaskListFilters, TaskView
+from app.engineering.application.query_tasks import GetTask, ListTasks
+from app.engineering.domain.lifecycle import TaskStatus
+from app.engineering.domain.task import Task
 
 
 def task() -> Task:
@@ -15,7 +17,7 @@ def task() -> Task:
         "Query task",
         "",
         3,
-        TaskState.NEW,
+        TaskStatus.NEW,
         None,
         None,
         None,

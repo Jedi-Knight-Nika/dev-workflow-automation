@@ -1,42 +1,26 @@
 <script lang="ts">
-  import Button from '$lib/components/Button.svelte';
   import type { Task } from '$lib/types';
-  import { t } from '$lib/i18n/index.svelte';
-
-  let {
-    task,
-    preparing,
-    onPrepareWorkspace
-  }: { task: Task; preparing: boolean; onPrepareWorkspace: () => void } = $props();
+  import { safeExternalUrl } from '$lib/task-links';
+  let { task }: { task: Task } = $props();
 </script>
 
-<section
-  class="border-line flex flex-wrap items-center justify-between gap-3 rounded-xl border p-5 xl:col-span-2"
->
-  <div class="min-w-0 flex-1">
-    <strong>{t('taskDetail.gitWorkspace')}</strong>
-    <p class="break-all text-muted text-xs">
-      {task.workspace_path ||
-        (task.repository_id
-          ? t('taskDetail.repoSelectedNotPrepared')
-          : t('taskDetail.noRepositorySelected'))}
-    </p>
-    {#if task.branch_name}<p class="mt-1 font-mono text-[10px] text-brand">
-        {task.branch_name} · {task.current_revision?.slice(0, 12)}
-      </p>{/if}
-    {#if task.pull_request_url}<!-- eslint-disable svelte/no-navigation-without-resolve -->
-      <a
-        class="mt-2 block text-xs text-brand underline"
-        href={task.pull_request_url}
-        target="_blank"
-        rel="noreferrer">{t('taskDetail.pullRequest')} #{task.pull_request_number}</a
-      ><!-- eslint-enable svelte/no-navigation-without-resolve -->{/if}
-  </div>
-  <Button disabled={!task.repository_id || preparing} onclick={onPrepareWorkspace}
-    >{preparing
-      ? t('taskDetail.preparing')
-      : task.workspace_path
-        ? t('taskDetail.refreshWorkspace')
-        : t('taskDetail.prepareWorkspace')}</Button
-  >
+<section class="min-w-0 rounded-xl border border-line p-5 xl:col-span-2">
+  <h2 class="font-semibold">Task workspace and pull request</h2>
+  <p class="mt-2 break-all text-xs text-muted">
+    {task.workspace_path || 'The isolated task workspace is prepared when work starts.'}
+  </p>
+  <p class="mt-2 font-mono text-xs">
+    {task.branch_name || 'No task branch yet'} · {task.current_revision?.slice(0, 12) ||
+      'No validated revision yet'}
+  </p>
+  {#if safeExternalUrl(task.pull_request_url)}
+    <!-- eslint-disable svelte/no-navigation-without-resolve -->
+    <a
+      class="mt-2 inline-block text-sm text-brand underline"
+      href={safeExternalUrl(task.pull_request_url) || ''}
+      target="_blank"
+      rel="noopener noreferrer">Pull request #{task.pull_request_number} ↗</a
+    >
+    <!-- eslint-enable svelte/no-navigation-without-resolve -->
+  {/if}
 </section>

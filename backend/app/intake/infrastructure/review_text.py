@@ -4,17 +4,21 @@ from decimal import Decimal
 from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.config import Settings
-from app.db.models import AIRun, ReviewCycle, Task, TaskMessage, TeamAgentProfile
+from app.agent_runtime.infrastructure.models import AIRun
 from app.engineering.domain.lifecycle import Action, WaitReason
 from app.engineering.infrastructure.controls import control_task
 from app.engineering.infrastructure.lifecycle import record_transition
+from app.engineering.infrastructure.message_models import TaskMessage
+from app.engineering.infrastructure.models import ReviewCycle
+from app.engineering.infrastructure.task_models import Task
 from app.intake.application.interpret import InterpretEvent, TextInterpreter
 from app.intake.domain.events import Event, Intent, classify
 from app.intake.infrastructure.authorization import actor_allowed
 from app.intake.infrastructure.metered import CloudInterpreter, MeteredLocalInterpreter
 from app.intake.infrastructure.ollama import OllamaInterpreter
 from app.intake.infrastructure.v2_events import apply_pending_feedback
+from app.platform.configuration.settings import Settings
+from app.teams.infrastructure.models import TeamAgentProfile
 
 # Local + two cloud attempts can each take up to two minutes. Recovery must not
 # race a healthy chain; the extra margin covers metering and provider admission.

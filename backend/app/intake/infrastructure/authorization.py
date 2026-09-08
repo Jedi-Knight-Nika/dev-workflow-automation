@@ -1,8 +1,9 @@
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import get_settings
-from app.db.models import Integration, Task
+from app.engineering.infrastructure.task_models import Task
+from app.platform.configuration.settings import get_settings
+from app.platform.integrations.models import Integration
 from app.teams.infrastructure.automation import read_policy
 
 

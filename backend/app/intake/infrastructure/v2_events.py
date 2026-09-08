@@ -8,7 +8,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import DeveloperSession, Repository, ReviewCycle, Task, TaskEvent
+from app.agent_runtime.infrastructure.models import DeveloperSession
 from app.delivery.infrastructure.git_transport import github_token
 from app.delivery.infrastructure.github import GitHubDelivery, github_client
 from app.delivery.infrastructure.workflow import delivery_gate
@@ -16,9 +16,12 @@ from app.engineering.domain.lifecycle import Action, WaitReason
 from app.engineering.infrastructure.controls import control_task
 from app.engineering.infrastructure.jobs import enqueue_phase
 from app.engineering.infrastructure.lifecycle import record_transition
+from app.engineering.infrastructure.models import ReviewCycle
+from app.engineering.infrastructure.task_models import Task, TaskEvent
 from app.intake.application.interpret import InterpretEvent
 from app.intake.domain.events import Event, Intent, requirement_fingerprint
 from app.intake.infrastructure.authorization import actor_allowed
+from app.repositories.infrastructure.models import Repository
 from app.teams.infrastructure.automation import read_policy
 
 
@@ -251,9 +254,9 @@ async def github_event(
 async def requirements_changed(
     session: AsyncSession, task: Task, title: str, description: str, *, source: str
 ) -> None:
-    if task.execution_version != 2 or requirement_fingerprint(
-        task.title, task.description
-    ) == requirement_fingerprint(title, description):
+    if requirement_fingerprint(task.title, task.description) == requirement_fingerprint(
+        title, description
+    ):
         return
     session.add(
         TaskEvent(
@@ -282,5 +285,10 @@ async def requirements_changed(
             ],
         }
     await control_task(session, task, Action.PAUSE, actor=source)
-    task.requirement_version += 1
-    task.stage = "FIXING" if native and native.native_session_id else "INTAKE"
+    await record_transition(
+        session,
+        task.id,
+        Action.REVISE_REQUIREMENT,
+        expected_version=task.lifecycle_version,
+        actor=source,
+    )

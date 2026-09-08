@@ -4,21 +4,17 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.db.models import (
-    Job,
-    JobState,
-    Repository,
-    Task,
-    TaskEvent,
-    Team,
-    ValidationRun,
-)
 from app.delivery.domain.merge import MergePolicy
 from app.delivery.infrastructure.git_transport import github_token
 from app.delivery.infrastructure.github import GitHubDelivery, github_client
 from app.engineering.application.jobs import PhaseBlocked, PhaseLease
 from app.engineering.domain.lifecycle import Action, WaitReason
+from app.engineering.infrastructure.models import ValidationRun
+from app.engineering.infrastructure.task_models import Job, Task, TaskEvent
+from app.platform.scheduling.states import JobState
+from app.repositories.infrastructure.models import Repository
 from app.teams.infrastructure.automation import read_policy
+from app.teams.infrastructure.team_models import Team
 
 
 async def delivery_gate(
@@ -89,6 +85,7 @@ async def merge_phase(sessions: async_sessionmaker[AsyncSession], lease: PhaseLe
                 and not task.manual_takeover
                 and not task.archived_at
                 and team.enabled
+                and not team.execution_paused
                 and not team.archived_at,
             )
             if pull.get("merged") and pull["head"]["sha"] == task.current_revision:

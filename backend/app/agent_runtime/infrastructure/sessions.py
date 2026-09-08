@@ -11,17 +11,12 @@ from app.agent_runtime.domain.session_changes import (
     can_keep_native,
     handoff_request,
 )
+from app.agent_runtime.infrastructure.models import AIRun, DeveloperSession
 from app.agent_runtime.infrastructure.versions import HARNESS_VERSIONS
-from app.db.models import (
-    AIRun,
-    DeveloperSession,
-    Job,
-    JobState,
-    Task,
-    TaskEvent,
-    Team,
-    TeamAgentProfile,
-)
+from app.engineering.infrastructure.task_models import Job, Task, TaskEvent
+from app.platform.scheduling.states import JobState
+from app.teams.infrastructure.models import TeamAgentProfile
+from app.teams.infrastructure.team_models import Team
 
 
 class SqlSessionAdministration:
@@ -51,7 +46,7 @@ class SqlSessionAdministration:
             .limit(1)
         )
         native = await self.session.scalar(native_query.with_for_update() if lock else native_query)
-        if task.execution_version != 2 or native is None:
+        if native is None:
             return None
         profile = await self.session.scalar(
             select(TeamAgentProfile).where(

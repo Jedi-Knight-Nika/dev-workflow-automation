@@ -1,72 +1,27 @@
-from scripts.validate_real_workflow import validate_history
+import sys
+
+import pytest
+from scripts import validate_real_workflow as observer
 
 
-def test_real_workflow_rejects_stale_checks_and_open_findings() -> None:
-    jobs = [
-        {"role": role, "state": "SUCCEEDED"}
-        for role in ("DELIVERER", "THINKER", "EXECUTOR", "REVIEWER")
-    ]
-    problems = validate_history(
-        {
-            "state": "READY_TO_MERGE",
-            "current_revision": "new-sha",
-        },
-        jobs,
-        [
-            {"event_type": "PULL_REQUEST_CREATED"},
-            {"event_type": "TASK_READY_TO_MERGE"},
-        ],
-        [{"kind": "CHECK", "name": "CI", "status": "SUCCESS", "revision": "old-sha"}],
-        [{"status": "OPEN"}],
-        False,
-    )
+@pytest.mark.parametrize("status,exit_code", [("MERGED", 0), ("PAUSED", 2), ("WAITING_HUMAN", 2)])
+def test_observer_only_reads_and_does_not_retry_or_merge(monkeypatch, capsys, status, exit_code):
+    calls = []
+    task = {
+        "id": "task-1",
+        "external_key": "TRELLO-test",
+        "status": status,
+        "stage": "DEVELOPING",
+        "wait_reason": "NONE",
+    }
 
-    assert "no GitHub check evidence for current revision" in problems
-    assert "unresolved internal review findings remain" in problems
+    def request(base_url, path):
+        calls.append(path)
+        return [task] if path.startswith("/tasks?") else []
 
-
-def test_real_workflow_accepts_current_clean_revision() -> None:
-    jobs = [
-        {"role": role, "state": "SUCCEEDED"}
-        for role in ("DELIVERER", "THINKER", "EXECUTOR", "REVIEWER")
-    ]
-    problems = validate_history(
-        {"state": "READY_TO_MERGE", "current_revision": "head-sha"},
-        jobs,
-        [
-            {"event_type": "PULL_REQUEST_CREATED"},
-            {"event_type": "TASK_READY_TO_MERGE"},
-        ],
-        [{"kind": "CHECK", "name": "CI", "status": "SUCCESS", "revision": "head-sha"}],
-        [{"status": "RESOLVED"}],
-        False,
-    )
-
-    assert problems == []
-
-
-def test_merged_workflow_validates_the_pre_merge_gate_revision() -> None:
-    jobs = [
-        {"role": role, "state": "SUCCEEDED"}
-        for role in ("DELIVERER", "THINKER", "EXECUTOR", "REVIEWER")
-    ]
-    problems = validate_history(
-        {"state": "MERGED", "current_revision": "squash-merge-sha"},
-        jobs,
-        [
-            {"event_type": "PULL_REQUEST_CREATED", "payload": {}},
-            {"event_type": "TASK_READY_TO_MERGE", "payload": {"revision": "pr-head-sha"}},
-        ],
-        [
-            {
-                "kind": "CHECK",
-                "name": "CI",
-                "status": "SUCCESS",
-                "revision": "pr-head-sha",
-            }
-        ],
-        [],
-        False,
-    )
-
-    assert problems == []
+    monkeypatch.setattr(observer, "request", request)
+    monkeypatch.setattr(sys, "argv", ["observe", "TRELLO-test"])
+    assert observer.main() == exit_code
+    assert len(calls) == 5
+    assert all(not path.endswith(("/resume", "/merge")) for path in calls)
+    assert status in capsys.readouterr().out

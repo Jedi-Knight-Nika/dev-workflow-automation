@@ -20,7 +20,12 @@ class ClaudeHarness:
 
         # Paths are checked after symlink resolution. Shell commands still need
         # the runner's OS sandbox; string matching is not a shell security model.
-        if tool not in {"Read", "Edit", "Write", "Glob", "Grep", "Bash"}:
+        allowed = (
+            {"Read", "Glob", "Grep"}
+            if self.settings.read_only
+            else {"Read", "Edit", "Write", "Glob", "Grep", "Bash"}
+        )
+        if tool not in allowed:
             return PermissionResultDeny(message="Tool is outside the Developer role")
         for field in ("file_path", "path"):
             if value := inputs.get(field):
@@ -36,7 +41,9 @@ class ClaudeHarness:
         options = ClaudeAgentOptions(
             model=self.settings.model,
             cwd=self.settings.workspace,
-            tools=["Read", "Edit", "Write", "Glob", "Grep", "Bash"],
+            tools=["Read", "Glob", "Grep"]
+            if self.settings.read_only
+            else ["Read", "Edit", "Write", "Glob", "Grep", "Bash"],
             disallowed_tools=["Agent", "Task", "WebSearch", "WebFetch"],
             allowed_tools=[],
             permission_mode="default",
@@ -84,7 +91,7 @@ class ClaudeHarness:
                         return TurnReceipt(
                             native_session_id=message.session_id,
                             native_turn_id=message.uuid or str(uuid4()),
-                            summary=(message.result or "")[-8000:],
+                            summary=(message.result or "")[:8000],
                             status="failed" if message.is_error else "completed",
                             usage=claude_usage(raw, message.total_cost_usd),
                             raw_usage=raw,

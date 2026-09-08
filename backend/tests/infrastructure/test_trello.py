@@ -3,7 +3,11 @@ import json
 import httpx
 import pytest
 
-from app.integrations.trello import TrelloClient, parse_trello_credentials, trello_priority
+from app.intake.infrastructure.trello_client import (
+    TrelloClient,
+    parse_trello_credentials,
+    trello_priority,
+)
 
 
 def test_trello_credentials_require_key_and_token() -> None:

@@ -1,7 +1,10 @@
 import pytest
 
-from app.application.discover_provider_catalog import DiscoverProviderCatalog
-from app.application.ports.provider_catalog import ProviderCatalogView, ProviderModelView
+from app.agent_runtime.application.discover_provider_catalog import DiscoverProviderCatalog
+from app.agent_runtime.application.ports.provider_catalog import (
+    ProviderCatalogView,
+    ProviderModelView,
+)
 
 
 class FakeProviderCatalogWorkflow:

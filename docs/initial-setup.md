@@ -1,133 +1,122 @@
-# V2 initial database and runtime setup
+# Fresh installation and operator setup
 
-This branch is a **fresh-install baseline**, not an upgrade of the earlier MVP.
-The old incremental migrations have been replaced by one initial revision,
-`0001_initial`. This document takes precedence over older database-upgrade instructions.
+## Database initialization
 
-The code change does not delete your application database, reset usage, start Docker,
-or enable paid workers. A database reset is a separate, explicitly targeted operation.
+Use a new empty PostgreSQL database. API startup runs `alembic upgrade head` before serving requests.
 
-## What the initial revision creates
+The only revision is `backend/migrations/versions/0001_initial.py`. It applies frozen `initial_schema.sql` and `initial_entities.sql` snapshots. The schema contains the 24 current application tables listed in [PRODUCT.md](../PRODUCT.md). Existing incompatible tables/revisions are refused, not silently dropped or stamped.
 
-`backend/migrations/initial_schema.sql` is a frozen PostgreSQL schema. The revision
-executes it and `initial_entities.sql` in one transaction. It does not import current
-ORM classes, call `create_all`, or reconstruct the database with column-add migrations.
-Foreign keys, enum types, check constraints and query indexes are part of the snapshot.
-Concurrent application starts serialize initialization with a PostgreSQL advisory lock.
+Initial entities:
 
-| Entity | Initial state |
-| --- | --- |
-| Default team | Enabled, one concurrent task, no assigned repositories |
-| Interpreter profile | Local Ollama / `qwen3:4b`; local interpretation still requires runtime opt-in |
-| Developer profile | Codex / OpenAI / `gpt-5.6-terra`; no USD budget configured |
-| Thinker and Reviewer profiles | Disabled; optional paid dispatch is not implemented yet |
-| Team automation policy | Enrollment and auto-merge disabled; repository/reviewer/check lists empty |
-| Account settings | Docker runtime, automatic repository indexing disabled |
-| Integrations | GitHub, Linear, Trello, Slack, OpenAI, Anthropic and DeepSeek placeholders, no credentials |
-| Tasks, jobs, AI runs, prices | Empty; no sample work or invented prices |
+- One enabled Default team, with paid execution not enrolled.
+- Four fixed profiles: Interpreter and Developer defaults, Thinker/Reviewer disabled.
+- No role has an authorized hard spending limit yet.
+- A disabled enrollment/auto-merge policy with no granted repositories.
+- Disconnected GitHub, Trello, Linear, Slack, OpenAI, Anthropic and DeepSeek integration records.
+- General display settings; no prices, tasks, jobs, credentials or paid runs.
 
-Creating another Team through the API creates its four fixed profiles and disabled
-automation policy atomically. Reinitializing profiles only fills missing roles; it
-does not overwrite operator configuration. No workflow graph is seeded.
+To initialize a host-managed database, configure both database URLs and run:
 
-**Schema-cleanup boundary:** the snapshot currently contains 55 ORM-managed tables.
-Some are still used by shared ticket, notification, integration, audit and legacy-facing
-API/read models. This is not yet a minimal V2-only table set. The scheduler no longer
-dispatches legacy work, but those remaining code paths and their tables require separate
-vertical removal. Dropping them now would break active readers. The old raw vector
-`knowledge_chunks` table and pgvector extension are not included.
+```sh
+cd backend
+uv sync --frozen --extra dev
+uv run alembic upgrade head
+uv run alembic current
+```
 
-## Safe initialization
+Do not use stamp to bypass a schema error. No application database was reset as part of the code refactor.
 
-1. Keep the scheduler stopped. Preserve a backup if any existing database or workspace
-   might still be useful. Do not run volume deletion commands as part of normal setup.
-2. Create a **new, empty** PostgreSQL database or a separately named Docker volume.
-   Configure `DATABASE_URL` and `DATABASE_URL_SYNC` for that same database.
-3. From `backend`, with dependencies installed and those URLs configured, run:
+## Local API/UI
 
-   ```sh
-   .venv/bin/alembic upgrade head
-   .venv/bin/alembic current
-   ```
+Copy `.env.example` to your own ignored `.env`, set independent random secrets and database credentials, then:
 
-   The expected revision is `0001_initial`. The API container performs the same upgrade
-   on startup. Running it again at the current revision leaves rows and settings intact.
-4. Open the UI and configure repositories/integrations, fixed Team profiles and verified
-   model prices. Secrets belong in the existing encrypted integration flow, not profiles.
-5. Build a repository-appropriate native runner image with its validation dependencies.
-   Configure deterministic validation commands, allowed repository IDs and USD budgets.
-6. Follow [the V2 deployment guide](v2-implementation.md#deployment). Check isolation,
-   cancellation and native-session persistence before enabling one approved test task.
+```sh
+docker compose up --build postgres backend frontend
+```
 
-Do not use `alembic stamp head`, manually rewrite `alembic_version`, or point this
-baseline at an MVP volume. A recognized old revision produces a retired-schema error;
-an unversioned nonempty schema is also refused. Neither path automatically drops data.
-Destructive downgrade is deliberately unsupported. Restore a backup into a separate
-database or explicitly dispose of a verified scratch database instead.
+Local ports bind to 127.0.0.1:3000 and 127.0.0.1:8000. Scheduling stays disabled. Source/provider credentials are configured through Integrations, not committed into files.
 
-The frozen snapshot represents this pre-release baseline. Future released schema
-changes must be reviewed and versioned; do not silently edit a deployed baseline and
-expect `upgrade head` to apply differences.
+## Production native execution
 
-## Startup and execution controls
+Use both production files:
 
-- Plain local and production Compose keep scheduling disabled. They are suitable for
-  configuring the API/UI without launching model work.
-- The V2 overlay exposes `V2_SCHEDULER_ENABLED=false` by default. Change it only after
-  checking images, credentials, prices, per-task/Team policy, source scope and validation.
-- `LEGACY_EXECUTOR=true` and `LEGACY_WORKFLOW_ROUTING=true` are rejected. Those flags do
-  not revive the retired scheduler loops.
-- `REPOSITORY_RAG_ENABLED=true` is rejected with the V2 lifecycle. This initial schema
-  has no vector store. Native agents inspect current files; new tasks fetch the configured
-  repository base branch rather than waiting for an index.
-- Old `MAX_*_TOKENS` / proposal-loop settings are no longer deployment controls for the
-  V2 lane. Configure actual USD limits on fixed profiles and Team automation policy.
-- The disabled scheduler process waits for a shutdown signal instead of exiting into a
-  container restart loop. Enabled scheduler shutdown cancels active phase coroutines and
-  finishes their cancellation handling. API shutdown also cleans up after startup failure.
-- Pausing or changing sessions does **not** erase recorded costs. Unknown-cost turns
-  require reconciliation; restarting a service is not a budget reset.
+```sh
+docker compose --env-file deploy/.env -f deploy/compose.production.yaml -f deploy/compose.v2.yaml config -q
+docker compose --env-file deploy/.env -f deploy/compose.production.yaml -f deploy/compose.v2.yaml build backend worker frontend developer-image provider-egress
+```
 
-The controller alone has database access and the Docker socket. Developer containers
-have only their task checkout, native state and approved provider credentials. Validation
-containers receive neither database/model credentials nor network access.
+Prepare `deploy/.env` from its example. Set:
 
-## Explicit model and harness changes
+- Domain, independent application/webhook secrets and database credentials.
+- OPERATOR_USER and a Caddy bcrypt OPERATOR_PASSWORD_HASH. Console/API access is authenticated at the TLS proxy; signed webhook endpoints remain reachable.
+- V2_DATA_ROOT: an absolute path that is identical on the Docker host and controller. Create workspaces, native and control subdirectories there.
+- A tested V2_RUNNER_IMAGE containing the target repository's build/test tools and preinstalled dependencies.
+- Provider harness enable flags and the internal provider-egress network/proxy.
+- Repository-specific V2_VALIDATION_COMMANDS: JSON mapping repository UUIDs to argv arrays.
+- Keep V2_SCHEDULER_ENABLED=false while configuring and inspecting everything.
 
-1. Pause the task and wait for its worker to stop and record its receipt.
-2. Select the target model/harness in the Team's Developer profile.
-3. Open the ticket's **Native Developer session** panel and refresh its state.
-4. Choose either to keep the Codex thread or start a bounded new-session handoff.
-   Provide an operator reason and apply the change.
-5. Check the task and resume separately when ready. Applying the change makes no model
-   call, does not edit files, and does not move the task to another workflow stage.
+The API has no Docker socket. Only the trusted controller mounts it. Native children never receive the socket, database credentials or GitHub credentials. The provider gateway restricts destinations; the Developer network is internal. Validation has no network.
 
-Keeping the thread is supported for Codex/OpenAI model changes: the next turn resumes
-the same native ID using the chosen model. This follows the documented
-[Codex thread-resume model override](https://learn.chatgpt.com/docs/app-server).
-Other combinations conservatively require an explicit new native session. The app does
-not promise that Claude and Codex histories are interchangeable.
+A stock runner cannot test every repository without dependency preparation. Build a project-specific dependency image; do not grant validation internet or production credentials to hide missing dependencies.
 
-A handoff keeps the same checkout and last known revision. It sends current requirements,
-pending feedback, an operator note, and at most 4,000 characters of advisory checkpoint
-summary, bounded to 24,000 characters total. Oversized requirements/feedback are refused,
-not silently truncated. Old native IDs, transcripts and cumulative token baselines are
-not copied into the successor. Previous sessions and their cost records remain intact.
+## Team admission checklist
 
-Both operations require current task/profile versions. Active workers, manual takeover,
-archived tickets, unresolved costs, disabled profiles and stale requests are refused.
-An audited event records the change without exposing provider credentials or native IDs.
+1. Configure GitHub and import the exact repository. Confirm its default branch.
+2. Configure a supported native Developer harness/provider/model and explicit hard USD allowance.
+3. For OpenAI and cloud interpretation, register current verified pricing and source/effective date in the pricing UI. Do not copy guessed rates.
+4. Set the Team's allowed repository UUIDs, task budget and cumulative Team budget.
+5. Enable enrollment for that scope; leave auto-merge off for the first smoke test.
+6. Configure required CI check names and authorized immutable numeric reviewer IDs before enabling auto-merge.
+7. Optionally enable Thinker/Reviewer with their own limits; neither is required for routine tasks.
+8. Validate the dependency image, native start/resume and offline test command first.
+9. Explicitly enable the scheduler and start one low-risk task.
 
-## Verification and remaining work
+There is no hard-coded success guarantee for an arbitrary task or insufficient allowance. Scope and dependencies must be feasible. Task/Team/role limits all apply; increasing one does not reset accumulated use.
 
-See [current verification and acceptance](v2-implementation.md#verification-and-acceptance)
-for test results. Database tests use a disposable PostgreSQL database, not the application
-database. No paid provider requests are needed for those tests.
+## Source routing
 
-Remaining code work is explicit: optional paid Thinker/Reviewer execution, removal of
-remaining legacy API/read-model/table dependencies, and corresponding UI simplification.
-The existing backup scripts target the old named workspace volume; V2 same-path checkout,
-native-state and controller-directory backup/restore wiring also remains to be completed.
-Do not treat the old `make backup-production` command as a complete V2 recovery backup.
-Real Docker/native-SDK smoke tests and the authorized live-task benchmark are also pending;
-mocked lifecycle tests are not evidence of production cost or completion rates.
+Trello integration configuration selects board/list eligibility and repository. Linear uses explicit assignee/source-state eligibility. Configure their source status destination IDs if tracker synchronization is desired. Authorized tracker-comment actor IDs live in integration configuration `v2_actor_ids`.
+
+Slack is configured through deployment secrets/routes, not a generic credential form:
+
+```json
+{"workspace-id:channel-id":{"team_id":"UUID","repository_id":"UUID","actor_ids":"U123,U456"}}
+```
+
+Set SLACK_SIGNING_SECRET and SLACK_TEAM_ROUTES. Send `task <requirement>` (or mention the app then task) in that channel. Thread replies attach to the existing ticket. This is the Events API, not an interactive slash-command endpoint.
+
+For GitHub issues, set GITHUB_ISSUE_ROUTES:
+
+```json
+{"owner/repository":{"team_id":"UUID","trigger_label":"engineering","actor_ids":"12345,67890"}}
+```
+
+Only open, labeled issues from configured actors are admitted; redelivery is deduplicated. Missing configuration leaves a visible ticket wait without paid work. GitHub issue close cancels its nonterminal task; issue edits record a new requirement version. GitHub issue status synchronization is not inferred from Trello/Linear destinations.
+
+For a private local interpreter, provision a verified OLLAMA_IMAGE and model before enabling LOCAL_EVENT_INTERPRETER. The overlay exposes no public Ollama port. INTERPRETER_CLOUD_MODELS is optional (at most two explicit provider/model entries) and needs credentials, pricing and admission budget.
+
+## Stop, resume and explicit session changes
+
+Use Team Stop work for a durable brake. The Team stays enabled; current tickets pause and jobs lose leases. Enable execution clears the Team brake, but paused tickets require explicit Resume work. No usage is reset.
+
+To change a suspended task's model/harness, configure the target Developer profile, then use the ticket's Native Developer session panel with an explicit reason. Version checks and unknown-cost checks apply. Same-harness compatible changes can retain the thread; cross-harness changes use a bounded handoff. The change does not run a model or resume work automatically.
+
+## Backup and restore
+
+Before a consistent backup, stop API/controller and all managed native/validation/Git containers. Set CONFIRM_QUIESCENT=YES only after checking them. The tools profile stores:
+
+- PostgreSQL custom-format dump.
+- workspaces, native and control directories together.
+- Verified archive listings and SHA256 checksums.
+
+The backup name includes UTC timestamp and a unique suffix. Incomplete backups remain for inspection; retention is operator-managed. These archives contain sensitive source and native state: protect/encrypt them and retain the matching APP_SECRET_KEY securely outside the archive.
+
+Restore requires CONFIRM_RESTORE=RESTORE and CONFIRM_QUIESCENT=YES. Supply a trusted BACKUP_SET and a NEW RESTORE_DATABASE. Runtime directories must be empty. The restore tool never drops a database or deletes existing directories. Restore at the original absolute data path, preserve UID/GID ownership, verify keys and inspect suspended/unknown runs before enabling execution.
+
+Backup/restore tooling is wired to the same native/checkouts/control tree but still requires a deployment-host smoke test.
+
+## What must be supplied by the operator
+
+Docker availability; a new database; protected secrets; GitHub/repository access; selected model access and verified rates; explicit Team/role allowances; a tested dependency image and validation commands; reviewer/check policy; and authorization for the first real paid run.
+
+The refactor itself did not launch paid workers, modify the application's database, publish a PR or perform a real-model benchmark.

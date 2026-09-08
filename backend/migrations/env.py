@@ -4,9 +4,9 @@ from alembic import context
 from alembic.script import ScriptDirectory
 from sqlalchemy import engine_from_config, inspect, pool, text
 
-from app.config import get_settings
-from app.db import models  # noqa: F401
-from app.db.base import Base
+from app.platform.configuration.settings import get_settings
+from app.platform.persistence import registry  # noqa: F401
+from app.platform.persistence.base import Base
 
 config = context.config
 config.set_main_option("sqlalchemy.url", get_settings().database_url_sync)
@@ -35,9 +35,8 @@ def run_migrations_online() -> None:
             known = {item.revision for item in ScriptDirectory.from_config(config).walk_revisions()}
             if versions - known:
                 raise RuntimeError(
-                    "This database uses the retired MVP migration chain. No data was changed. "
-                    "Use a separately provisioned empty database for initial V2 setup; "
-                    "do not stamp an old database as current."
+                    "This database has an incompatible schema revision. No data was changed. "
+                    "Provision an empty database for initial setup; never bypass schema validation."
                 )
         # Inspection starts an implicit SQLAlchemy transaction; close it before
         # Alembic owns the DDL transaction (otherwise setup would roll back on exit).

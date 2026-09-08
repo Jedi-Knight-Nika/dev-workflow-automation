@@ -19,6 +19,7 @@ class ValidationManifest(BaseModel):
     branch: str = Field(min_length=1, max_length=255, pattern=r"^agent/[a-zA-Z0-9._/-]+$")
     title: str = Field(min_length=1, max_length=500)
     author_name: str = Field(min_length=1, max_length=120)
+    base_sha: str = Field(pattern=r"^[0-9a-f]{40}$")
     commands: list[list[str]] = Field(min_length=1, max_length=12)
     timeout_seconds: int = Field(default=1200, ge=1, le=7200)
 
@@ -101,6 +102,11 @@ async def validate(manifest: ValidationManifest) -> dict[str, object]:
         "head_sha": await git("rev-parse", "HEAD"),
         "fingerprint": workspace_fingerprint(paths),
         "checks": [asdict(check) for check in checks],
+        "change_context": (
+            await git(
+                "diff", "--no-ext-diff", "--no-textconv", "--stat", manifest.base_sha, "HEAD", "--"
+            )
+        )[:6000],
     }
 
 
