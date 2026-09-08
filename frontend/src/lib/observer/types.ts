@@ -4,6 +4,25 @@ export interface ObserverConfiguration {
   local_ai_enabled: boolean;
   model: string;
   memory_reserve_mb: number;
+  output_tokens: number;
+  response_timeout_seconds: number;
+}
+
+export type ObserverInferenceSettings = Pick<
+  ObserverConfiguration,
+  'local_ai_enabled' | 'model' | 'memory_reserve_mb' | 'output_tokens' | 'response_timeout_seconds'
+>;
+export interface LocalModels {
+  reachable: boolean;
+  reason: string | null;
+  models: { name: string; size_bytes: number; estimated_memory_mb: number }[];
+  catalog: { name: string; minimum_free_disk_mb: number }[];
+}
+export interface ModelDownloadEvent {
+  status?: string;
+  percent?: number | null;
+  done?: boolean;
+  error?: string;
 }
 
 export type ObserverScope = {

@@ -23,6 +23,12 @@ class Evidence:
 
 
 @dataclass(frozen=True)
+class LocalExplanation:
+    answer: str
+    fact_ids: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class Attention:
     fingerprint: str
     kind: str
@@ -73,6 +79,8 @@ def capacity_reason(snapshot: Snapshot, enabled: bool, reserve_mb: int) -> str |
         return "Local AI is sleeping: resource readings are stale."
     if available < reserve_mb * 1024 * 1024:
         return "Local AI is sleeping to preserve the configured engineering memory reserve."
+    if (number(snapshot.host.get("host_cpu")) or 0) >= 85:
+        return "Local AI is sleeping while host CPU is under pressure."
     if any(i.get("kind") == "OOM" and not i.get("closed_at") for i in snapshot.incidents):
         return "Local AI is sleeping after an unresolved OOM incident."
     return None
@@ -230,6 +238,8 @@ def detect(snapshot: Snapshot, thresholds: dict[str, int]) -> list[Attention]:
 def choose_tools(question: str, scope: Scope) -> list[str]:
     """No model purchase or recursive loop is needed to route common questions."""
     text = question.lower()
+    if text.strip(" !?.") in {"hi", "hello", "hey", "hey jarvis", "hello jarvis", "გამარჯობა"}:
+        return ["product"]
     groups = (
         (
             ("cost", "token", "expens", "budget", "cheap", "spend", "compaction", "model", "agent"),
@@ -249,3 +259,41 @@ def choose_tools(question: str, scope: Scope) -> list[str]:
     if scope.task_id and "tasks" not in tools:
         tools.insert(0, "tasks")
     return (tools or ["attention", "tasks", "resources"])[:4]
+
+
+def question_subject(question: str, history: list[dict[str, Any]]) -> str:
+    followups = {"what", "why", "", "explain", "what do you mean"}
+    if question.lower().strip(" ?!.") not in followups:
+        return question
+    previous = [r["content"] for r in history if r.get("role") == "user"]
+    if previous and previous[-1] == question:
+        previous.pop()
+    return next(
+        (value for value in reversed(previous) if value.lower().strip(" ?!.") not in followups),
+        question,
+    )
+
+
+def capacity_question(question: str) -> bool:
+    value = question.lower()
+    return any(
+        term in value
+        for term in (
+            "another task",
+            "another runner",
+            "capacity",
+            "safe to start",
+            "can i start",
+            "can the host",
+        )
+    )
+
+
+def capacity_advice(snapshot: Snapshot) -> str:
+    disk = number(snapshot.host.get("host_disk"))
+    memory = number(snapshot.host.get("host_memory"))
+    if disk is not None and disk >= 90:
+        return f"I would not start another task now: disk usage is {disk:.1f}%. Free disk space first. Low CPU alone does not establish safe capacity. This is advice, not a scheduling action."
+    if memory is not None and memory >= 85:
+        return f"I would not start another task now: RAM usage is {memory:.1f}%. Preserve memory for existing work. No scheduling action was taken."
+    return "I cannot confirm that another task is safe to start. That requires fresh free-memory and disk readings, the new runner's resource limits and Team concurrency policy. Low CPU alone is not enough. No scheduling action was taken."

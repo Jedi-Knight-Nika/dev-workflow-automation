@@ -7,7 +7,10 @@ import type {
   ObserverConfiguration,
   ObserverScope,
   ObserverStatus,
-  ObserverStreamEvent
+  ObserverStreamEvent,
+  ObserverInferenceSettings,
+  LocalModels,
+  ModelDownloadEvent
 } from './types';
 
 export function scopeQuery(scope: ObserverScope): string {
@@ -19,6 +22,12 @@ export function scopeQuery(scope: ObserverScope): string {
 
 export const observerApi = {
   configuration: () => api<ObserverConfiguration>('/observer/configuration'),
+  models: () => api<LocalModels>('/observer/models'),
+  configureLocal: (settings: ObserverInferenceSettings) =>
+    api<ObserverConfiguration>('/observer/configuration', {
+      method: 'PUT',
+      body: JSON.stringify(settings)
+    }),
   rename: (display_name: string) =>
     api<ObserverConfiguration>('/observer/configuration', {
       method: 'PUT',
@@ -72,11 +81,45 @@ export async function streamAnswer(
     signal,
     headers: { Accept: 'text/event-stream' }
   });
+  let completed = false;
+  await consumeStream<ObserverStreamEvent>(response, (event) => {
+    receive(event);
+    if (event.type === 'observer.completed' || event.type === 'observer.failed') completed = true;
+  });
+  if (!completed && !signal.aborted)
+    throw new Error('Assistant disconnected. Your saved conversation is available in history.');
+}
+
+export async function installLocalModel(
+  model: string,
+  receive: (event: ModelDownloadEvent) => void,
+  signal: AbortSignal
+): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/observer/models/install`, {
+    method: 'POST',
+    signal,
+    headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
+    body: JSON.stringify({ model })
+  });
+  let completed = false;
+  await consumeStream<ModelDownloadEvent>(response, (event) => {
+    if (event.error) throw new Error(event.error);
+    receive(event);
+    if (event.done) completed = true;
+  });
+  if (!completed && !signal.aborted)
+    throw new Error('Download interrupted. Retry explicitly when the host is idle.');
+}
+
+async function consumeStream<T>(response: Response, receive: (event: T) => void): Promise<void> {
+  if (!response.ok) {
+    const error = await response.json().catch(() => null);
+    throw new Error(error?.detail || 'Assistant request unavailable.');
+  }
   if (!response.ok || !response.body) throw new Error('Assistant stream unavailable.');
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
-  let completed = false;
   try {
     while (true) {
       const chunk = await reader.read();
@@ -93,14 +136,9 @@ export async function streamAnswer(
           .map((line) => line.slice(5).trimStart())
           .join('\n');
         if (!payload) continue;
-        const event = JSON.parse(payload) as ObserverStreamEvent;
-        receive(event);
-        if (event.type === 'observer.completed' || event.type === 'observer.failed')
-          completed = true;
+        receive(JSON.parse(payload) as T);
       }
     }
-    if (!completed && !signal.aborted)
-      throw new Error('Assistant disconnected. Your saved conversation is available in history.');
   } finally {
     await reader.cancel().catch(() => {});
     reader.releaseLock();

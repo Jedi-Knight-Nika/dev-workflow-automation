@@ -36,6 +36,8 @@ export const ka: Record<TranslationKey, string> = {
   'nav.language': 'ენა',
   'nav.openMenu': 'მენიუს გახსნა',
   'nav.closeMenu': 'მენიუს დახურვა',
+  'nav.enterFullscreen': 'სრულ ეკრანზე',
+  'nav.exitFullscreen': 'სრული ეკრანის დახურვა',
 
   'theme.toLight': 'ღია თემაზე გადართვა',
   'theme.toDark': 'მუქ თემაზე გადართვა',

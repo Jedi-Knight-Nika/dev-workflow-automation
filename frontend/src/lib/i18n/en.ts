@@ -33,6 +33,8 @@ export const en = {
   'nav.language': 'Language',
   'nav.openMenu': 'Open menu',
   'nav.closeMenu': 'Close menu',
+  'nav.enterFullscreen': 'Fullscreen',
+  'nav.exitFullscreen': 'Exit fullscreen',
 
   'theme.toLight': 'Switch to light theme',
   'theme.toDark': 'Switch to dark theme',

@@ -2,7 +2,7 @@
 
 from typing import Any, Protocol
 
-from app.observability.observer.domain import Attention, Evidence, Scope, Snapshot
+from app.observability.observer.domain import Attention, Evidence, LocalExplanation, Scope, Snapshot
 
 
 class ObserverReads(Protocol):
@@ -38,7 +38,7 @@ class ObserverStore(Protocol):
 
 
 class LocalObserverModel(Protocol):
-    async def available(self) -> bool: ...
-    async def select(
+    async def readiness(self, *, fresh: bool = False) -> dict[str, Any]: ...
+    async def explain(
         self, question: str, evidence: list[Evidence], history: list[dict[str, Any]]
-    ) -> tuple[list[str], dict[str, Any]]: ...
+    ) -> tuple[LocalExplanation | None, dict[str, Any]]: ...

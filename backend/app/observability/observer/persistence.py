@@ -285,6 +285,10 @@ class SqlObserverStore:
             assert row is not None
             row.values = {**row.values, **changes}
             row.updated_at = datetime.now(UTC)
+            if owner == "deployment":
+                # Delivered only on commit: a failed local apply or disconnected
+                # Settings request cannot lose the controller's configuration wakeup.
+                await session.execute(text("SELECT pg_notify('observer_configuration', 'changed')"))
             return {"focus": "normal", "last_seen_at": None, **row.values}
 
     async def receipt(self, question: str, receipt: dict[str, Any]) -> None:
@@ -331,6 +335,23 @@ class SqlObserverStore:
                 )
                 .values(status="INTERRUPTED")
             )
+            stale_runs = await session.scalars(
+                select(ObserverModelRun)
+                .join(ObserverQuestion, ObserverQuestion.id == ObserverModelRun.question_id)
+                .where(
+                    ObserverModelRun.receipt["status"].as_string() == "STARTED",
+                    ObserverModelRun.created_at < now - timedelta(minutes=5),
+                    ObserverQuestion.status != "RUNNING",
+                )
+                .limit(1000)
+                .with_for_update(of=ObserverModelRun)
+            )
+            for run in stale_runs:
+                run.receipt = {
+                    **run.receipt,
+                    "status": "INTERRUPTED",
+                    "reason": "PROCESS_INTERRUPTED",
+                }
             await session.execute(
                 delete(ObserverConversation).where(
                     ObserverConversation.updated_at < now - timedelta(days=30)

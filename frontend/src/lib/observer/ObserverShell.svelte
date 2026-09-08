@@ -37,6 +37,7 @@
   let busy = $state(false);
   let offline = $state(false);
   let bubble = $state('');
+  let unreadReply = $state(false);
   let error = $state('');
   let activity = $state('');
   let input = $state('');
@@ -160,6 +161,7 @@
     clearTimeout(bubbleTimer);
     busy = false;
     bubble = '';
+    unreadReply = false;
     currentStatus = null;
     briefing = null;
     closePanel();
@@ -236,6 +238,7 @@
   async function openPanel() {
     if (!enabled) return;
     open = true;
+    unreadReply = false;
     bubble = '';
     error = '';
     await tick();
@@ -249,8 +252,6 @@
   function closePanel() {
     const restoreFocus =
       typeof document !== 'undefined' && dialog?.contains(document.activeElement);
-    request?.abort();
-    busy = false;
     open = false;
     dialog?.close();
     if (restoreFocus) launcher?.focus({ preventScroll: true });
@@ -281,6 +282,8 @@
           if (controller.signal.aborted) return;
           if (event.type === 'observer.tool_started')
             activity = `Reading ${(event.tool || 'facts').replaceAll('_', ' ')}`;
+          if (event.type === 'observer.model_started')
+            activity = 'Local AI · composing an explanation';
           if (event.type === 'observer.text_delta') {
             activity = 'Answering';
             messages = messages.map((m) =>
@@ -295,11 +298,23 @@
             );
             activity =
               event.mode === 'local'
-                ? 'Local Ollama · verified facts'
-                : 'Deterministic · no model call';
+                ? 'Local Ollama · source-backed explanation'
+                : event.reason || 'Deterministic facts';
+            if (!open) {
+              unreadReply = true;
+              if (focus !== 'silent') {
+                bubble = `${assistantName} replied: ${(event.answer || '').slice(0, 130)}`;
+                clearTimeout(bubbleTimer);
+                bubbleTimer = setTimeout(() => {
+                  bubble = '';
+                }, 15000);
+              }
+            }
           }
-          if (event.type === 'observer.failed')
+          if (event.type === 'observer.failed') {
             error = event.message || `${assistantName} unavailable.`;
+            messages = messages.map((m) => (m.id === responseId ? { ...m, content: error } : m));
+          }
           void tick().then(() => {
             if (log) log.scrollTop = log.scrollHeight;
           });
@@ -311,6 +326,16 @@
         error = `${assistantName} could not finish this answer. Saved conversations remain in History.`;
     } finally {
       if (request === controller) busy = false;
+      messages = messages.map((m) =>
+        m.id === responseId && !m.content
+          ? {
+              ...m,
+              content: controller.signal.aborted
+                ? 'Reply cancelled because the chat was reset or assistant settings changed. Send again when ready; no automatic AI retry was started.'
+                : error || 'The reply was interrupted. Please try again.'
+            }
+          : m
+      );
     }
   }
 
@@ -482,7 +507,8 @@
           : 'deterministic facts'} · Drag to move"
     >
       <ObserverOrb {mode} {displayMode} size={dockSize - 2} />
-      {#if currentStatus?.open_attention_count}<span
+      {#if unreadReply}<span class="observer-badge" aria-label="Unread reply">●</span>
+      {:else if currentStatus?.open_attention_count}<span
           class="observer-badge"
           class:critical={currentStatus.highest_severity === 'CRITICAL'}
           >{currentStatus.open_attention_count}</span
@@ -510,8 +536,6 @@
   oncancel={closePanel}
   onclose={() => {
     open = false;
-    request?.abort();
-    busy = false;
   }}
 >
   {#if open && enabled}
@@ -657,7 +681,7 @@
             class:user={message.role === 'user'}
           >
             <div class="message-label">{message.role === 'user' ? 'YOU' : assistantName}</div>
-            <p>{message.content || (busy ? 'Reading verified facts…' : 'No answer received.')}</p>
+            <p>{message.content || (busy ? `${activity}…` : 'This reply was interrupted.')}</p>
             {#if message.sources.length}<div class="sources">
                 {#each uniqueSources(message.sources) as source (source.source + source.complete)}<span
                     class:incomplete={!source.complete}

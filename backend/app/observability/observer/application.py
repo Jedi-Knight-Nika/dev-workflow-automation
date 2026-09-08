@@ -7,7 +7,20 @@ from datetime import UTC, datetime
 from time import perf_counter
 from typing import Any
 
-from app.observability.observer.domain import Evidence, Scope, capacity_reason, choose_tools, detect
+from anyio import move_on_after
+
+from app.observability.observer.domain import (
+    Evidence,
+    LocalExplanation,
+    Scope,
+    Snapshot,
+    capacity_advice,
+    capacity_question,
+    capacity_reason,
+    choose_tools,
+    detect,
+    question_subject,
+)
 from app.observability.observer.ports import LocalObserverModel, ObserverReads, ObserverStore
 
 
@@ -26,6 +39,19 @@ class Observer:
         self.reads, self.store, self.model = reads, store, model
         self.local_enabled, self.reserve_mb, self.thresholds = local_enabled, reserve_mb, thresholds
         self.record = record
+        self.installing = False
+
+    async def local_reason(self, snapshot: Snapshot, *, fresh: bool = False) -> str | None:
+        if self.installing:
+            return "Local model setup is running; chat will use deterministic facts."
+        reason = capacity_reason(snapshot, self.local_enabled, self.reserve_mb)
+        if reason or self.model is None:
+            return reason or "Local AI is disabled."
+        readiness = await self.model.readiness(fresh=fresh)
+        if not readiness["available"]:
+            return str(readiness["reason"])
+        # Leave the configured reserve AFTER estimated weights + KV/runtime use.
+        return capacity_reason(snapshot, True, self.reserve_mb + int(readiness["memory_mb"]))
 
     async def detect_attention(self) -> None:
         started = perf_counter()
@@ -49,12 +75,8 @@ class Observer:
             if any(e["severity"] == "WARNING" for e in visible)
             else "NONE"
         )
-        reason = capacity_reason(snapshot, self.local_enabled, self.reserve_mb)
-        ready = False
-        if reason is None and self.model:
-            ready = await self.model.available()
-            if not ready:
-                reason = "The local assistant model is unavailable or not provisioned. No model is downloaded automatically."
+        reason = await self.local_reason(snapshot)
+        ready = reason is None
         return {
             "enabled": True,
             "ai_available": ready,
@@ -129,15 +151,20 @@ class Observer:
         self.record("questions_total", 1)
         evidence: list[Evidence] = []
         mode, reason = "deterministic", None
+        explanation: LocalExplanation | None = None
         tools: list[str] = []
         local_started = False
         try:
-            async with asyncio.timeout(45):
+            async with asyncio.timeout(85):
                 scope = Scope(**request["scope"])
                 prefs = await self.store.preference(owner)
                 message = request["message"]
+                history = await self.store.history(owner, request["conversation_id"])
+                subject = question_subject(message, history)
                 days = 7 if "week" in message.lower() or "7 day" in message.lower() else 30
-                tools = choose_tools(message, scope)
+                tools = (
+                    ["resources"] if capacity_question(subject) else choose_tools(subject, scope)
+                )
                 for tool in tools:
                     self.record("tool_calls_total", 1)
                     yield {"type": "observer.tool_started", "tool": tool}
@@ -165,6 +192,8 @@ class Observer:
                                 found = await self.reads.evidence(
                                     tool, scope, days, prefs.get("last_seen_at")
                                 )
+                                if tool == "product":
+                                    found = found[:2]
                             evidence.extend(found)
                     except Exception:  # noqa: BLE001 -- optional read-port failure becomes partial evidence
                         self.record("tool_failures_total", 1)
@@ -180,73 +209,103 @@ class Observer:
                     yield {"type": "observer.tool_finished", "tool": tool}
                 # Hard bound applied before model admission and persistence.
                 evidence = [
-                    Evidence(e.key, e.text[:650], e.source, e.measured_at, e.complete)
-                    for e in evidence[:24]
+                    Evidence(e.key, e.text[:420], e.source, e.measured_at, e.complete)
+                    for e in evidence[:12]
                 ]
                 snapshot = await self.reads.snapshot(scope, fresh=True)
-                reason = capacity_reason(snapshot, self.local_enabled, self.reserve_mb)
-                if reason and self.local_enabled:
+                if capacity_question(subject):
+                    evidence = [
+                        Evidence(
+                            "capacity:assessment",
+                            capacity_advice(snapshot),
+                            "CAPACITY_POLICY",
+                            snapshot.metrics_at,
+                        )
+                    ]
+                    reason = "Capacity advice is calculated without a model."
+                else:
+                    reason = await self.local_reason(snapshot, fresh=True)
+                if reason and self.local_enabled and not capacity_question(subject):
                     self.record("capacity_denied_total", 1)
-                if reason is None and self.model and await self.model.available():
-                    history = await self.store.history(owner, request["conversation_id"])
+                if reason is None and self.model:
                     await self.store.receipt(
                         identifier,
                         {"status": "STARTED", "prompt_eval_count": None, "eval_count": None},
                     )
                     local_started = True
                     self.record("model_requests_total", 1)
-                    selected, receipt = await self._local_selection(message, evidence, history)
+                    yield {
+                        "type": "observer.model_started",
+                        "message": "Local AI is composing an answer from verified sources.",
+                    }
+                    explanation, receipt = await self._local_explanation(message, evidence, history)
                     await self.store.receipt(identifier, receipt)
                     local_started = False
                     if receipt.get("prompt_eval_count") is not None:
                         self.record("model_prompt_tokens_total", receipt["prompt_eval_count"])
                     if receipt.get("eval_count") is not None:
                         self.record("model_output_tokens_total", receipt["eval_count"])
-                    if selected:
+                    if explanation:
                         ordered = {e.key: e for e in evidence}
-                        evidence = [ordered[k] for k in selected] + [
-                            e for e in evidence if not e.complete and e.key not in selected
-                        ][:2]
+                        evidence = [ordered[k] for k in explanation.fact_ids] + [
+                            e
+                            for e in evidence
+                            if not e.complete and e.key not in explanation.fact_ids
+                        ][:4]
                         mode = "local"
                     else:
                         self.record("model_failures_total", 1)
-                        reason = "Local explanation unavailable; showing verified facts."
+                        reason = (
+                            "Engineering work took priority; showing verified facts."
+                            if receipt.get("reason") == "ENGINEERING_PRIORITY"
+                            else "Local explanation reached its limit or was unavailable; showing verified facts."
+                        )
                 elif reason is None:
                     reason = "Local model not provisioned; showing verified facts."
         except asyncio.CancelledError:
-            # Closing the panel closes the upstream HTTP call too, no detached model loop.
-            if local_started:
-                await self.store.receipt(
+            # A page disconnect cancels the upstream call; hiding the panel does not.
+            # ASGI disconnects use level cancellation. Shield only bounded
+            # bookkeeping so the Observer pool can return its connection.
+            with move_on_after(3, shield=True):
+                if local_started:
+                    await self.store.receipt(
+                        identifier,
+                        {"status": "INTERRUPTED", "prompt_eval_count": None, "eval_count": None},
+                    )
+                await self.store.finish_question(
+                    owner,
                     identifier,
-                    {"status": "INTERRUPTED", "prompt_eval_count": None, "eval_count": None},
+                    {
+                        "answer": "Question interrupted. No engineering action was taken.",
+                        "sources": [],
+                        "mode": "deterministic",
+                        "tools": tools,
+                    },
                 )
-            await self.store.finish_question(
-                owner,
-                identifier,
-                {
-                    "answer": "Question interrupted. No engineering action was taken.",
-                    "sources": [],
-                    "mode": "deterministic",
-                    "tools": tools,
-                },
-            )
             raise
         except Exception:  # noqa: BLE001 -- companion failure cannot escape into execution
+            explanation = None
             if local_started:
                 await self.store.receipt(
                     identifier,
                     {"status": "INTERRUPTED", "prompt_eval_count": None, "eval_count": None},
                 )
-            reason = (
-                "The assistant reached its time or availability limit. No engineering action was taken."
-            )
+            reason = "The assistant reached its time or availability limit. No engineering action was taken."
         facts = evidence[:8]
-        incomplete = [e for e in evidence[8:] if not e.complete][:2]
+        incomplete = [e for e in evidence[8:] if not e.complete][:4]
         facts.extend(incomplete)
         answer = (
             "\n\n".join(f.text for f in facts)
             or "I cannot retrieve the necessary facts right now. Engineering execution is independent of this assistant."
         )
+        if explanation:
+            answer = explanation.answer
+            # A model cannot suppress missing-data notices from the evidence layer.
+            missing = list(dict.fromkeys(e.source for e in facts if not e.complete))
+            if missing:
+                answer += (
+                    "\n\nData limitation: " + ", ".join(missing) + " is incomplete or unavailable."
+                )
         result = {
             "answer": answer,
             "sources": [asdict(f) for f in facts],
@@ -264,19 +323,26 @@ class Observer:
             yield {"type": "observer.text_delta", "text": answer[start : start + 120]}
         yield {"type": "observer.completed", **result}
 
-    async def _local_selection(
+    async def _local_explanation(
         self, message: str, evidence: list[Evidence], history: list[dict[str, Any]]
-    ) -> tuple[list[str], dict[str, Any]]:
+    ) -> tuple[LocalExplanation | None, dict[str, Any]]:
         assert self.model is not None
-        task = asyncio.create_task(self.model.select(message, evidence, history))
+        if not self.local_enabled or self.installing or await self.reads.execution_busy():
+            return None, {
+                "status": "SKIPPED",
+                "reason": "ENGINEERING_PRIORITY",
+                "prompt_eval_count": 0,
+                "eval_count": 0,
+            }
+        task = asyncio.create_task(self.model.explain(message, evidence, history))
         try:
             while not task.done():
                 done, _ = await asyncio.wait({task}, timeout=2)
                 if done:
                     break
                 # Yield to new actionable work arriving after admission, too.
-                if await self.reads.execution_busy():
-                    return [], {
+                if not self.local_enabled or self.installing or await self.reads.execution_busy():
+                    return None, {
                         "status": "INTERRUPTED",
                         "reason": "ENGINEERING_PRIORITY",
                         "prompt_eval_count": None,
@@ -286,4 +352,5 @@ class Observer:
         finally:
             if not task.done():
                 task.cancel()
-                await asyncio.gather(task, return_exceptions=True)
+                with move_on_after(3, shield=True):
+                    await asyncio.gather(task, return_exceptions=True)

@@ -8,6 +8,7 @@ import secrets
 import unicodedata
 from collections.abc import AsyncIterator
 from datetime import datetime
+from time import monotonic
 from typing import Any, Literal
 from uuid import UUID
 
@@ -17,21 +18,18 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.bootstrap.observer import get_observer, observer_runtime
 from app.observability.observer.application import Observer
-from app.observability.observer.domain import Scope
+from app.observability.observer.domain import Scope, capacity_reason, number
+from app.observability.observer.local_model import INSTALL_MODELS, OllamaObserver, local_model_name
 from app.platform.configuration.settings import get_settings
 
 
-async def enabled_observer() -> AsyncIterator[Observer]:
+async def enabled_observer() -> Observer:
     if not get_settings().observer_enabled or not observer_runtime.enabled:
         raise HTTPException(404, "Observer is disabled")
-    task = asyncio.current_task()
-    if task:
-        observer_runtime.active.add(task)
-    try:
-        yield get_observer()
-    finally:
-        if task:
-            observer_runtime.active.discard(task)
+    # Streams register their own task below. Cancelling both an ASGI parent
+    # request and its stream child can repeatedly interrupt database cleanup.
+    # Short read-only requests may drain; no new work is admitted after off.
+    return get_observer()
 
 
 def owner(request: Request, response: Response) -> str:
@@ -101,13 +99,20 @@ class ConfigurationInput(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True, str_strip_whitespace=True)
     enabled: bool | None = None
     display_name: str | None = Field(default=None, min_length=1, max_length=40)
+    local_ai_enabled: bool | None = None
+    model: str | None = Field(default=None, min_length=1, max_length=100)
+    memory_reserve_mb: int | None = Field(default=None, ge=512, le=1048576)
+    output_tokens: int | None = Field(default=None, ge=128, le=768)
+    response_timeout_seconds: int | None = Field(default=None, ge=10, le=60)
 
     @model_validator(mode="after")
     def validate_changes(self) -> "ConfigurationInput":
         if not self.model_fields_set or any(
             getattr(self, field) is None for field in self.model_fields_set
         ):
-            raise ValueError("Provide a name or enabled setting; null is not a setting")
+            raise ValueError("Provide a configuration change; null is not a setting")
+        if self.model is not None and not local_model_name(self.model):
+            raise ValueError("Only local Ollama model tags are allowed")
         if self.display_name and any(
             unicodedata.category(char).startswith("C") for char in self.display_name
         ):
@@ -123,6 +128,95 @@ async def configuration() -> dict[str, object]:
 @router.put("/configuration")
 async def save_configuration(body: ConfigurationInput) -> dict[str, object]:
     return await observer_runtime.configure(body.model_dump(exclude_unset=True))
+
+
+@router.get("/models")
+async def local_models() -> dict[str, Any]:
+    settings = get_settings()
+    model = OllamaObserver(settings.ollama_base_url, settings.observer_model)
+    return {
+        **await model.models(),
+        "catalog": [
+            {"name": name, "minimum_free_disk_mb": size} for name, size in INSTALL_MODELS.items()
+        ],
+    }
+
+
+class ModelInstallInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    model: Literal["qwen3.5:0.8b", "qwen3.5:2b", "qwen3.5:4b"]
+
+
+@router.post("/models/install")
+async def install_model(
+    body: ModelInstallInput, request: Request, observer: Observer = Depends(enabled_observer)
+) -> StreamingResponse:
+    snapshot = await observer.reads.snapshot(Scope(), fresh=True)
+    reason = capacity_reason(snapshot, True, 512)
+    free = number(snapshot.host.get("host_disk_available"))
+    if reason or free is None or free < INSTALL_MODELS[body.model] * 1048576:
+        raise HTTPException(
+            409,
+            reason
+            or "Not enough verified free disk for this download. Choose a smaller model or free disk space.",
+        )
+    if observer_runtime.installing:
+        raise HTTPException(409, "A local model download is already running")
+
+    async def stream() -> AsyncIterator[str]:
+        if observer_runtime.installing or not observer_runtime.enabled:
+            yield (
+                "data: "
+                + json.dumps({"error": "Model setup is busy or Jarvis was disabled."})
+                + "\n\n"
+            )
+            return
+        observer_runtime.installing = True
+        observer.installing = True
+        task = asyncio.current_task()
+        if task:
+            observer_runtime.active.add(task)
+        checked = 0.0
+        try:
+            adapter = OllamaObserver(get_settings().ollama_base_url, body.model)
+            async with asyncio.timeout(1800):
+                async for progress in adapter.install(body.model):
+                    if await request.is_disconnected():
+                        return
+                    if monotonic() - checked < 1 and not progress["done"]:
+                        continue
+                    checked = monotonic()
+                    if await observer.reads.execution_busy():
+                        yield (
+                            "data: "
+                            + json.dumps(
+                                {"error": "Download interrupted: engineering work takes priority."}
+                            )
+                            + "\n\n"
+                        )
+                        return
+                    yield "data: " + json.dumps(progress) + "\n\n"
+        except Exception:  # noqa: BLE001 -- do not expose upstream details
+            yield (
+                "data: "
+                + json.dumps(
+                    {
+                        "error": "Download failed or timed out. Check private Ollama connectivity and free disk, then retry explicitly."
+                    }
+                )
+                + "\n\n"
+            )
+        finally:
+            observer_runtime.installing = False
+            observer.installing = False
+            if task:
+                observer_runtime.active.discard(task)
+
+    return StreamingResponse(
+        stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
+    )
 
 
 def scope_query(task_id: UUID | None = None, team_id: UUID | None = None) -> Scope:

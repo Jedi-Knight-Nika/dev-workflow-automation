@@ -31,6 +31,23 @@
   const reducedMotion = browser && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   const transitionDuration = reducedMotion ? 0 : 180;
 
+  const fullscreenSupported = browser && Boolean(document.fullscreenEnabled);
+  let isFullscreen = $state(browser && Boolean(document.fullscreenElement));
+
+  onMount(() => {
+    const sync = () => (isFullscreen = Boolean(document.fullscreenElement));
+    document.addEventListener('fullscreenchange', sync);
+    return () => document.removeEventListener('fullscreenchange', sync);
+  });
+
+  function toggleFullscreen() {
+    if (document.fullscreenElement) {
+      void document.exitFullscreen();
+    } else {
+      void document.documentElement.requestFullscreen();
+    }
+  }
+
   const SIDEBAR_STORAGE_KEY = 'sidebarWidth';
   const MIN_SIDEBAR_WIDTH = 180;
   const MAX_SIDEBAR_WIDTH = 360;
@@ -120,6 +137,32 @@
         >
       {/each}
     </nav>
+    {#if fullscreenSupported}
+      <div class="p-3 pt-0">
+        <button
+          type="button"
+          onclick={toggleFullscreen}
+          class="text-muted hover:text-heading hover:border-brand border-line flex w-full items-center gap-2 rounded-lg border-l-2 border-transparent px-3 py-2.5 text-sm transition-all duration-200 ease-smooth hover:translate-x-0.5"
+        >
+          <svg
+            class="size-4 shrink-0"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            {#if isFullscreen}
+              <path d="M8 3v3a2 2 0 0 1-2 2H3M21 8h-3a2 2 0 0 1-2-2V3M3 16h3a2 2 0 0 1 2 2v3M16 21v-3a2 2 0 0 1 2-2h3" />
+            {:else}
+              <path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M21 16v3a2 2 0 0 1-2 2h-3M8 21H5a2 2 0 0 1-2-2v-3" />
+            {/if}
+          </svg>
+          {isFullscreen ? t('nav.exitFullscreen') : t('nav.enterFullscreen')}
+        </button>
+      </div>
+    {/if}
     <footer class="border-line text-muted border-t px-5 py-4 text-[11px] tracking-wide">
       <small>© Nikolla_L</small>
     </footer>

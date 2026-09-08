@@ -8,8 +8,11 @@ export async function api<T>(path: string, options?: RequestInit): Promise<T> {
     headers: { 'content-type': 'application/json', ...options?.headers }
   });
   if (!response.ok) {
-    const body = await response.text();
-    throw new Error(body || `API request failed with ${response.status}`);
+    const fallback = `API request failed with ${response.status}`;
+    const contentType = response.headers.get('content-type') || '';
+    const body = (await response.text()).trim();
+    const isHtml = contentType.includes('text/html') || body.startsWith('<');
+    throw new Error(isHtml || !body ? fallback : body.slice(0, 500));
   }
   if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;

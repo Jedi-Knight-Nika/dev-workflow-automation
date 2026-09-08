@@ -1,3 +1,4 @@
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -18,10 +19,14 @@ from app.interfaces.http.routes.observer import ConfigurationInput
         {"display_name": None},
         {"enabled": None},
         {"enabled": "true"},
-        {"display_name": "Jarvis", "model": "paid-model"},
+        {"display_name": "Jarvis", "model": "cloud-model"},
+        {"model": "https://ollama.com/model"},
+        {"memory_reserve_mb": 0},
+        {"output_tokens": 100000},
+        {"response_timeout_seconds": 600},
     ],
 )
-def test_identity_changes_are_bounded_and_cannot_change_inference_policy(body):
+def test_settings_are_bounded_and_cannot_select_remote_inference(body):
     with pytest.raises(ValidationError):
         ConfigurationInput(**body)
 
@@ -54,3 +59,29 @@ async def test_existing_configuration_defaults_to_jarvis_without_a_write(monkeyp
     assert value["display_name"] == "Jarvis"
     assert value["enabled"] is False
     store.preference.assert_awaited_once_with("deployment", None)
+
+
+async def test_concurrent_settings_do_not_apply_an_older_value_last(monkeypatch):
+    import app.bootstrap.observer as bootstrap
+
+    store = AsyncMock()
+    store.preference.side_effect = lambda _owner, values: values
+    monkeypatch.setattr(bootstrap, "get_observer", lambda: SimpleNamespace(store=store))
+    runtime = ObserverRuntime()
+    entered, release = asyncio.Event(), asyncio.Event()
+    applied = []
+
+    async def apply(config):
+        if config["enabled"]:
+            entered.set()
+            await release.wait()
+        applied.append(config["enabled"])
+
+    runtime.apply = AsyncMock(side_effect=apply)
+    enable = asyncio.create_task(runtime.configure({"enabled": True}))
+    await entered.wait()
+    disable = asyncio.create_task(runtime.configure({"enabled": False}))
+    await asyncio.sleep(0)
+    release.set()
+    await asyncio.gather(enable, disable)
+    assert applied == [True, False]

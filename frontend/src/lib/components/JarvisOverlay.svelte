@@ -77,7 +77,7 @@
   <div class="dial dial-tl">
     <span class="dial-ring"></span>
   </div>
-  <div class="dial dial-br">
+  <div class="dial dial-bl">
     <span class="dial-ring"></span>
     <span class="dial-ring dial-ring-inner"></span>
     <span class="dial-sweep"></span>
@@ -240,8 +240,8 @@
     height: 56px;
     opacity: 0.22;
   }
-  .dial-br {
-    right: 28px;
+  .dial-bl {
+    left: 28px;
     bottom: 28px;
     filter: drop-shadow(0 0 14px color-mix(in srgb, var(--color-brand-2) 40%, transparent));
   }
@@ -305,7 +305,7 @@
     }
   }
   @media (max-width: 640px) {
-    .dial-br {
+    .dial-bl {
       width: 84px;
       height: 84px;
     }
