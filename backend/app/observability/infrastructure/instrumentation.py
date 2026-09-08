@@ -54,6 +54,7 @@ class Instrumentation:
             "settings",
             "dashboard",
             "observability",
+            "observer",
             "analytics",
             "health",
             "webhooks",

@@ -4,6 +4,7 @@ import signal
 import structlog
 
 from app.bootstrap.observability import supporting_controller
+from app.bootstrap.observer import observer_controller
 from app.bootstrap.scheduler import create_scheduler
 from app.platform.configuration.settings import get_settings
 from app.platform.telemetry.logging import configure_logging
@@ -21,7 +22,7 @@ async def run() -> None:
         for name in (signal.SIGINT, signal.SIGTERM):
             loop.add_signal_handler(name, stopped.set)
         log.info("worker_service_disabled")
-        async with supporting_controller():
+        async with supporting_controller(), observer_controller():
             await stopped.wait()
         return
     settings.workspace_root.mkdir(parents=True, exist_ok=True)
@@ -33,7 +34,7 @@ async def run() -> None:
     await scheduler.start()
     try:
         log.info("worker_service_started")
-        async with supporting_controller():
+        async with supporting_controller(), observer_controller():
             await stopped.wait()
     finally:
         await scheduler.stop()

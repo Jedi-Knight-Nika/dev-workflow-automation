@@ -1,7 +1,7 @@
 import { getTheme } from './theme.svelte';
 
 export type AccentId = 'purple' | 'blue' | 'green' | 'yellow' | 'pink' | 'teal';
-export type AccentSelection = AccentId | 'custom';
+type AccentSelection = AccentId | 'custom';
 
 type AccentColors = { brand: string; brand2: string };
 type AccentPair = { dark: AccentColors; light: AccentColors };

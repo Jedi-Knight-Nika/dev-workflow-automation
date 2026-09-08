@@ -282,6 +282,70 @@ Production acceptance additionally requires representative authorized tickets: s
 
 Token optimization is judged by completed-task rate, median and high-percentile total/uncached input, peak active context, cost, intervention, and wall time. Monitoring overhead is measured on the same workload enabled and disabled. Passing local checks does not establish provider invoice accuracy, universal cost savings, unattended reliability, or every-repository support; those claims require recorded real-task evidence.
 
+## Observer: ambient operations companion
+
+Observer is an optional read-only operations feature in the application shell. It combines deterministic attention rules, bounded product queries, saved conversations and a small animated particle halo. It is not an engineering role, does not buy provider calls and cannot issue engineering commands. Its failures do not change task execution, Team budgets, native sessions, validation or merge gates.
+
+### Ownership and extraction boundary
+
+`backend/app/observability/observer/domain.py` owns pure attention, routing and capacity policies. `application.py` composes use cases against `ports.py`: `ObserverReads`, `ObserverStore` and `LocalObserverModel`. The SQL read adapter, Observer persistence, Ollama adapter and instrumentation implement these ports. Only bootstrap wires them to existing analytics and observability queries. HTTP routes live in `interfaces/http/routes/observer.py`; frontend code is isolated in `frontend/src/lib/observer`. The shared layout and Settings page each compose a single Observer component.
+
+The domain and application do not import execution implementations. No delivery command, model provider credential, Docker client, shell runner, workspace or Developer transcript is available through the Observer contracts. Existing SQL facts are read in read-only transactions with short statement timeouts. An independent single-connection pool bounds Observer persistence/query contention; this connects to the same application database, not a second database. Query adapters can later be replaced with HTTP read clients without changing the use cases or UI contract.
+
+Observer owns `observer_events`, `observer_conversations`, `observer_messages`, `observer_questions`, `observer_preferences` and `observer_model_runs`. These tables do not create foreign-key dependencies on execution records. Their only relational links are within Observer. Browser-isolated conversation identifiers are scoped to the original task/Team/dashboard and cannot be reused across scopes. Production operator authentication still belongs to the existing protected ingress; the HttpOnly same-site browser cookie separates histories, but is not a replacement for authentication or a multi-tenant authorization model.
+
+### Facts and attention
+
+The initial rules cover sustained host CPU/RAM/disk pressure, task-budget pressure, unknown stopped billing, consecutive validation failures, repeated no-progress reports, human attention and recorded infrastructure incidents. Utilization must remain observed above its threshold for five minutes. Monitoring gaps break that continuity and do not count as downtime or recovery. A truncated task cohort cannot resolve events for omitted tasks.
+
+Attention items are fingerprinted, deduplicated and retain measured facts, source, timestamps and rule revision. Repeated old container incidents are grouped by service/condition. When a current container is running or pressure measurements have recovered, an unclosed historical incident is labeled as a record needing reconciliation rather than presented as a newly confirmed outage. This does not alter the original incident or claim that container state proves endpoint readiness. Operators can acknowledge items or snooze them; severity escalation can bring them back to attention. Briefings are deterministic and never invoke a model on page refresh. Notification preferences include normal, warnings-only, critical-only and silent. Conversation entry offers a bounded “since my visit” view; the operator explicitly advances the seen marker.
+
+The query registry routes to bounded groups: attention, tasks, AI usage, resources, incidents, recent changes, forecasts and product knowledge. Task detail follows the current page automatically. Task/team UUIDs are validated; the frontend supplies references, never arbitrary SQL, PromQL, tool definitions or measured values. `askObserver(question, context)` is the frontend integration seam for future chart/card actions. New capabilities should extend the read port and registry, not add a generic agent loop.
+
+AI usage comes from durable receipts; resource facts come from the existing Prometheus query adapter. Answers show source/freshness chips and explicit missing-data statements. Task counts and detailed rows have separate completeness semantics; detail is capped at 100 recent/active tasks. No raw logs, descriptions, diffs or source code are included. Model/profile names and user text remain untrusted and are rendered as text, never HTML.
+
+### Optional local AI, never paid fallback
+
+`OBSERVER_LOCAL_AI_ENABLED=false` is the default. The deterministic panel is fully usable without Ollama. Enabling local AI is an operator deployment choice after provisioning and benchmarking the chosen model; the candidate is `qwen3.5:4b`. Observer never pulls a model. It verifies the installed local model and rejects remote/cloud models and arbitrary endpoints. It never receives cloud credentials or invokes a cloud fallback.
+
+The local model performs one bounded relevance-selection call over supplied facts. Its strict output schema permits only existing fact IDs; the application renders the verified statements. This first implementation intentionally uses extractive answers, not unconstrained model-authored diagnoses. It therefore cannot turn injected ticket text into actions or invent additional measurements in its final answer. Common question routing is deterministic, capped at four read groups, and there is no recursive tool loop. Prompt payloads are bounded to 16 KB, recent history to six short messages, context to 8192 tokens and output to 256 tokens. Thinking is disabled; private reasoning is neither displayed nor stored. See the official [Ollama chat API](https://docs.ollama.com/api/chat) and [structured-output contract](https://docs.ollama.com/capabilities/structured-outputs).
+
+Local AI admission fails closed if memory is missing/stale, the operator has not configured a reserve, available memory is below the reserve, there is an unresolved OOM, or actionable engineering/intake jobs are queued or running. New work is checked while inference runs and cancels Observer inference. Ollama receives one CPU thread and `keep_alive=0`; shared Ollama/Interpreter configuration is not changed. This bounds interference but does not claim that local inference has zero CPU/RAM cost or that a race-free hardware reservation exists. Real hardware contention and cancellation still need benchmark evidence before enabling local AI for unattended operation.
+
+Configuration:
+
+```dotenv
+OBSERVER_ENABLED=true
+OBSERVER_LOCAL_AI_ENABLED=false
+OBSERVER_MODEL=qwen3.5:4b
+OBSERVER_MIN_AVAILABLE_MEMORY_MB=0
+OBSERVER_PROACTIVE_COOLDOWN_SECONDS=900
+```
+
+The memory setting is minimum available headroom for model weights, context and engineering reserve combined. Zero blocks model admission. Hardware-specific values are not guessed by the application.
+
+### Master switch and shutdown behavior
+
+Settings → Observer assistant has a persisted master on/off switch. Turning it off stops the controller's detection task, cancels active Observer question/inference tasks, rejects new Observer work, clears its cached projections and removes frontend polling, animation and panel activity. Conversations are retained for re-enablement. Same-browser tabs receive the change through BroadcastChannel; other connected clients discover the switch on their next bounded status request and then stop polling.
+
+Re-enablement is push-driven using PostgreSQL LISTEN/NOTIFY. The disabled feature has no recurring detection or model timer. One idle configuration-listener connection per API/controller process remains so the Settings switch can wake it; loaded application code and stored records are not physically removed. Setting `OBSERVER_ENABLED=false` at deployment and restarting also removes that listener. Shared Ollama, Interpreter, Prometheus and Team workflows are not stopped by an Observer switch. In-flight local responses are cancelled and unknown interrupted usage remains unknown, never fabricated as zero.
+
+### UI, transport, retention and metrics
+
+The Observer follows the application's shared Default/Jarvis display setting and light/dark/accent tokens. Default uses a quiet ring and rounded panel; Jarvis adds a particle core, neon framing, a subtle header grid and matching control-center typography inside the panel and notice bubble. The isolated Canvas2D renderer caps animation at 24 frames/second while responding, 15 idle in Jarvis and 12 idle in Default. There are no animation network requests or model calls. Rendering pauses in hidden tabs, honors reduced motion and has an inline SVG fallback. Application state drives color/motion; animation cannot change application state.
+
+The launcher and panel header support mouse, touch and pen dragging. Both move the same browser-local anchor; the chat panel and notice bubble choose an adjacent on-screen placement, including after viewport resize or mobile keyboard changes. Position is saved as relative coordinates in local storage when a drag ends, never in task state or a backend request. Focused drag controls also support arrow keys (Shift for larger steps), Home and a reset-position button. A drag does not accidentally open or close chat. The floating non-modal dialog leaves the app usable, closes on outside click or Escape, and retains a scrollable conversation and composer in compact viewports. Turning Observer off removes the drag controls, panel and renderers. Attention collapses during conversation so it cannot obscure answers.
+
+Canonical APIs are under `/api/observer`: `configuration` GET/PUT; `status`, `briefing`, `events`, `conversations`, `conversations/{id}` and `usage` GET; event `acknowledge`/`snooze` POST; `preferences` PUT; `questions` POST and `questions/{id}/events` GET. Question SSE carries started, read-tool status, verified text chunks and completion/failure. Closing the panel aborts the request. Persisted question claims prevent duplicate inference; there is one active Observer answer globally, twelve admitted questions per minute, finite request timeouts and no detached background chat loop. Interrupted questions are not retried automatically.
+
+Local model receipts are separate from paid `ai_runs` and never enter Team spending. They store reported token counts/durations or unknown values, including interrupted work. Low-cardinality `observer_*` counters/histograms cover questions, briefings, tools, local requests/failures/tokens, capacity denial, deterministic fallback and durations. Conversation history is retained for thirty days; resolved attention history for ninety days. No private thinking is persisted. The deployment switch stops periodic cleanup along with the other Observer work; cleanup resumes when enabled.
+
+### Acceptance boundary
+
+Focused checks cover capacity/missing-data behavior, read-only routing, input/scope bounds, invented fact rejection, deterministic briefings, master-switch cancellation, PostgreSQL hold/dedupe/snooze/resolution, conversation isolation and migration metadata. Browser checks exercise grounded chat/SSE, saved history, desktop/mobile layouts and disabled-state polling. No paid model task is needed for these checks.
+
+Production acceptance remains separate: complete the engineering and monitoring gates, benchmark at least fifty representative local-model questions, measure shared-host interference and animation performance, and tune notification noise during dogfood. Broader statistical anomaly families, richer natural-language synthesis, automatic daily briefings and voice are not claimed as accepted by these initial checks. There is no voice/microphone access, model fine-tuning, new agent role or mandatory external animation runtime.
+
 ## Final operating rule
 
 The checkout remembers code. PostgreSQL remembers authoritative state, policy, accounting, evidence, and continuity. A bounded checkpoint remembers unresolved intent. Native context carries only the current slice. Models implement and reason; deterministic code retains authorization, spending, validation, publication, and merge authority.

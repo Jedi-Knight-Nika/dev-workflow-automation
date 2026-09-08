@@ -16,6 +16,14 @@ from app.observability.infrastructure.models import (
     RunnerResourceSummary,
     ServiceIncident,
 )
+from app.observability.observer.models import (
+    ObserverConversation,
+    ObserverEvent,
+    ObserverMessage,
+    ObserverModelRun,
+    ObserverPreference,
+    ObserverQuestion,
+)
 from app.platform.configuration.models import AccountSettings, SettingsAuditEvent
 from app.platform.integrations.models import Integration
 from app.platform.scheduling.models import WorkerNode
@@ -37,6 +45,12 @@ __all__ = [
     "Job",
     "JobState",
     "LocalModelRun",
+    "ObserverConversation",
+    "ObserverEvent",
+    "ObserverMessage",
+    "ObserverModelRun",
+    "ObserverPreference",
+    "ObserverQuestion",
     "PricingCatalog",
     "Repository",
     "ReviewCycle",

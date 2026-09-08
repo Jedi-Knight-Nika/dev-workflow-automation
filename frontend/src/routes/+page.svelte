@@ -541,11 +541,41 @@
     gap: 0.7rem;
   }
   .metric {
+    position: relative;
     min-height: 122px;
     padding: 1rem;
     display: flex;
     flex-direction: column;
     justify-content: space-between;
+  }
+  :root[data-display='jarvis'] .metric,
+  :root[data-display='jarvis'] .health {
+    border-color: color-mix(in srgb, var(--color-brand-2) 35%, var(--color-line));
+  }
+  :root[data-display='jarvis'] .metric::before,
+  :root[data-display='jarvis'] .health::before,
+  :root[data-display='jarvis'] .metric::after,
+  :root[data-display='jarvis'] .health::after {
+    content: '';
+    position: absolute;
+    width: 9px;
+    height: 9px;
+    opacity: 0.7;
+    pointer-events: none;
+  }
+  :root[data-display='jarvis'] .metric::before,
+  :root[data-display='jarvis'] .health::before {
+    top: 6px;
+    left: 6px;
+    border-top: 1.5px solid var(--color-brand-2);
+    border-left: 1.5px solid var(--color-brand-2);
+  }
+  :root[data-display='jarvis'] .metric::after,
+  :root[data-display='jarvis'] .health::after {
+    bottom: 6px;
+    right: 6px;
+    border-bottom: 1.5px solid var(--color-brand-2);
+    border-right: 1.5px solid var(--color-brand-2);
   }
   .metric span,
   .panel header span,
@@ -572,6 +602,7 @@
     border-color: #ef444477;
   }
   .health {
+    position: relative;
     padding: 0.8rem;
     display: flex;
     align-items: center;

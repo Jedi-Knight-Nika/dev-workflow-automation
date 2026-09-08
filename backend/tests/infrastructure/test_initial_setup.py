@@ -12,8 +12,8 @@ def test_initial_and_additive_revisions_can_generate_sql_without_a_database() ->
     output = StringIO()
     config = Config("alembic.ini", output_buffer=output)
     revisions = ScriptDirectory.from_config(config)
-    assert revisions.get_heads() == ["0006_canonical_identifiers"]
-    assert len(list(revisions.walk_revisions())) == 6
+    assert revisions.get_heads() == ["0007_observer"]
+    assert len(list(revisions.walk_revisions())) == 7
     command.upgrade(config, "head", sql=True)
     sql = output.getvalue()
     assert "CREATE TABLE developer_sessions" in sql
@@ -25,6 +25,7 @@ def test_initial_and_additive_revisions_can_generate_sql_without_a_database() ->
     assert "DROP TABLE" not in sql
     assert "CREATE TABLE runner_resource_bindings" in sql
     assert "CREATE TABLE task_forecasts" in sql
+    assert "CREATE TABLE observer_events" in sql
 
 
 def test_fresh_installation_never_enables_paid_execution() -> None:

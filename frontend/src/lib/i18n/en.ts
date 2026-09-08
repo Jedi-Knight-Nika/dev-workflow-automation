@@ -678,7 +678,15 @@ export const en = {
   'accent.teal': 'Teal',
   'accent.customLabel': 'Custom',
   'accent.customHint': 'Drag to pick any hue',
-  'accent.hueSlider': 'Accent hue'
+  'accent.hueSlider': 'Accent hue',
+
+  'display.title': 'Display mode',
+  'display.description':
+    'Switch how the interface renders. Jarvis mode adds a scanning HUD overlay in your accent color; Default keeps the plain layout.',
+  'display.default': 'Default',
+  'display.defaultHint': 'Plain interface',
+  'display.jarvis': 'Jarvis',
+  'display.jarvisHint': 'HUD overlay, scan lines, radar'
 } as const;
 
 export type TranslationKey = keyof typeof en;

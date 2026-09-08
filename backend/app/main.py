@@ -11,6 +11,7 @@ from starlette.requests import Request
 from starlette.responses import Response
 
 from app.bootstrap.observability import observe_request
+from app.bootstrap.observer import observer_controller
 from app.bootstrap.scheduler import create_scheduler
 from app.interfaces.http.routes.analytics import router as analytics_router
 from app.interfaces.http.routes.control_plane import router as control_plane_router
@@ -20,6 +21,7 @@ from app.interfaces.http.routes.events import router as events_router
 from app.interfaces.http.routes.health import router as health_router
 from app.interfaces.http.routes.metrics import router as metrics_router
 from app.interfaces.http.routes.observability import router as observability_router
+from app.interfaces.http.routes.observer import router as observer_router
 from app.interfaces.http.routes.settings import router as settings_router
 from app.interfaces.http.routes.tasks import router as tasks_router
 from app.interfaces.http.routes.teams import router as teams_router
@@ -43,7 +45,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     try:
         if scheduler is not None:
             await scheduler.start()
-        yield
+        async with observer_controller(worker=False):
+            yield
     finally:
         try:
             if scheduler is not None:
@@ -69,6 +72,7 @@ app.include_router(events_router, prefix="/api")
 app.include_router(webhooks_router)
 app.include_router(engineering_router, prefix="/api")
 app.include_router(observability_router, prefix="/api")
+app.include_router(observer_router, prefix="/api")
 app.include_router(analytics_router, prefix="/api")
 app.include_router(metrics_router)
 

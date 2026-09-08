@@ -686,5 +686,13 @@ export const ka: Record<TranslationKey, string> = {
   'accent.teal': 'ფირუზისფერი',
   'accent.customLabel': 'საკუთარი',
   'accent.customHint': 'გადაათრიეთ ნებისმიერი ტონის ასარჩევად',
-  'accent.hueSlider': 'აქცენტის ტონი'
+  'accent.hueSlider': 'აქცენტის ტონი',
+
+  'display.title': 'ჩვენების რეჟიმი',
+  'display.description':
+    'შეცვალეთ ინტერფეისის გამოსახვის სტილი. Jarvis რეჟიმი ამატებს სკანირების HUD გადაფარვას თქვენი აქცენტის ფერით; Default ტოვებს მარტივ იერსახეს.',
+  'display.default': 'ჩვეულებრივი',
+  'display.defaultHint': 'მარტივი ინტერფეისი',
+  'display.jarvis': 'Jarvis',
+  'display.jarvisHint': 'HUD გადაფარვა, სკან ხაზები, რადარი'
 };

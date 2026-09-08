@@ -6,19 +6,22 @@
   import { fade } from 'svelte/transition';
   import type { Snippet } from 'svelte';
   import MobileNav from '$lib/components/MobileNav.svelte';
+  import ObserverShell from '$lib/observer/ObserverShell.svelte';
   import ThemeToggle from '$lib/components/ThemeToggle.svelte';
   import LanguageToggle from '$lib/components/LanguageToggle.svelte';
-  import CursorGlow from '$lib/components/CursorGlow.svelte';
   import ClickBurst from '$lib/components/ClickBurst.svelte';
+  import JarvisOverlay from '$lib/components/JarvisOverlay.svelte';
   import { NAV_ITEMS, isActiveNavItem } from '$lib/nav';
   import { t } from '$lib/i18n/index.svelte';
   import { getTheme } from '$lib/theme.svelte';
   import { initAccent, reapplyAccentForTheme } from '$lib/accent.svelte';
+  import { getDisplayMode, initDisplayMode } from '$lib/display.svelte';
 
   let { children }: { children: Snippet } = $props();
 
   onMount(() => {
     initAccent();
+    initDisplayMode();
   });
   $effect(() => {
     getTheme();
@@ -72,8 +75,9 @@
   }
 </script>
 
-<CursorGlow />
+<ObserverShell />
 <ClickBurst />
+{#if getDisplayMode() === 'jarvis'}<JarvisOverlay />{/if}
 
 <div class="min-h-screen md:grid" style="grid-template-columns: {sidebarWidth}px 1fr">
   <MobileNav />

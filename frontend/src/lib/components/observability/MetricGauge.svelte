@@ -89,6 +89,44 @@
     opacity: 0.6;
     transition: opacity 0.3s var(--ease-smooth);
   }
+  :root[data-display='jarvis'] article {
+    border-color: color-mix(in srgb, var(--color-brand-2) 35%, var(--color-line));
+  }
+  :root[data-display='jarvis'] article::after {
+    content: '';
+    position: absolute;
+    inset: 6px;
+    pointer-events: none;
+    opacity: 0.7;
+    background-repeat: no-repeat;
+    background-image:
+      linear-gradient(var(--color-brand-2), var(--color-brand-2)),
+      linear-gradient(var(--color-brand-2), var(--color-brand-2)),
+      linear-gradient(var(--color-brand-2), var(--color-brand-2)),
+      linear-gradient(var(--color-brand-2), var(--color-brand-2)),
+      linear-gradient(var(--color-brand-2), var(--color-brand-2)),
+      linear-gradient(var(--color-brand-2), var(--color-brand-2)),
+      linear-gradient(var(--color-brand-2), var(--color-brand-2)),
+      linear-gradient(var(--color-brand-2), var(--color-brand-2));
+    background-size:
+      9px 1.5px,
+      1.5px 9px,
+      9px 1.5px,
+      1.5px 9px,
+      9px 1.5px,
+      1.5px 9px,
+      9px 1.5px,
+      1.5px 9px;
+    background-position:
+      top left,
+      top left,
+      top right,
+      top right,
+      bottom left,
+      bottom left,
+      bottom right,
+      bottom right;
+  }
   article.hot::before {
     background: radial-gradient(
       circle,

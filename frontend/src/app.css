@@ -28,6 +28,8 @@
   --ease-smooth: cubic-bezier(0.16, 1, 0.3, 1);
 
   --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --font-jarvis-body: 'Rajdhani', 'Noto Sans Georgian', ui-sans-serif, system-ui, sans-serif;
+  --font-jarvis-display: 'Orbitron', 'Noto Sans Georgian', ui-sans-serif, system-ui, sans-serif;
 }
 
 /* System preference (no explicit choice saved) */
@@ -152,6 +154,23 @@
   }
 }
 
+/* Same drift, minus the dot-grid layer: Jarvis mode's body::before drops that
+   layer, so it needs a matching 2-value keyframe instead of reusing bg-drift's
+   3-value one (which would pair the wrong drift amount with each glow). */
+@keyframes bg-drift-jarvis {
+  0%,
+  100% {
+    background-position:
+      0% 0%,
+      100% 100%;
+  }
+  50% {
+    background-position:
+      10% 6%,
+      90% 94%;
+  }
+}
+
 @keyframes node-pulse {
   0%,
   100% {
@@ -190,6 +209,15 @@
       sans-serif;
   }
 
+  :root[data-display='jarvis'] body {
+    font-family: var(--font-jarvis-body);
+    letter-spacing: 0.01em;
+  }
+  :root[data-display='jarvis'] :is(h1, h2, h3, h4) {
+    font-family: var(--font-jarvis-display);
+    letter-spacing: 0.03em;
+  }
+
   body::before {
     content: '';
     position: fixed;
@@ -221,6 +249,30 @@
       0% 0%,
       100% 100%;
     animation: bg-drift 30s ease-in-out infinite;
+  }
+
+  /* Jarvis mode brings its own grid/texture layer - the default dotted
+     pattern would just double up with it, so drop the dots and keep only
+     the two ambient corner glows. */
+  :root[data-display='jarvis'] body::before {
+    background-image:
+      radial-gradient(
+        circle at 15% 20%,
+        color-mix(in srgb, var(--color-brand) 10%, transparent),
+        transparent 40%
+      ),
+      radial-gradient(
+        circle at 85% 75%,
+        color-mix(in srgb, var(--color-brand-2) 8%, transparent),
+        transparent 40%
+      );
+    background-size:
+      140% 140%,
+      140% 140%;
+    background-position:
+      0% 0%,
+      100% 100%;
+    animation: bg-drift-jarvis 30s ease-in-out infinite;
   }
 
   @media (prefers-reduced-motion: reduce) {

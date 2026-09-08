@@ -53,6 +53,13 @@ class Settings(BaseSettings):
     developer_compact_before_feedback_tokens: int = Field(default=0, ge=0, le=10000000)
     repository_validation_commands: dict[str, list[list[str]]] = Field(default_factory=dict)
     ollama_base_url: str = "http://ollama:11434"
+    observer_enabled: bool = True
+    observer_local_ai_enabled: bool = False
+    observer_model: str = Field(default="qwen3.5:4b", max_length=100)
+    # Includes model load/KV cache headroom plus the operator's engineering reserve.
+    # Zero fails closed; it never means unlimited admission.
+    observer_min_available_memory_mb: int = Field(default=0, ge=0, le=1048576)
+    observer_proactive_cooldown_seconds: int = Field(default=900, ge=60, le=86400)
     interpreter_model: str = "qwen3:4b"
     interpreter_timeout_seconds: int = Field(default=30, ge=1, le=120)
     interpreter_cloud_models: list[str] = Field(default_factory=list, max_length=2)
