@@ -753,7 +753,11 @@ async def run(job_id: uuid.UUID) -> WorkerResult:
         compiler = ContextCompiler(
             session,
             max_context_chars,
-            include_repository_knowledge=use_repository_knowledge is not False and can_read_rag,
+            include_repository_knowledge=(
+                settings.repository_rag_enabled
+                and use_repository_knowledge is not False
+                and can_read_rag
+            ),
             retrieval_depth=str(config.configuration.get("rag_retrieval_depth", "normal")),
             native_repository_tools=provider.supports_repository_tools,
         )

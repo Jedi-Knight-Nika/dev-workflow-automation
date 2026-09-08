@@ -4,6 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.application.ports.task_reconciliation import ReconciliationResult
+from app.config import get_settings
 from app.db.models import ExternalTaskSnapshot, Integration, JobRole, Task, WorkflowNode
 from app.domain.webhooks import configured_repository_id, linear_datetime, linear_priority
 from app.infrastructure.persistence.job_operations import enqueue_job, record_event
@@ -19,6 +20,8 @@ class SqlAlchemyLinearTaskReconciliation:
     async def reconcile_due(self) -> ReconciliationResult:
         async with self._session_factory() as session:
             now = datetime.now(UTC)
+            if get_settings().new_fixed_lifecycle and not get_settings().legacy_workflow_routing:
+                return await self._reconcile_fixed(session, now)
             node = await session.scalar(
                 select(WorkflowNode)
                 .where(
@@ -69,6 +72,50 @@ class SqlAlchemyLinearTaskReconciliation:
                     failed_integration.last_error = str(exc)[:1000]
                 await session.commit()
                 return ReconciliationResult(processed=True)
+
+    async def _reconcile_fixed(self, session: AsyncSession, now: datetime) -> ReconciliationResult:
+        """V2 polls configured source IDs, never a removed workflow node."""
+        integration = await session.scalar(
+            select(Integration)
+            .where(Integration.provider_name == "linear")
+            .with_for_update(skip_locked=True)
+        )
+        if integration is None or not integration.encrypted_credentials:
+            return ReconciliationResult(processed=False)
+        config = integration.configuration or {}
+        assignee = config.get("v2_assignee_id")
+        states = config.get("v2_source_state_ids")
+        if (
+            not isinstance(assignee, str)
+            or not assignee
+            or not isinstance(states, list)
+            or not states
+        ):
+            return ReconciliationResult(processed=False)
+        if any(not isinstance(value, str) or not value for value in states):
+            return ReconciliationResult(processed=False)
+        if integration.last_synced_at and integration.last_synced_at + timedelta(seconds=60) > now:
+            return ReconciliationResult(processed=False)
+        integration.last_synced_at = now
+        imported = updated = 0
+        try:
+            async with session.begin_nested():
+                issues = await LinearClient(
+                    cipher.decrypt(integration.encrypted_credentials)
+                ).list_issues(assignee, states)
+                for issue in issues:
+                    created = await self._upsert_issue(session, integration, issue)
+                    imported += int(created)
+                    updated += int(not created)
+            integration.sync_status, integration.last_error = "READY", None
+        except Exception as exc:  # noqa: BLE001 - one bounded poll, sanitized operator evidence
+            integration.sync_status, integration.last_error = (
+                "FAILED",
+                f"V2 Linear poll failed: {type(exc).__name__}",
+            )
+            imported = updated = 0
+        await session.commit()
+        return ReconciliationResult(processed=True, imported=imported, updated=updated)
 
     @staticmethod
     async def _session_integration(session: AsyncSession) -> Integration | None:
@@ -123,12 +170,18 @@ class SqlAlchemyLinearTaskReconciliation:
                 source="linear",
             )
         else:
+            from app.intake.infrastructure.v2_events import requirements_changed
+
+            await requirements_changed(
+                session, task, issue["title"], issue["description"], source="linear"
+            )
             task.title = issue["title"]
             task.description = issue["description"]
             task.priority = linear_priority(issue["priority"])
         task.due_at = linear_datetime(issue["raw"].get("dueDate"))
-        task.started_at = linear_datetime(issue["raw"].get("startedAt"))
-        task.completed_at = linear_datetime(issue["raw"].get("completedAt"))
+        if task.execution_version == 1:
+            task.started_at = linear_datetime(issue["raw"].get("startedAt"))
+            task.completed_at = linear_datetime(issue["raw"].get("completedAt"))
         snapshot = await session.scalar(
             select(ExternalTaskSnapshot).where(
                 ExternalTaskSnapshot.provider == "linear",

@@ -3,6 +3,7 @@ from datetime import UTC, datetime
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_settings
 from app.db.models import (
     ExternalTaskSnapshot,
     Integration,
@@ -24,6 +25,7 @@ from app.domain.webhooks import (
 )
 from app.infrastructure.persistence.job_operations import enqueue_job, record_event
 from app.infrastructure.persistence.team_routing import assign_routed_team
+from app.intake.domain.eligibility import linear_eligible
 
 
 async def process_linear_delivery(session: AsyncSession, delivery: WebhookDelivery) -> None:
@@ -34,6 +36,12 @@ async def process_linear_delivery(session: AsyncSession, delivery: WebhookDelive
         task = await session.scalar(select(Task).where(Task.external_key == comment_identifier))
         if task is None:
             delivery.status = "IGNORED"
+            return
+        if task.execution_version == 2:
+            from app.intake.infrastructure.tracker_comments import tracker_comment
+
+            await tracker_comment(session, task, "linear", delivery.delivery_id, intake_payload)
+            delivery.status = "PROCESSED"
             return
         active = await session.scalar(
             select(func.count(Job.id)).where(
@@ -78,20 +86,30 @@ async def process_linear_delivery(session: AsyncSession, delivery: WebhookDelive
     task = await session.scalar(select(Task).where(Task.external_key == str(identifier)))
     if payload.get("action") == "remove" or data.get("archivedAt"):
         if task:
-            task.state = TaskState.CANCELLED
+            if task.execution_version == 2 and task.status not in {"MERGED", "CANCELLED", "FAILED"}:
+                from app.engineering.domain.lifecycle import Action
+                from app.engineering.infrastructure.controls import control_task
+
+                await control_task(session, task, Action.CANCEL, actor="linear")
+            if task.execution_version == 1:
+                task.state = TaskState.CANCELLED
             await record_event(session, task.id, "LINEAR_ISSUE_REMOVED", {}, source="linear")
         delivery.status = "PROCESSED"
         return
-    intake_nodes = list(
-        (
-            await session.scalars(
-                select(WorkflowNode).where(
-                    WorkflowNode.role == "DELIVERER",
-                    WorkflowNode.enabled.is_(True),
-                    WorkflowNode.integration_mode.in_(["webhook", "hybrid"]),
+    intake_nodes = (
+        []
+        if get_settings().new_fixed_lifecycle
+        else list(
+            (
+                await session.scalars(
+                    select(WorkflowNode).where(
+                        WorkflowNode.role == "DELIVERER",
+                        WorkflowNode.enabled.is_(True),
+                        WorkflowNode.integration_mode.in_(["webhook", "hybrid"]),
+                    )
                 )
-            )
-        ).all()
+            ).all()
+        )
     )
     configured_nodes = [
         node
@@ -109,6 +127,8 @@ async def process_linear_delivery(session: AsyncSession, delivery: WebhookDelive
         if configured_nodes
         else trigger_label in issue_labels(data)
     )
+    if get_settings().new_fixed_lifecycle:
+        triggered = linear_eligible(configuration, assignee_id, state_id)
     if task is None and not triggered:
         delivery.status = "IGNORED"
         return
@@ -142,8 +162,20 @@ async def process_linear_delivery(session: AsyncSession, delivery: WebhookDelive
             },
         )
     else:
+        from app.intake.infrastructure.v2_events import requirements_changed
+
+        await requirements_changed(
+            session,
+            task,
+            str(data.get("title") or task.title),
+            str(
+                data.get("description") if data.get("description") is not None else task.description
+            ),
+            source="linear",
+        )
         task.title = str(data.get("title") or task.title)
-        task.description = str(data.get("description") or task.description)
+        if data.get("description") is not None:
+            task.description = str(data["description"])
         task.priority = linear_priority(data.get("priority"))
         await record_event(
             session,
@@ -154,8 +186,9 @@ async def process_linear_delivery(session: AsyncSession, delivery: WebhookDelive
         )
     linear_issue_id = str(data.get("id") or "")
     task.due_at = linear_datetime(data.get("dueDate"))
-    task.started_at = linear_datetime(data.get("startedAt"))
-    task.completed_at = linear_datetime(data.get("completedAt"))
+    if task.execution_version == 1:
+        task.started_at = linear_datetime(data.get("startedAt"))
+        task.completed_at = linear_datetime(data.get("completedAt"))
     if linear_issue_id:
         snapshot = await session.scalar(
             select(ExternalTaskSnapshot).where(

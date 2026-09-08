@@ -15,6 +15,8 @@ from app.db.models import Job, JobRole, JobState, TaskAssignment
 from app.db.models import Task as TaskRecord
 from app.db.models import TaskState as TaskRecordState
 from app.domain.tasks import LifecycleDirective, Task, TaskState
+from app.engineering.domain.lifecycle import Action, InvalidTransition
+from app.engineering.infrastructure.controls import control_task
 from app.infrastructure.external_task_sync import sync_external_task_state
 from app.infrastructure.git.workspaces import GitCommandError, run_git
 from app.infrastructure.persistence.job_operations import enqueue_job, record_event
@@ -64,6 +66,9 @@ class SqlAlchemyTaskLifecycleUnitOfWork:
     async def refresh_workspace(self, task_id: uuid.UUID) -> tuple[str, str]:
         if self._task is None or self._task.id != task_id or not self._task.workspace_path:
             raise RuntimeError("Task workspace is unavailable")
+        if self._task.execution_version == 2:
+            # Untrusted repository commands stay in the isolated validation container.
+            return self._task.current_revision or "", str(self._task.progress_fingerprint or {})
         workspace = Path(self._task.workspace_path)
         try:
             return await run_git("rev-parse", "HEAD", cwd=workspace), await workspace_fingerprint(
@@ -83,6 +88,27 @@ class SqlAlchemyTaskLifecycleUnitOfWork:
         if self._task is None or self._task.id != context.task_id:
             raise RuntimeError("Task lifecycle context is not loaded")
         session = self._active()
+        if self._task.execution_version == 2:
+            action = (
+                Action.TAKEOVER
+                if directive.manual_takeover
+                else Action.RELEASE_TAKEOVER
+                if context.manual_takeover
+                else Action.CANCEL
+                if directive.state == TaskState.CANCELLED
+                else Action.PAUSE
+                if directive.state == TaskState.PAUSED or directive.archive
+                else Action.RESUME
+            )
+            try:
+                await control_task(session, self._task, action, actor="user:ticket-control")
+            except InvalidTransition as exc:
+                from app.domain.tasks import InvalidTaskTransition
+
+                raise InvalidTaskTransition(str(exc)) from exc
+            if directive.archive:
+                self._task.archived_at = datetime.now(UTC)
+            return task_to_domain(self._task)
         self._task.state = TaskRecordState(directive.state.value)
         self._task.manual_takeover = directive.manual_takeover
         if directive.archive:
@@ -155,6 +181,8 @@ class SqlAlchemyTaskLifecycleUnitOfWork:
     async def enqueue_reopened_task(self, context: TaskLifecycleContext) -> None:
         session = self._active()
         task = await session.get(TaskRecord, context.task_id)
+        if task is not None and task.execution_version == 2:
+            return  # Phase job was queued atomically with the V2 transition.
         if task is None or task.team_id is None or task.state != TaskRecordState.NEW:
             return
         active_job = await session.scalar(

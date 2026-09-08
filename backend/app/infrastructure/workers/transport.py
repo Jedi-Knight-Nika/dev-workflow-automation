@@ -18,6 +18,7 @@ def docker_container_spec(settings: Settings, job_id: uuid.UUID) -> dict[str, An
         f"APP_SECRET_KEY={settings.app_secret_key}",
         f"WORKSPACE_ROOT={settings.workspace_root}",
         "SCHEDULER_ENABLED=false",
+        f"REPOSITORY_RAG_ENABLED={str(settings.repository_rag_enabled).lower()}",
         f"MAX_JOB_TOKENS={settings.max_job_tokens}",
         f"MAX_TASK_TOKENS={settings.max_task_tokens}",
         f"MAX_JOB_MODEL_CALLS={settings.max_job_model_calls}",
@@ -95,8 +96,11 @@ async def _run_local(settings: Settings, job_id: uuid.UUID) -> WorkerExecution:
         stdout, stderr = await asyncio.wait_for(
             process.communicate(), timeout=settings.worker_timeout_seconds
         )
-    except TimeoutError:
+    except (TimeoutError, asyncio.CancelledError) as exc:
         await _terminate_process_tree(process.pid)
+        await process.wait()
+        if isinstance(exc, asyncio.CancelledError):
+            raise
         return WorkerExecution(-1, b"", b"Worker timed out", timed_out=True)
     limit = 1_000_000
     return WorkerExecution(process.returncode or 0, stdout[-limit:], stderr[-limit:])

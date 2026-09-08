@@ -139,38 +139,6 @@ export type WebhookHealth = {
   last_error: string | null;
 };
 
-export type AgentConfig = {
-  role: string;
-  enabled: boolean;
-  provider: string;
-  model: string;
-  configuration: Record<string, unknown>;
-  updated_at: string;
-  status: string;
-  active_jobs: number;
-  queued_jobs: number;
-  current_job_action: string | null;
-  total_runs: number;
-  total_input_tokens: number;
-  total_output_tokens: number;
-  total_estimated_cost_usd: number;
-  last_run_at: string | null;
-  last_duration_ms: number | null;
-  last_provider: string | null;
-  last_model: string | null;
-  active_task_id: string | null;
-  active_task_manual_takeover: boolean;
-  active_task_has_workspace: boolean;
-};
-
-export type TerminalAccess = {
-  session_id: string;
-  token: string;
-  status: string;
-  cols: number;
-  rows: number;
-};
-
 export type AccountSettings = {
   general: {
     display_name: string;
@@ -235,78 +203,6 @@ export type AccountSettings = {
 
 export type PolicyChoice = 'ALLOW' | 'DENY' | 'REQUIRE_HUMAN';
 
-export type AgentKnowledge = {
-  id: string;
-  role: string;
-  title: string;
-  chunk_count: number;
-  created_at: string;
-};
-
-export type WorkflowNode = {
-  id: string;
-  role: string;
-  label: string;
-  position_x: number;
-  position_y: number;
-  enabled: boolean;
-  activation_policy: string;
-  batch_window_seconds: number;
-  integration_ids: string[];
-  repository_ids: string[];
-  provider: string;
-  model: string;
-  system_prompt: string;
-  model_validation_status: string;
-  model_validation_message: string | null;
-  model_validated_at: string | null;
-  integration_mode: string;
-  poll_interval_seconds: number;
-  filter_assignee_id: string;
-  filter_state_ids: string[];
-  integration_sync_status: string;
-  integration_sync_error: string | null;
-  integration_last_synced_at: string | null;
-  reasoning_effort: 'default' | 'low' | 'medium' | 'high' | 'max';
-  max_output_tokens: number | null;
-  temperature: number | null;
-  timeout_minutes: number;
-  max_retries: number;
-  max_review_cycles: number;
-  context_depth: 'low' | 'normal' | 'deep';
-  rag_retrieval_depth: 'low' | 'normal' | 'deep';
-  fallback_provider: string | null;
-  fallback_model: string | null;
-  agent_id: string | null;
-  node_type: 'AGENT' | 'SYSTEM_GATE' | 'TERMINAL' | 'HUMAN_APPROVAL' | 'EXTERNAL_WAIT';
-  system_node_type: string | null;
-};
-
-export type WorkflowEdge = {
-  id: string;
-  source_node_id: string;
-  target_node_id: string;
-  outcome: string;
-  required: boolean;
-  job_type: string | null;
-  internal_task_state: string | null;
-  external_status_key: string | null;
-  priority_override: number | null;
-  configuration: Record<string, unknown>;
-};
-
-export type WorkflowGraph = {
-  version: number;
-  nodes: WorkflowNode[];
-  edges: WorkflowEdge[];
-};
-
-export type ProviderCatalog = {
-  provider: string;
-  capabilities: Record<string, boolean>;
-  models: Array<{ id: string; display_name: string }>;
-};
-
 export type Job = {
   id: string;
   task_id: string;
@@ -343,6 +239,7 @@ export type TaskRoleMetrics = {
   duration_ms: number;
 };
 export type TaskMetrics = {
+  native_turns?: number;
   attempts: number;
   input_tokens: number;
   output_tokens: number;
@@ -575,7 +472,7 @@ export type Team = {
   completed_tasks: number;
   total_input_tokens: number;
   total_output_tokens: number;
-  estimated_cost_usd: number;
+  estimated_cost_usd: number | null;
   created_at: string;
   updated_at: string;
 };
@@ -653,80 +550,6 @@ export type AgentCheckpoint = {
   structured_data: Record<string, unknown>;
   token_estimate: number | null;
   created_at: string;
-};
-
-export type Role = {
-  id: string;
-  name: string;
-  category: string;
-  description: string;
-  system_instructions: string;
-  capabilities: string[];
-  permissions: string[];
-  allowed_results: string[];
-  knowledge_collection_ids: string[];
-  default_provider: string | null;
-  default_model: string | null;
-  default_reasoning_effort: string;
-  default_timeout_minutes: number;
-  default_max_retries: number;
-  runtime_profile: RoleRuntimeProfile;
-  override_policy: Record<string, string>;
-  enabled: boolean;
-  built_in: boolean;
-  version: number;
-  active_agents: number;
-  inactive_agents: number;
-  total_agents: number;
-  created_at: string;
-  updated_at: string;
-};
-
-export type RoleRuntimeProfile = {
-  reasoning_default: 'PROVIDER_DEFAULT' | 'MINIMAL' | 'LOW' | 'MEDIUM' | 'HIGH' | 'MAX';
-  reasoning_min: 'PROVIDER_DEFAULT' | 'MINIMAL' | 'LOW' | 'MEDIUM' | 'HIGH' | 'MAX';
-  reasoning_max: 'PROVIDER_DEFAULT' | 'MINIMAL' | 'LOW' | 'MEDIUM' | 'HIGH' | 'MAX';
-  dynamic_reasoning_allowed: boolean;
-  max_output_tokens: number | null;
-  temperature: number | null;
-  context_strategy: 'MINIMAL' | 'BALANCED' | 'DEEP';
-  max_tool_calls: number;
-  job_timeout_seconds: number;
-  max_job_attempts: number;
-  max_model_turns: number;
-  structured_output_mode: 'REQUIRED' | 'PREFERRED' | 'NONE';
-};
-
-export type AgentRuntimeView = {
-  agent_id: string;
-  role_id: string;
-  role_name: string;
-  config_version: number;
-  versions: {
-    role: number;
-    agent: number;
-    capabilities: string;
-    strategy: string;
-  };
-  overrides: Record<string, unknown>;
-  override_policy: Record<string, string>;
-  effective: {
-    provider: string;
-    model: string;
-    reasoning_level: string;
-    max_output_tokens: number;
-    temperature: number | null;
-    context_strategy: string;
-    max_tool_calls: number;
-    job_timeout_seconds: number;
-    max_job_attempts: number;
-    max_model_turns: number;
-    structured_output_mode: string;
-    capability_version: string;
-    strategy_version: string;
-  };
-  effective_hash: string;
-  sources: Record<string, 'ROLE' | 'AGENT'>;
 };
 
 export type ModelCapabilities = {

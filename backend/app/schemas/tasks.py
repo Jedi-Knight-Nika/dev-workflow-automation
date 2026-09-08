@@ -136,6 +136,7 @@ class TaskMetricsRead(BaseModel):
     duration_ms: int
     estimated_cost_usd: float | None
     roles: list[TaskRoleMetricsRead]
+    native_turns: int = 0
 
 
 class EventRead(BaseModel):

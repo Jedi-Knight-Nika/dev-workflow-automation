@@ -46,7 +46,11 @@ def _focused_reconciled_payload(item: dict[str, object]) -> dict[str, object]:
 async def reconcile_startup(session: AsyncSession) -> int:
     """Reconcile durable tasks with local Git and authoritative GitHub PR state."""
     tasks = list(
-        (await session.scalars(select(Task).where(Task.state.not_in(TERMINAL_STATES)))).all()
+        (
+            await session.scalars(
+                select(Task).where(Task.state.not_in(TERMINAL_STATES), Task.execution_version == 1)
+            )
+        ).all()
     )
     integration = await session.scalar(
         select(Integration).where(Integration.provider_name == "github")

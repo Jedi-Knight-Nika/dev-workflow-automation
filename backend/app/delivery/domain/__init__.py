@@ -1,0 +1,1 @@
+"""Current-revision merge policies."""

@@ -47,6 +47,8 @@ class SqlAlchemyGitHubMergeWorkflow:
         task = await self._session.get(Task, task_id, with_for_update=True)
         if task is None:
             return None
+        if task.execution_version == 2:
+            raise MergeConflict("V2 tasks require the current-SHA V2 delivery gate")
         self._team_id = task.team_id
         scope = await self._session.scalar(
             select(TaskRepositoryScope).where(

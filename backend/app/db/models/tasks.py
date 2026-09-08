@@ -37,6 +37,13 @@ class Task(Base):
     description: Mapped[str] = mapped_column(Text, default="")
     priority: Mapped[int] = mapped_column(Integer, default=3)
     state: Mapped[TaskState] = mapped_column(Enum(TaskState), default=TaskState.NEW)
+    # V2 is opt-in per task. Legacy state remains an audit/compatibility field.
+    execution_version: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
+    status: Mapped[str | None] = mapped_column(String(24))
+    stage: Mapped[str | None] = mapped_column(String(24))
+    wait_reason: Mapped[str | None] = mapped_column(String(40))
+    requirement_version: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
+    lifecycle_version: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
     current_revision: Mapped[str | None] = mapped_column(String(64))
     repository_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("repositories.id", ondelete="SET NULL")

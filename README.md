@@ -1,9 +1,5 @@
 # Autonomous Engineering Worker
 
-<p align="center">
-  <img src="docs/logo.png" alt="Autonomous Engineering Worker logo" width="220" />
-</p>
-
 > Automate the nine-to-five job hell. As one wise man said, if they don't give you a salary raise, promote yourself by working less.
 
 An AI engineering workflow orchestrator that turns external or manually created tasks into
@@ -14,7 +10,23 @@ The project is designed around durable jobs, isolated workers, auditable events,
 human control. AI models assist with reasoning and implementation; the application
 controls scheduling, permissions, retries, and lifecycle decisions.
 
-## Development
+## V2 architecture migration
+
+The [V2 technical specification](autonomous_engineering_worker_v2_technical_architecture.md)
+is the target architecture and takes precedence over legacy workflow descriptions.
+Read [implementation status and rollout](docs/v2-implementation.md) before enabling
+anything: fixed-phase scheduling, native-runner transport and isolated validation are
+implemented behind flags, but this is **not yet a
+production replacement for the legacy worker**. Existing tasks/history are preserved.
+
+The obsolete graph/Role editors and web terminals have been removed. Teams now
+open the fixed lifecycle/profile page; old bookmarks redirect there. Task enrollment
+and V2 publication/merge still need completion before switching production execution.
+
+Repository RAG is off by default. Set `REPOSITORY_RAG_ENABLED=true` explicitly to
+enable repository indexing and retrieval; normal coding uses current workspaces.
+
+## Local development
 
 The application is containerized and can be started with:
 
@@ -25,23 +37,3 @@ docker compose up --build
 
 Read [PRODUCT.md](PRODUCT.md) for the complete product and architecture reference, and
 [DEVELOPMENT.md](DEVELOPMENT.md) for setup, operations, and validation commands.
-
-See [How AI task execution currently works](docs/ai-task-lifecycle-current.md) for an
-English, source-backed walkthrough from task creation to merge, including role handoffs,
-workspace tools, context, token budgets, and known completion limitations.
-
-See [Project architecture and detailed feature inventory](docs/project-architecture-and-features.md)
-for the technology stack, deployment, domain/data model, UI and API features,
-integrations, security boundaries, operations, and current limitations.
-
-See [Role-by-role efficiency research](docs/role-efficiency-research.md) for the latest
-Planner, Executor, routing, review, and validation optimizations and their test evidence.
-
-See [Token efficiency and execution budgets](docs/token-efficiency.md) for cost controls,
-source-reading limits, plan reuse, and verification details.
-
-See [Executor workspace tools](docs/executor-workspace-tools.md) for direct editing,
-same-run test correction, permissions, and rollout instructions.
-
-See [Token-cost research and recovery](docs/token-cost-research-and-recovery.md) for
-the research-backed source-access, caching, and reimport/worktree fixes.

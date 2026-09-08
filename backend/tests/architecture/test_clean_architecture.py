@@ -10,6 +10,22 @@ from app.domain.tasks import Task, TaskState
 BACKEND_ROOT = Path(__file__).parents[2]
 
 
+def imported_modules(source_path: Path) -> list[str]:
+    """Inspect the module in `from x import y`, not just the symbol `y`."""
+    tree = ast.parse(source_path.read_text())
+    result: list[str] = []
+    package = list(source_path.relative_to(BACKEND_ROOT).parts[:-1])
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            result.extend(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            prefix = package[: len(package) - node.level + 1] if node.level else []
+            module = ".".join([*prefix, *([node.module] if node.module else [])])
+            result.append(module)
+            result.extend(f"{module}.{alias.name}" for alias in node.names)
+    return result
+
+
 class FakeTasks:
     def __init__(self) -> None:
         self.added: list[Task] = []
@@ -107,13 +123,7 @@ def test_domain_layer_has_no_framework_or_infrastructure_imports() -> None:
     }
 
     for source_path in domain_root.rglob("*.py"):
-        tree = ast.parse(source_path.read_text())
-        imports = [
-            alias.name
-            for node in ast.walk(tree)
-            if isinstance(node, (ast.Import, ast.ImportFrom))
-            for alias in node.names
-        ]
+        imports = imported_modules(source_path)
         assert not any(
             imported == forbidden_name or imported.startswith(f"{forbidden_name}.")
             for imported in imports
@@ -137,13 +147,7 @@ def test_application_layer_has_no_transport_or_infrastructure_imports() -> None:
     }
 
     for source_path in application_root.rglob("*.py"):
-        tree = ast.parse(source_path.read_text())
-        imports = [
-            alias.name
-            for node in ast.walk(tree)
-            if isinstance(node, (ast.Import, ast.ImportFrom))
-            for alias in node.names
-        ]
+        imports = imported_modules(source_path)
         assert not any(
             imported == forbidden_name or imported.startswith(f"{forbidden_name}.")
             for imported in imports
@@ -162,13 +166,7 @@ def test_legacy_service_namespace_stays_empty() -> None:
 def test_transport_schemas_do_not_import_persistence_models() -> None:
     schemas_root = BACKEND_ROOT / "app" / "schemas"
     for schema_path in schemas_root.rglob("*.py"):
-        tree = ast.parse(schema_path.read_text())
-        imports = [
-            alias.name
-            for node in ast.walk(tree)
-            if isinstance(node, (ast.Import, ast.ImportFrom))
-            for alias in node.names
-        ]
+        imports = imported_modules(schema_path)
         assert not any(name == "app.db" or name.startswith("app.db.") for name in imports)
 
 
@@ -177,15 +175,36 @@ def test_http_routes_depend_on_application_ports_not_persistence_adapters() -> N
     forbidden = {"sqlalchemy", "app.db", "app.integrations", "app.infrastructure.persistence"}
 
     for source_path in api_root.rglob("*.py"):
-        tree = ast.parse(source_path.read_text())
-        imports = [
-            alias.name
-            for node in ast.walk(tree)
-            if isinstance(node, (ast.Import, ast.ImportFrom))
-            for alias in node.names
-        ]
+        imports = imported_modules(source_path)
         assert not any(
             imported == forbidden_name or imported.startswith(f"{forbidden_name}.")
             for imported in imports
             for forbidden_name in forbidden
         ), f"{source_path} couples HTTP transport to a persistence adapter"
+
+
+@pytest.mark.parametrize("context", ["engineering", "agent_runtime", "delivery", "teams", "intake"])
+@pytest.mark.parametrize("layer", ["domain", "application"])
+def test_v2_inner_layers_do_not_import_frameworks_or_adapters(context: str, layer: str) -> None:
+    root = BACKEND_ROOT / "app" / context / layer
+    forbidden = (
+        "fastapi",
+        "sqlalchemy",
+        "httpx",
+        "pydantic",
+        "openai_codex",
+        "claude_agent_sdk",
+        "app.db",
+        "app.api",
+        "app.bootstrap",
+        "app.infrastructure",
+        "app.integrations",
+    )
+    for path in root.rglob("*.py"):
+        for imported in imported_modules(path):
+            assert not any(
+                imported == prefix or imported.startswith(prefix + ".") for prefix in forbidden
+            ), path
+            assert ".infrastructure" not in imported, path
+            if layer == "domain":
+                assert ".application" not in imported, path

@@ -1,0 +1,1 @@
+"""Bounded classification application contracts."""

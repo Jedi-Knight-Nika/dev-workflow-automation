@@ -22,6 +22,12 @@ describe('isActiveNavItem', () => {
 });
 
 describe('NAV_ITEMS', () => {
+  it('does not expose legacy role or graph editors', () => {
+    const hrefs: string[] = NAV_ITEMS.map((item) => item.href);
+    expect(hrefs).not.toContain('/roles');
+    expect(hrefs).not.toContain('/agents');
+    expect(hrefs).toContain('/teams');
+  });
   it('has a unique href per entry', () => {
     const hrefs = NAV_ITEMS.map((item) => item.href);
     expect(new Set(hrefs).size).toBe(hrefs.length);

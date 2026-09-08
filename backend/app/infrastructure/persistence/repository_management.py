@@ -19,8 +19,9 @@ TERMINAL_TASK_STATES = {TaskState.CANCELLED, TaskState.FAILED, TaskState.MERGED}
 
 
 class SqlAlchemyRepositoryManagementWorkflow:
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(self, session: AsyncSession, *, repository_rag_enabled: bool = False) -> None:
         self._session = session
+        self._repository_rag_enabled = repository_rag_enabled
 
     @staticmethod
     def _code_status(item: Repository) -> str:
@@ -177,7 +178,9 @@ class SqlAlchemyRepositoryManagementWorkflow:
         if any((item.provider, item.external_repo_id) in keys for item in existing):
             raise ManagedRepositoryConflict("One or more repositories are already imported")
         settings = await self._session.get(AccountSettings, "default")
-        auto_index = settings is None or settings.auto_index_repositories
+        auto_index = self._repository_rag_enabled and (
+            settings is None or settings.auto_index_repositories
+        )
         items = [
             Repository(
                 provider=command.provider,
@@ -225,6 +228,10 @@ class SqlAlchemyRepositoryManagementWorkflow:
         return (await self._views([item]))[0]
 
     async def queue_index(self, repository_id: uuid.UUID) -> RepositoryView:
+        if not self._repository_rag_enabled:
+            raise ManagedRepositoryConflict(
+                "Repository RAG is disabled. Enable REPOSITORY_RAG_ENABLED before requesting an index."
+            )
         item = await self._locked(repository_id)
         if not item.enabled or item.archived_at is not None:
             raise ManagedRepositoryConflict("Repository is disabled or archived")

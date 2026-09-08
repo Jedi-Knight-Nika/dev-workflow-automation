@@ -4,8 +4,14 @@ Importing this package registers every table and preserves the historical
 ``from app.db.models import ...`` API.
 """
 
+from app.agent_runtime.infrastructure.models import AIRun, DeveloperSession, PricingCatalog
+from app.delivery.infrastructure.status_sync import ExternalStatusSync
 from app.domain.operational_states import IndexStatus, IntegrationStatus, JobRole, JobState
 from app.domain.tasks import TaskState
+from app.engineering.infrastructure.models import ReviewCycle, TaskPhaseRun, ValidationRun
+from app.intake.infrastructure.models import LocalModelRun
+from app.teams.infrastructure.automation import TeamAutomationPolicy
+from app.teams.infrastructure.models import TeamAgentProfile
 
 from .agents import (
     AgentConfig,
@@ -68,13 +74,16 @@ from .workflows import (
 
 __all__ = [
     "AIAgent",
+    "AIRun",
     "AccountSettings",
     "AgentCheckpoint",
     "AgentConfig",
     "AgentKnowledgeChunk",
     "AgentKnowledgeSource",
     "ApprovalRequest",
+    "DeveloperSession",
     "ExecutionPolicy",
+    "ExternalStatusSync",
     "ExternalTaskSnapshot",
     "FailureEvent",
     "HealthState",
@@ -87,9 +96,12 @@ __all__ = [
     "JobRetryState",
     "JobRole",
     "JobState",
+    "LocalModelRun",
     "Notification",
     "NotificationDelivery",
+    "PricingCatalog",
     "Repository",
+    "ReviewCycle",
     "ReviewFinding",
     "Role",
     "SettingsAuditEvent",
@@ -98,9 +110,12 @@ __all__ = [
     "TaskEvent",
     "TaskMemory",
     "TaskMessage",
+    "TaskPhaseRun",
     "TaskRepositoryScope",
     "TaskState",
     "Team",
+    "TeamAgentProfile",
+    "TeamAutomationPolicy",
     "TelegramConnection",
     "TelegramConnectionToken",
     "TelegramUpdate",
@@ -108,6 +123,7 @@ __all__ = [
     "TerminalSession",
     "ToolExecutionEvent",
     "ValidationRecord",
+    "ValidationRun",
     "WebhookDelivery",
     "WorkerNode",
     "WorkerRun",

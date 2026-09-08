@@ -1,3 +1,4 @@
+from app.agent_runtime.infrastructure.orphans import reap_orphans
 from app.application.complete_consultation import CompleteConsultation
 from app.application.jobs import (
     CompleteDelivererJob,
@@ -16,6 +17,9 @@ from app.application.run_startup_maintenance import RunStartupMaintenance
 from app.config import Settings
 from app.db.session import SessionLocal
 from app.domain.jobs import RetryPolicy
+from app.engineering.application.jobs import RunEngineeringJob
+from app.engineering.infrastructure.executor import SqlPhaseExecutor
+from app.engineering.infrastructure.jobs import SqlPhaseJobs
 from app.infrastructure.delivery_processing import SqlAlchemyDeliveryProcessor
 from app.infrastructure.index_processing import SqlAlchemyIndexProcessor
 from app.infrastructure.job_dispatch import SqlAlchemyJobDispatch
@@ -94,6 +98,27 @@ def create_scheduler(settings: Settings) -> Scheduler:
     job_dispatch = DispatchJobs(
         SqlAlchemyJobDispatch(SessionLocal, worker_id, settings.worker_lease_seconds)
     )
+    phase_jobs = (
+        SqlPhaseJobs(
+            SessionLocal,
+            worker_id,
+            settings.worker_lease_seconds,
+            orphan_cleanup=lambda: reap_orphans(SessionLocal, settings),
+        )
+        if settings.new_fixed_lifecycle
+        else None
+    )
+    phase_worker = (
+        RunEngineeringJob(
+            phase_jobs,
+            SqlPhaseExecutor(SessionLocal, settings),
+            heartbeat_seconds=min(
+                settings.worker_heartbeat_seconds, settings.worker_lease_seconds / 3
+            ),
+        )
+        if phase_jobs
+        else None
+    )
     return Scheduler(
         settings,
         worker_id,
@@ -117,6 +142,8 @@ def create_scheduler(settings: Settings) -> Scheduler:
         ),
         RecoveryManager(SqlAlchemyResilienceStore(SessionLocal)),
         CompleteConsultation(SqlAlchemyConsultationStore(SessionLocal)),
+        phase_jobs,
+        phase_worker,
     )
 
 

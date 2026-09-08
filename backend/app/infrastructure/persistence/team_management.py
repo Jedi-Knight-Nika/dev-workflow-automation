@@ -25,8 +25,8 @@ from app.db.models import (
     TaskAssignment,
     TaskState,
     Team,
-    WorkerRun,
 )
+from app.infrastructure.persistence.usage_query import complete_cost, metered_runs
 from app.infrastructure.persistence.workflow_designer import SqlAlchemyWorkflowDesigner
 
 
@@ -234,6 +234,7 @@ class SqlAlchemyTeamManagementWorkflow:
                         Task.team_id == team_id,
                         Job.state.in_([JobState.CLAIMED, JobState.RUNNING]),
                         Job.lease_expires_at.is_not(None),
+                        Task.execution_version == 1,
                         Job.lease_expires_at < now,
                     )
                     .with_for_update(skip_locked=True)
@@ -262,6 +263,7 @@ class SqlAlchemyTeamManagementWorkflow:
                     .where(
                         Task.team_id == team_id,
                         Task.state == TaskState.NEW,
+                        Task.execution_version == 1,
                         Job.state.in_([JobState.WAITING_HUMAN, JobState.WAITING_CONFIGURATION]),
                     )
                     .with_for_update(skip_locked=True)
@@ -322,6 +324,9 @@ class SqlAlchemyTeamManagementWorkflow:
         created_jobs = 0
         missing_repository_tasks = 0
         for assignment, task in assignments:
+            if task.execution_version == 2:
+                # Wake is not authorization to replay an interrupted/over-budget native turn.
+                continue
             if task.repository_id is None and candidate_repository_count == 0:
                 missing_repository_tasks += 1
             if task.id in active_task_ids:
@@ -431,7 +436,15 @@ class SqlAlchemyTeamManagementWorkflow:
                     TaskState.MERGED,
                     TaskState.PAUSED,
                 }:
-                    task.state = TaskState.PAUSED
+                    if task.execution_version == 2:
+                        from app.engineering.domain.lifecycle import Action
+                        from app.engineering.infrastructure.controls import control_task
+
+                        await control_task(
+                            self._session, task, Action.PAUSE, actor="user:team-shutdown"
+                        )
+                    else:
+                        task.state = TaskState.PAUSED
                     paused_tasks += 1
         await self._session.execute(
             update(TaskAssignment)
@@ -461,21 +474,23 @@ class SqlAlchemyTeamManagementWorkflow:
             )
         ).all()
         counts = {row[0]: (int(row[1]), int(row[2]), int(row[3])) for row in count_rows}
+        measured = metered_runs().c
         usage_rows = (
             await self._session.execute(
                 select(
-                    Task.team_id,
-                    func.coalesce(func.sum(WorkerRun.input_tokens), 0),
-                    func.coalesce(func.sum(WorkerRun.output_tokens), 0),
-                    func.coalesce(func.sum(WorkerRun.estimated_cost_usd), 0),
+                    measured.team_id,
+                    func.coalesce(func.sum(measured.input_tokens), 0),
+                    func.coalesce(func.sum(measured.output_tokens), 0),
+                    complete_cost(measured.cost_usd),
                 )
-                .join(Job, Job.task_id == Task.id)
-                .join(WorkerRun, WorkerRun.job_id == Job.id)
-                .where(Task.team_id.in_(team_ids))
-                .group_by(Task.team_id)
+                .where(measured.team_id.in_(team_ids))
+                .group_by(measured.team_id)
             )
         ).all()
-        usage = {row[0]: (int(row[1]), int(row[2]), float(row[3])) for row in usage_rows}
+        usage = {
+            row[0]: (int(row[1]), int(row[2]), float(row[3]) if row[3] is not None else None)
+            for row in usage_rows
+        }
         return [
             TeamView(
                 team.id,

@@ -68,10 +68,6 @@ from .teams import (
     TeamWrite,
     WakeTeamRead,
 )
-from .terminals import (
-    TerminalAccessRead,
-    TerminalOpen,
-)
 from .workers import (
     ReviewFindingRead,
     ValidationRead,
@@ -137,8 +133,6 @@ __all__ = [
     "TeamRead",
     "TeamWrite",
     "TelegramConfigure",
-    "TerminalAccessRead",
-    "TerminalOpen",
     "TrelloBoardRead",
     "TrelloListRead",
     "ValidationRead",

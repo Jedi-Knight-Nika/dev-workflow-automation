@@ -27,7 +27,9 @@
       ['Task title', taskTitle],
       ['Exported at', new Date().toISOString()],
       ['Provider time (ms)', metrics.duration_ms],
-      ['AI attempts', metrics.attempts],
+      ['AI execution runs', metrics.attempts],
+      ['Native harness turns (may contain multiple provider requests)', metrics.native_turns ?? 0],
+      ['Runs missing usage', metrics.missing_usage_attempts],
       ['Input tokens', metrics.input_tokens],
       ['Output tokens', metrics.output_tokens],
       ['Estimated cost (USD)', metrics.estimated_cost_usd],
@@ -84,7 +86,9 @@
     </p>{:else}
     <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
       <div class="metric"><span>Provider time</span><b>{duration(metrics.duration_ms)}</b></div>
-      <div class="metric"><span>AI attempts</span><b>{number.format(metrics.attempts)}</b></div>
+      <div class="metric">
+        <span>AI execution runs</span><b>{number.format(metrics.attempts)}</b>
+      </div>
       <div class="metric">
         <span>Input tokens</span><b>{number.format(metrics.input_tokens)}</b>
       </div>
@@ -99,6 +103,12 @@
         >
       </div>
     </div>
+    {#if metrics.native_turns}
+      <p class="mt-3 text-xs text-muted">
+        Includes {metrics.native_turns} native harness turn(s). Each native turn can contain multiple
+        provider requests; this is not a model-call count.
+      </p>
+    {/if}
     <div class="mt-5 overflow-x-auto">
       <table class="w-full text-left text-xs">
         <thead

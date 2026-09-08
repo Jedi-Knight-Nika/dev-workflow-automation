@@ -1,5 +1,5 @@
 import uuid
-from collections import defaultdict
+from decimal import Decimal
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -9,10 +9,10 @@ from app.application.ports.task_history import (
     ReviewFindingView,
     TaskEventView,
     TaskMetricsView,
-    TaskRoleMetricsView,
     ValidationView,
 )
-from app.db.models import Job, ReviewFinding, TaskEvent, ValidationRecord, WorkerRun
+from app.application.task_usage import UsageSample, task_usage
+from app.db.models import AIRun, Job, ReviewFinding, TaskEvent, ValidationRecord, WorkerRun
 from app.infrastructure.persistence.job_enqueueing import job_to_view
 
 
@@ -104,44 +104,37 @@ class SqlAlchemyTaskHistoryQueries:
                 .order_by(WorkerRun.created_at)
             )
         ).all()
-        by_role: dict[tuple[str, str, str], list[int]] = defaultdict(lambda: [0, 0, 0, 0])
-        known_input = 0
-        known_output = 0
-        missing = 0
-        duration = 0
-        priced: float | None = 0.0
-        for run in runs:
-            input_tokens = run.input_tokens
-            output_tokens = run.output_tokens
-            if input_tokens is None or output_tokens is None:
-                missing += 1
-            known_input += input_tokens or 0
-            known_output += output_tokens or 0
-            duration += run.duration_ms or 0
-            if run.estimated_cost_usd is None:
-                priced = None
-            elif priced is not None:
-                priced += float(run.estimated_cost_usd)
-            key = (
-                run.role.value if hasattr(run.role, "value") else str(run.role),
+        native_runs = (
+            await self._session.scalars(select(AIRun).where(AIRun.task_id == task_id))
+        ).all()
+        samples = [
+            UsageSample(
+                run.role.value,
                 run.provider,
                 run.model,
+                run.input_tokens,
+                run.output_tokens,
+                run.duration_ms,
+                Decimal(str(run.estimated_cost_usd))
+                if run.estimated_cost_usd is not None
+                else None,
             )
-            bucket = by_role[key]
-            bucket[0] += 1
-            bucket[1] += input_tokens or 0
-            bucket[2] += output_tokens or 0
-            bucket[3] += run.duration_ms or 0
-        roles = tuple(
-            TaskRoleMetricsView(role, provider, model, *values)
-            for (role, provider, model), values in by_role.items()
+            for run in runs
+        ]
+        samples.extend(
+            UsageSample(
+                run.role_kind,
+                run.provider,
+                run.model,
+                run.input_tokens,
+                run.output_tokens,
+                run.provider_duration_ms,
+                run.provider_cost_usd
+                if run.provider_cost_usd is not None
+                else run.calculated_cost_usd,
+                native=True,
+                complete=run.usage_complete,
+            )
+            for run in native_runs
         )
-        return TaskMetricsView(
-            attempts=len(runs),
-            input_tokens=known_input,
-            output_tokens=known_output,
-            missing_usage_attempts=missing,
-            duration_ms=duration,
-            estimated_cost_usd=priced if runs else None,
-            roles=roles,
-        )
+        return task_usage(samples)

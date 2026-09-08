@@ -26,7 +26,7 @@ from app.api.roles import router as roles_router
 from app.api.settings import router as settings_router
 from app.api.tasks import router as tasks_router
 from app.api.teams import router as teams_router
-from app.api.terminals import router as terminals_router
+from app.api.v2 import router as v2_router
 from app.api.webhooks import router as webhooks_router
 from app.bootstrap.scheduler import create_scheduler
 from app.config import get_settings
@@ -81,13 +81,13 @@ app.include_router(resilience_router, prefix="/api/v1")
 app.include_router(settings_router, prefix="/api/v1")
 app.include_router(ai_runtime_router, prefix="/api/v1")
 app.include_router(agent_runtime_router, prefix="/api/v1")
-app.include_router(terminals_router, prefix="/api/v1")
 app.include_router(control_plane_router, prefix="/api/v1")
 app.include_router(events_router, prefix="/api/v1")
 app.include_router(execution_policy_router, prefix="/api/v1")
 app.include_router(memory_router, prefix="/api/v1")
 app.include_router(notifications_router, prefix="/api/v1")
 app.include_router(webhooks_router)
+app.include_router(v2_router, prefix="/api/v1")
 app.include_router(telegram_webhook_router)
 
 

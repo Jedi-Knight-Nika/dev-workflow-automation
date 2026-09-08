@@ -1,6 +1,7 @@
 import asyncio
 import uuid
 from datetime import UTC, datetime
+from time import monotonic
 from typing import Any
 
 import structlog
@@ -33,6 +34,7 @@ from app.application.run_startup_maintenance import RunStartupMaintenance
 from app.config import Settings
 from app.domain.agents import AgentRole
 from app.domain.jobs import JobExecutionState
+from app.engineering.application.jobs import PhaseJobs, RunEngineeringJob
 from app.schemas import WorkerResult
 
 log = structlog.get_logger()
@@ -65,6 +67,8 @@ class Scheduler:
         task_reconciler: ReconcileExternalTasks,
         recovery_manager: RecoveryManager | None = None,
         consultation_completer: CompleteConsultation | None = None,
+        phase_jobs: PhaseJobs | None = None,
+        phase_worker: RunEngineeringJob | None = None,
     ) -> None:
         self.settings = settings
         self._job_dispatch = job_dispatch
@@ -82,6 +86,8 @@ class Scheduler:
         self._task_reconciler = task_reconciler
         self._recovery_manager = recovery_manager
         self._consultation_completer = consultation_completer
+        self._phase_jobs, self._phase_worker = phase_jobs, phase_worker
+        self._last_phase_recovery = monotonic()
         self.worker_id = worker_id
         self._stop = asyncio.Event()
         self._loop_task: asyncio.Task[None] | None = None
@@ -91,9 +97,12 @@ class Scheduler:
 
     async def start(self) -> None:
         await self._startup_maintenance.execute()
+        if self._phase_jobs is not None:
+            await self._phase_jobs.recover()
         await self._worker_presence.online()
         self._loop_task = asyncio.create_task(self._run(), name="job-scheduler")
-        self._index_task = asyncio.create_task(self._run_indexer(), name="repository-indexer")
+        if self.settings.repository_rag_enabled:
+            self._index_task = asyncio.create_task(self._run_indexer(), name="repository-indexer")
         self._heartbeat_task = asyncio.create_task(self._run_heartbeat(), name="worker-heartbeat")
 
     async def stop(self) -> None:
@@ -126,12 +135,32 @@ class Scheduler:
             while not self._stop.is_set():
                 try:
                     self._job_tasks = {task for task in self._job_tasks if not task.done()}
+                    if (
+                        self._phase_jobs is not None
+                        and monotonic() - self._last_phase_recovery
+                        >= self.settings.worker_lease_seconds
+                    ):
+                        await self._phase_jobs.recover()
+                        self._last_phase_recovery = monotonic()
                     await self._task_reconciler.execute()
                     if self._recovery_manager is not None:
                         await self._recovery_manager.recover_due_resources()
                     await self._delivery_processor.execute()
                     claimed_any = False
                     while len(self._job_tasks) < self.settings.scheduler_max_concurrent_jobs:
+                        if self._phase_jobs is not None and self._phase_worker is not None:
+                            phase = await self._phase_jobs.claim()
+                            if phase is not None:
+                                claimed_any = True
+                                self._job_tasks.add(
+                                    asyncio.create_task(
+                                        self._phase_worker.execute(phase),
+                                        name=f"v2-job-{phase.job_id}",
+                                    )
+                                )
+                                continue
+                        if not self.settings.legacy_workflow_routing:
+                            break
                         job = await self._job_dispatch.claim()
                         if job is None:
                             break
@@ -155,6 +184,8 @@ class Scheduler:
                     await asyncio.sleep(self.settings.scheduler_poll_seconds)
         finally:
             if self._job_tasks:
+                for task in self._job_tasks:
+                    task.cancel()
                 await asyncio.gather(*self._job_tasks, return_exceptions=True)
                 self._job_tasks.clear()
 

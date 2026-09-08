@@ -65,6 +65,7 @@ class TaskMetricsView:
     duration_ms: int
     estimated_cost_usd: float | None
     roles: tuple[TaskRoleMetricsView, ...]
+    native_turns: int = 0
 
 
 class TaskHistoryQueries(Protocol):

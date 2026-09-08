@@ -23,6 +23,8 @@ class SqlAlchemyGitHubPublicationWorkflow:
         task = await self._session.get(Task, task_id, with_for_update=True)
         if task is None:
             raise PublishTaskNotFound("Task not found")
+        if task.execution_version == 2:
+            raise PublishConflict("V2 tasks require the validated V2 publication adapter")
         if task.repository_id is None:
             raise PublishConflict("Task has no repository")
         repository = await self._session.get(Repository, task.repository_id)

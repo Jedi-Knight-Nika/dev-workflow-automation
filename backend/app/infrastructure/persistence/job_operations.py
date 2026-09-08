@@ -104,6 +104,24 @@ async def enqueue_job(
     workflow_version: int | None = None,
     preserve_task_state: bool = False,
 ) -> Job:
+    if action == "INTERPRET_TASK" and task.execution_version != 2 and task.team_id:
+        from app.config import get_settings
+        from app.engineering.infrastructure.enrollment import enroll
+        from app.teams.infrastructure.automation import read_policy
+
+        settings = get_settings()
+        if (
+            settings.new_fixed_lifecycle
+            and (await read_policy(session, task.team_id)).enrollment_enabled
+        ):
+            await enroll(session, task, settings, actor="configured-import")
+            phase = await session.scalar(
+                select(Job).where(Job.task_id == task.id, Job.state == JobState.QUEUED)
+            )
+            assert phase is not None
+            return phase
+    if task.execution_version == 2:
+        raise ValueError("V2 tasks cannot enter the legacy workflow router")
     if task.execution_profile is None or task.execution_strategy is None:
         profile = TaskProfiler().profile(
             title=task.title,
@@ -182,7 +200,9 @@ async def _pin_job_to_workflow(session: AsyncSession, task: Task, job: Job) -> N
     task.current_workflow_node_id = node.id
 
 
-async def claim_next_job(session: AsyncSession, worker_id: str, lease_seconds: int) -> Job | None:
+async def claim_next_job(
+    session: AsyncSession, worker_id: str, lease_seconds: int, *, execution_version: int = 1
+) -> Job | None:
     bind = session.get_bind()
     active_job = aliased(Job)
     active_task = aliased(Task)
@@ -247,6 +267,7 @@ async def claim_next_job(session: AsyncSession, worker_id: str, lease_seconds: i
             & (HealthState.resource_id == AIAgent.provider),
         )
         .where(
+            Task.execution_version == execution_version,
             Job.state.in_([JobState.QUEUED, JobState.RETRY_WAIT]),
             or_(Job.retry_not_before.is_(None), Job.retry_not_before <= datetime.now(UTC)),
             Task.manual_takeover.is_(False),
@@ -332,7 +353,11 @@ async def recover_expired_jobs(session: AsyncSession) -> int:
         CursorResult[Any],
         await session.execute(
             update(Job)
-            .where(Job.state.in_([JobState.CLAIMED, JobState.RUNNING]), Job.lease_expires_at < now)
+            .where(
+                Job.state.in_([JobState.CLAIMED, JobState.RUNNING]),
+                Job.lease_expires_at < now,
+                Job.task_id.in_(select(Task.id).where(Task.execution_version == 1)),
+            )
             .values(
                 state=JobState.QUEUED,
                 worker_id=None,

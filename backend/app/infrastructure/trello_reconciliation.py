@@ -115,6 +115,11 @@ class SqlAlchemyTrelloTaskReconciliation:
             )
             session.add(snapshot)
         else:
+            from app.intake.infrastructure.v2_events import requirements_changed
+
+            await requirements_changed(
+                session, task, card["name"], self._description(card), source="trello"
+            )
             task.title = card["name"]
             task.description = self._description(card)
             task.priority = trello_priority(card["labels"])

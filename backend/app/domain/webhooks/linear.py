@@ -54,6 +54,7 @@ def linear_comment(payload: dict[str, Any]) -> tuple[str, dict[str, Any]] | None
         "source": "linear",
         "event_type": "comment",
         "author": (data.get("user") or {}).get("name"),
+        "actor_id": str((data.get("user") or {}).get("id") or ""),
         "url": data.get("url"),
         "raw_text": body,
     }

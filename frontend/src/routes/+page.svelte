@@ -4,6 +4,7 @@
   import { API_URL } from '$lib/api';
   import { createLiveRefresh } from '$lib/live-refresh';
   import ErrorBanner from '$lib/components/ErrorBanner.svelte';
+  import V2StatisticsPanel from '$lib/components/V2StatisticsPanel.svelte';
   import PageHeader from '$lib/components/PageHeader.svelte';
   import Skeleton from '$lib/components/Skeleton.svelte';
   import PixelAgentAvatar from '$lib/components/agents/PixelAgentAvatar.svelte';
@@ -343,7 +344,7 @@
             <div><b>{team.ready_to_merge}</b><small>merge ready</small></div>
           </div>
           <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
-          <a href={`${resolve('/agents')}?team=${team.team_id}`}>VIEW TEAM →</a>
+          <a href={resolve('/teams/[id]', { id: team.team_id })}>VIEW TEAM →</a>
         </article>{/each}
     </section>
 
@@ -500,6 +501,7 @@
       </section>
     {/if}
   {/if}
+  <V2StatisticsPanel />
 </main>
 
 <style>

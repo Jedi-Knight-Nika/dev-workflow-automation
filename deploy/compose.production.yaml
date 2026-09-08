@@ -49,6 +49,7 @@ services:
       LINEAR_WEBHOOK_SECRET: ${LINEAR_WEBHOOK_SECRET:?Set LINEAR_WEBHOOK_SECRET}
       WORKSPACE_ROOT: /data/workspaces
       SCHEDULER_ENABLED: "false"
+      REPOSITORY_RAG_ENABLED: ${REPOSITORY_RAG_ENABLED:-false}
       SCHEDULER_POLL_SECONDS: ${SCHEDULER_POLL_SECONDS:-1.0}
       WORKER_TIMEOUT_SECONDS: ${WORKER_TIMEOUT_SECONDS:-300}
       WORKER_LEASE_SECONDS: ${WORKER_LEASE_SECONDS:-330}
@@ -82,6 +83,7 @@ services:
     environment:
       <<: *backend-environment
       SCHEDULER_ENABLED: "true"
+      REPOSITORY_RAG_ENABLED: ${REPOSITORY_RAG_ENABLED:-false}
       WORKER_TRANSPORT: docker
       DOCKER_SOCKET: /var/run/docker.sock
       WORKER_CONTAINER_IMAGE: autonomous-engineering-worker-runtime:latest

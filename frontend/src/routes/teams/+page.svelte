@@ -12,8 +12,7 @@
     createTeam,
     listTeams,
     shutdownTeam,
-    updateTeam,
-    wakeTeam
+    updateTeam
   } from '$lib/services/teams';
   import type { Repository, Team } from '$lib/types';
 
@@ -25,9 +24,8 @@
   let error = $state(''),
     loading = $state(true);
   let archivingId = $state(''),
-    wakingId = $state(''),
     shuttingDownId = $state(''),
-    wakeMessage = $state('');
+    statusMessage = $state('');
   let name = $state(''),
     description = $state(''),
     concurrency = $state(1);
@@ -134,30 +132,6 @@
       archivingId = '';
     }
   }
-  async function wake(team: Team) {
-    wakingId = team.id;
-    wakeMessage = '';
-    error = '';
-    try {
-      const result = await wakeTeam(team.id);
-      const actions = [
-        result.recovered_jobs ? `${result.recovered_jobs} expired job recovered` : '',
-        result.created_jobs ? `${result.created_jobs} missing job created` : '',
-        `${result.queued_jobs} queued`,
-        `${result.running_jobs} running`
-      ].filter(Boolean);
-      wakeMessage = `${team.name}: ${actions.join(' · ')}${
-        result.missing_repository_tasks
-          ? ` · ${result.missing_repository_tasks} task(s) still need a repository`
-          : ''
-      }`;
-      await load();
-    } catch (cause) {
-      error = String(cause);
-    } finally {
-      wakingId = '';
-    }
-  }
   async function shutdown(team: Team) {
     if (
       !confirm(`Stop active work for ${team.name}? Tasks will be paused and can be resumed later.`)
@@ -167,7 +141,7 @@
     error = '';
     try {
       const result = await shutdownTeam(team.id);
-      wakeMessage = `${team.name}: stopped ${result.cancelled_jobs} job(s), paused ${result.paused_tasks} task(s)`;
+      statusMessage = `${team.name}: stopped ${result.cancelled_jobs} job(s), paused ${result.paused_tasks} task(s)`;
       await load();
     } catch (cause) {
       error = String(cause);
@@ -185,7 +159,7 @@
 />
 <main class="space-y-6 p-4 sm:p-6 md:p-10">
   <ErrorBanner message={error} />
-  {#if wakeMessage}<p class="wake-result" role="status">{wakeMessage}</p>{/if}
+  {#if statusMessage}<p class="operation-result" role="status">{statusMessage}</p>{/if}
   <div class="teams-toolbar">
     <div>
       <strong>Independent delivery lanes</strong>
@@ -256,7 +230,9 @@
             ><b>Tokens</b>{integer.format(team.total_input_tokens + team.total_output_tokens)}</span
           >
           <span title="Estimated provider cost"
-            ><b>Spend</b>{money.format(team.estimated_cost_usd)}</span
+            ><b>Spend</b>{team.estimated_cost_usd === null
+              ? 'Unavailable'
+              : money.format(team.estimated_cost_usd)}</span
           >
           <span title="Repository access scope"
             ><b>Access</b>{team.repository_ids.length
@@ -265,17 +241,10 @@
           >
         </div>
         <footer>
-          <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
-          <a class="workflow-action" href={`${resolve('/agents')}?team=${team.id}`}
-            ><span>Open workflow</span><b aria-hidden="true">→</b></a
+          <a class="workflow-action" href={resolve('/teams/[id]', { id: team.id })}
+            ><span>Open team lifecycle</span><b aria-hidden="true">→</b></a
           >
           <div class="operation-actions">
-            <button
-              class="wake"
-              disabled={!team.enabled || wakingId === team.id}
-              onclick={() => void wake(team)}
-              ><span aria-hidden="true">▶</span>{wakingId === team.id ? 'Waking…' : 'Wake'}</button
-            >
             <span
               class="button-help"
               title={!hasActiveWork ? 'No running or queued work to stop' : undefined}
@@ -433,7 +402,7 @@
     <footer>
       <button class="cancel" onclick={() => (showForm = false)}>Cancel</button>
       <div class="save-group">
-        <span>{editing ? 'Update team settings' : 'Create an empty team workflow'}</span><button
+        <span>{editing ? 'Update team settings' : 'Create a team'}</span><button
           class="primary"
           disabled={busy || !name.trim()}
           onclick={() => void save()}
@@ -752,14 +721,6 @@
   .button-help {
     display: inline-flex;
   }
-  .operation-actions .wake {
-    border: 1px solid color-mix(in srgb, var(--color-brand) 40%, var(--color-line));
-    color: var(--color-brand);
-    font-weight: 700;
-  }
-  .operation-actions .wake:hover:not(:disabled) {
-    background: color-mix(in srgb, var(--color-brand) 9%, transparent);
-  }
   .operation-actions .stop {
     border: 1px solid color-mix(in srgb, var(--color-danger) 45%, var(--color-line));
     color: var(--color-danger);
@@ -772,7 +733,7 @@
     cursor: not-allowed;
     opacity: 0.42;
   }
-  .wake-result {
+  .operation-result {
     border: 1px solid color-mix(in srgb, #22a06b 35%, var(--color-line));
     border-radius: 0.7rem;
     background: color-mix(in srgb, #22a06b 8%, var(--color-panel));

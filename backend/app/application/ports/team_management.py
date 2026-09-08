@@ -42,7 +42,7 @@ class TeamView:
     completed_tasks: int
     total_input_tokens: int
     total_output_tokens: int
-    estimated_cost_usd: float
+    estimated_cost_usd: float | None
     created_at: datetime
     updated_at: datetime
 

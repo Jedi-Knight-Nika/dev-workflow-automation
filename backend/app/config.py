@@ -65,6 +65,34 @@ class Settings(BaseSettings):
     github_app_return_url: str = "http://localhost:3000/repositories"
     linear_webhook_secret: str = ""
     application_base_url: str = "http://localhost:3000"
+    # Additive V2 rollout: never silently reroute existing engineering jobs.
+    new_fixed_lifecycle: bool = False
+    developer_harness_codex: bool = False
+    developer_harness_claude: bool = False
+    local_event_interpreter: bool = False
+    repository_rag_enabled: bool = False
+    legacy_workflow_routing: bool = True
+    legacy_executor: bool = True
+    harness_state_root: Path = Path("./harness-state")
+    harness_control_root: Path = Path("./harness-control")
+    developer_container_image: str = "engineering-developer:local"
+    developer_container_network: str = "engineering-provider-internal"
+    developer_egress_proxy: str = ""
+    developer_turn_timeout_seconds: int = Field(default=1200, ge=1, le=7200)
+    # Zero keeps native automatic compaction only. Opt in after the SDK smoke test.
+    developer_compact_before_feedback_tokens: int = Field(default=0, ge=0, le=10000000)
+    v2_validation_commands: dict[str, list[list[str]]] = Field(default_factory=dict)
+    ollama_base_url: str = "http://ollama:11434"
+    interpreter_model: str = "qwen3:4b"
+    interpreter_timeout_seconds: int = Field(default=30, ge=1, le=120)
+    interpreter_cloud_models: list[str] = Field(default_factory=list, max_length=2)
+    interpreter_cloud_request_limit_usd: float = Field(
+        default=0.02, gt=0, le=0.1, allow_inf_nan=False
+    )
+    slack_signing_secret: str = ""
+    slack_team_routes: dict[str, dict[str, str]] = Field(default_factory=dict)
+    trello_webhook_secret: str = ""
+    trello_webhook_callback_url: str = ""
 
     @model_validator(mode="after")
     def validate_production_secrets(self) -> "Settings":

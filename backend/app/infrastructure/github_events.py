@@ -525,6 +525,11 @@ async def process_github_event(
         task = await session.get(Task, scope.task_id)
     if task is None:
         return
+    if task.execution_version == 2:
+        from app.intake.infrastructure.v2_events import github_event
+
+        await github_event(session, task, repository, event_type, payload)
+        return
     approval_actor = merge_approval_actor(event_type, payload)
     if approval_actor:
         await _request_merge_from_github(

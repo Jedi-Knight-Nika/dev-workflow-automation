@@ -59,7 +59,7 @@ class SqlAlchemyTaskConversationStore:
     async def add_user_message(
         self, task_id: uuid.UUID, body: str, reply_to_id: int | None
     ) -> TaskMessageView:
-        task = await self._session.get(Task, task_id)
+        task = await self._session.get(Task, task_id, with_for_update=True)
         if task is None:
             raise LookupError("Task not found")
         if reply_to_id is not None:
@@ -83,6 +83,12 @@ class SqlAlchemyTaskConversationStore:
             "TASK_MESSAGE_ADDED",
             {"message_id": message.id, "author_type": "USER"},
         )
+        if task.execution_version == 2:
+            from app.intake.infrastructure.operator_messages import operator_message
+
+            await operator_message(self._session, task, message)
+            await self._session.commit()
+            return _view(message)
         pending_response = await self._session.scalar(
             select(Job.id).where(
                 Job.task_id == task_id,

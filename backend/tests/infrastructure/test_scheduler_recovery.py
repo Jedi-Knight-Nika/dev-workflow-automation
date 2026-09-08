@@ -115,7 +115,9 @@ async def test_scheduler_runs_jobs_up_to_configured_bound() -> None:
         async def execute(self) -> None:
             return None
 
-    settings = SimpleNamespace(scheduler_max_concurrent_jobs=2, scheduler_poll_seconds=0.01)
+    settings = SimpleNamespace(
+        scheduler_max_concurrent_jobs=2, scheduler_poll_seconds=0.01, legacy_workflow_routing=True
+    )
     unused = cast(Any, object())
     scheduler = Scheduler(
         cast(Any, settings),

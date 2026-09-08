@@ -26,8 +26,10 @@ from app.db.models import (
     TaskState,
     Team,
     WorkerNode,
-    WorkerRun,
 )
+from app.infrastructure.persistence.usage_query import complete_cost, metered_runs
+
+RUN_USAGE = metered_runs()
 
 ACTIVE_TASK_STATES = (
     TaskState.PLANNING,
@@ -41,8 +43,9 @@ QUEUED_JOB_STATES = (JobState.QUEUED, JobState.RETRY_WAIT)
 
 
 class SqlAlchemyDashboardQueries:
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(self, session: AsyncSession, *, repository_rag_enabled: bool = False) -> None:
         self._session = session
+        self._repository_rag_enabled = repository_rag_enabled
 
     async def snapshot(self, period: str) -> DashboardSnapshot:
         now = datetime.now(UTC)
@@ -128,12 +131,12 @@ class SqlAlchemyDashboardQueries:
         active_ids = select(Job.id).where(Job.state.in_(ACTIVE_JOB_STATES))
         usage = (
             select(
-                WorkerRun.job_id,
-                func.sum(WorkerRun.input_tokens).label("input_tokens"),
-                func.sum(WorkerRun.output_tokens).label("output_tokens"),
+                RUN_USAGE.c.job_id,
+                func.sum(RUN_USAGE.c.input_tokens).label("input_tokens"),
+                func.sum(RUN_USAGE.c.output_tokens).label("output_tokens"),
             )
-            .where(WorkerRun.job_id.in_(active_ids))
-            .group_by(WorkerRun.job_id)
+            .where(RUN_USAGE.c.job_id.in_(active_ids))
+            .group_by(RUN_USAGE.c.job_id)
             .subquery()
         )
         rows = await self._session.execute(
@@ -250,15 +253,14 @@ class SqlAlchemyDashboardQueries:
                     Task.team_id,
                     func.coalesce(
                         func.sum(
-                            func.coalesce(WorkerRun.input_tokens, 0)
-                            + func.coalesce(WorkerRun.output_tokens, 0)
+                            func.coalesce(RUN_USAGE.c.input_tokens, 0)
+                            + func.coalesce(RUN_USAGE.c.output_tokens, 0)
                         ),
                         0,
                     ),
                 )
-                .join(Job, Job.id == WorkerRun.job_id)
-                .join(Task, Task.id == Job.task_id)
-                .where(Task.team_id.is_not(None), WorkerRun.created_at >= start)
+                .join(Task, Task.id == RUN_USAGE.c.task_id)
+                .where(Task.team_id.is_not(None), RUN_USAGE.c.started_at >= start)
                 .group_by(Task.team_id)
             )
         ).all()
@@ -348,29 +350,28 @@ class SqlAlchemyDashboardQueries:
         return result
 
     async def _usage(self, start: datetime, dimension: str) -> list[UsageBucketView]:
-        inputs = func.coalesce(func.sum(WorkerRun.input_tokens), 0)
-        outputs = func.coalesce(func.sum(WorkerRun.output_tokens), 0)
-        cost = func.sum(WorkerRun.estimated_cost_usd)
+        inputs = func.coalesce(func.sum(RUN_USAGE.c.input_tokens), 0)
+        outputs = func.coalesce(func.sum(RUN_USAGE.c.output_tokens), 0)
+        cost = complete_cost(RUN_USAGE.c.cost_usd)
         statement: Any
         if dimension == "role":
             statement = (
-                select(WorkerRun.role, inputs, outputs, cost)
-                .where(WorkerRun.created_at >= start)
-                .group_by(WorkerRun.role)
+                select(RUN_USAGE.c.role, inputs, outputs, cost)
+                .where(RUN_USAGE.c.started_at >= start)
+                .group_by(RUN_USAGE.c.role)
             )
         elif dimension == "provider":
             statement = (
-                select(WorkerRun.provider, inputs, outputs, cost)
-                .where(WorkerRun.created_at >= start)
-                .group_by(WorkerRun.provider)
+                select(RUN_USAGE.c.provider, inputs, outputs, cost)
+                .where(RUN_USAGE.c.started_at >= start)
+                .group_by(RUN_USAGE.c.provider)
             )
         else:
             statement = (
                 select(Team.name, inputs, outputs, cost)
-                .join(Job)
-                .join(Task)
+                .join(Task, Task.id == RUN_USAGE.c.task_id)
                 .join(Team, Team.id == Task.team_id)
-                .where(WorkerRun.created_at >= start)
+                .where(RUN_USAGE.c.started_at >= start)
                 .group_by(Team.name)
             )
         rows = (await self._session.execute(statement.order_by((inputs + outputs).desc()))).all()
@@ -388,10 +389,10 @@ class SqlAlchemyDashboardQueries:
         inputs, outputs, cost = (
             await self._session.execute(
                 select(
-                    func.coalesce(func.sum(WorkerRun.input_tokens), 0),
-                    func.coalesce(func.sum(WorkerRun.output_tokens), 0),
-                    func.sum(WorkerRun.estimated_cost_usd),
-                ).where(WorkerRun.created_at >= start)
+                    func.coalesce(func.sum(RUN_USAGE.c.input_tokens), 0),
+                    func.coalesce(func.sum(RUN_USAGE.c.output_tokens), 0),
+                    complete_cost(RUN_USAGE.c.cost_usd),
+                ).where(RUN_USAGE.c.started_at >= start)
             )
         ).one()
         return int(inputs) + int(outputs), float(cost) if cost is not None else None
@@ -415,15 +416,15 @@ class SqlAlchemyDashboardQueries:
     async def _history(self, start: datetime, days: int, *, usage: bool) -> list[TimeBucketView]:
         first = start.replace(hour=0, minute=0, second=0, microsecond=0)
         if usage:
-            bucket = func.date_trunc("day", WorkerRun.created_at).label("bucket")
+            bucket = func.date_trunc("day", RUN_USAGE.c.started_at).label("bucket")
             rows = (
                 await self._session.execute(
                     select(
                         bucket,
-                        func.coalesce(func.sum(WorkerRun.input_tokens), 0),
-                        func.coalesce(func.sum(WorkerRun.output_tokens), 0),
+                        func.coalesce(func.sum(RUN_USAGE.c.input_tokens), 0),
+                        func.coalesce(func.sum(RUN_USAGE.c.output_tokens), 0),
                     )
-                    .where(WorkerRun.created_at >= first)
+                    .where(RUN_USAGE.c.started_at >= first)
                     .group_by(bucket)
                 )
             ).all()
@@ -495,14 +496,22 @@ class SqlAlchemyDashboardQueries:
             for repo in repositories
         )
         incomplete = len(repositories) - ready - failed
-        rag_status = "DEGRADED" if failed or stale or incomplete else "HEALTHY"
+        rag_status = (
+            "NOT_CONFIGURED"
+            if not self._repository_rag_enabled
+            else "DEGRADED"
+            if failed or stale or incomplete
+            else "HEALTHY"
+        )
         checks.append(
             HealthCheckView(
                 "RAG",
                 rag_status,
-                f"{ready} ready · {stale} stale · {failed} failed · {incomplete} preparing",
+                "Disabled · optional; tasks read the current checkout"
+                if not self._repository_rag_enabled
+                else f"{ready} ready · {stale} stale · {failed} failed · {incomplete} preparing",
                 now if rag_status == "HEALTHY" else None,
-                now if rag_status != "HEALTHY" else None,
+                now if rag_status == "DEGRADED" else None,
             )
         )
         online = int(
