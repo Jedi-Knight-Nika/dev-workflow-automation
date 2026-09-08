@@ -5,6 +5,7 @@
   import PageHeader from '$lib/components/PageHeader.svelte';
   import TeamBadge from '$lib/components/TeamBadge.svelte';
   import Skeleton from '$lib/components/Skeleton.svelte';
+  import { t } from '$lib/i18n/index.svelte';
   import { listRepositories } from '$lib/services/repositories';
   import {
     archiveTeam,
@@ -79,7 +80,7 @@
     }
   }
   async function remove(team: Team) {
-    if (!confirm(`Archive ${team.name}? Queued assignments will be cancelled.`)) return;
+    if (!confirm(t('teamsPage.confirmArchive', { name: team.name }))) return;
     archivingId = team.id;
     try {
       await archiveTeam(team.id);
@@ -91,15 +92,16 @@
     }
   }
   async function shutdown(team: Team) {
-    if (
-      !confirm(`Stop active work for ${team.name}? Tasks will be paused and can be resumed later.`)
-    )
-      return;
+    if (!confirm(t('teamsPage.confirmStop', { name: team.name }))) return;
     shuttingDownId = team.id;
     error = '';
     try {
       const result = await shutdownTeam(team.id);
-      statusMessage = `${team.name}: stopped ${result.cancelled_jobs} job(s), paused ${result.paused_tasks} task(s)`;
+      statusMessage = t('teamsPage.shutdownResult', {
+        name: team.name,
+        jobs: result.cancelled_jobs,
+        tasks: result.paused_tasks
+      });
       await load();
     } catch (cause) {
       error = String(cause);
@@ -111,20 +113,21 @@
 </script>
 
 <PageHeader
-  eyebrow="AUTONOMOUS DELIVERY"
-  title="Engineering teams"
-  description="Hire configurable AI teams, scope their codebase access, and run independent task queues in parallel."
+  eyebrow={t('teamsPage.eyebrow')}
+  title={t('teamsPage.title')}
+  description={t('teamsPage.description')}
 />
 <main class="space-y-6 p-4 sm:p-6 md:p-10">
   <ErrorBanner message={error} />
   {#if statusMessage}<p class="operation-result" role="status">{statusMessage}</p>{/if}
   <div class="teams-toolbar">
     <div>
-      <strong>Independent delivery lanes</strong>
-      <p>Each team works sequentially by default and runs independently.</p>
+      <strong>{t('teamsPage.independentLanes')}</strong>
+      <p>{t('teamsPage.independentLanesDescription')}</p>
     </div>
     <button class="create-button" onclick={() => void open()}>
-      <span aria-hidden="true">+</span> Create team
+      <span aria-hidden="true">+</span>
+      {t('teamsPage.createTeam')}
     </button>
   </div>
   <section class="team-grid" aria-busy={loading}>
@@ -154,7 +157,7 @@
               <span
                 class:online={team.enabled}
                 class="status"
-                title={team.enabled ? 'Enabled' : 'Disabled'}
+                title={team.enabled ? t('teamsPage.enabled') : t('teamsPage.disabled')}
               ></span>
             </div>
             <span
@@ -162,44 +165,59 @@
               class:working={team.running_tasks > 0}
               class:disabled={!team.enabled}
             >
-              <i></i>{team.running_tasks > 0 ? 'Working' : team.enabled ? 'Available' : 'Disabled'}
+              <i></i>{team.running_tasks > 0
+                ? t('teamsPage.working')
+                : team.enabled
+                  ? t('teamsPage.available')
+                  : t('teamsPage.disabled')}
             </span>
           </div>
           <div class="capacity">
             <strong>{team.max_concurrent_tasks}</strong>
-            <span>{team.max_concurrent_tasks === 1 ? 'task at a time' : 'parallel tasks'}</span>
+            <span
+              >{team.max_concurrent_tasks === 1
+                ? t('teamsPage.taskAtATime')
+                : t('teamsPage.parallelTasks')}</span
+            >
           </div>
         </header>
-        <p class="team-description">{team.description || 'No team description yet.'}</p>
+        <p class="team-description">{team.description || t('teamsPage.noDescription')}</p>
         <div class="metrics">
           <div class="running-metric">
-            <span><i></i>Running</span><strong>{team.running_tasks}</strong>
+            <span><i></i>{t('teamsPage.running')}</span><strong>{team.running_tasks}</strong>
           </div>
           <div class="queued-metric">
-            <span><i></i>Queued</span><strong>{team.queued_tasks}</strong>
+            <span><i></i>{t('teamsPage.queued')}</span><strong>{team.queued_tasks}</strong>
           </div>
           <div class="completed-metric">
-            <span><i></i>Completed</span><strong>{team.completed_tasks}</strong>
+            <span><i></i>{t('teamsPage.completed')}</span><strong>{team.completed_tasks}</strong>
           </div>
         </div>
         <div class="usage" aria-label="Team usage">
-          <span title="Total input and output tokens"
-            ><b>Tokens</b>{integer.format(team.total_input_tokens + team.total_output_tokens)}</span
+          <span title={t('teamsPage.tokensTitle')}
+            ><b>{t('teamsPage.tokens')}</b>{integer.format(
+              team.total_input_tokens + team.total_output_tokens
+            )}</span
           >
-          <span title="Estimated provider cost"
-            ><b>Spend</b>{team.estimated_cost_usd === null
-              ? 'Unavailable'
+          <span title={t('teamsPage.spendTitle')}
+            ><b>{t('teamsPage.spend')}</b>{team.estimated_cost_usd === null
+              ? t('operations.unavailable')
               : money.format(team.estimated_cost_usd)}</span
           >
-          <span title="Repository access scope"
-            ><b>Access</b>{team.repository_ids.length
-              ? `${team.repository_ids.length} ${team.repository_ids.length === 1 ? 'project' : 'projects'}`
-              : 'All projects'}</span
+          <span title={t('teamsPage.accessTitle')}
+            ><b>{t('teamsPage.access')}</b>{team.repository_ids.length
+              ? t(
+                  team.repository_ids.length === 1
+                    ? 'teamsPage.projectCount'
+                    : 'teamsPage.projectCountPlural',
+                  { count: team.repository_ids.length }
+                )
+              : t('teamsPage.allProjects')}</span
           >
         </div>
         <footer>
           <a class="workflow-action" href={resolve('/teams/[id]', { id: team.id })}
-            ><span>Open team lifecycle</span><b aria-hidden="true">→</b></a
+            ><span>{t('teamsPage.openLifecycle')}</span><b aria-hidden="true">→</b></a
           >
           <div class="operation-actions">
             {#if team.execution_paused}
@@ -211,39 +229,42 @@
                   try {
                     await wakeTeam(team.id);
                     await load();
-                    statusMessage =
-                      'Team is accepting new work. Paused tickets still require explicit Resume.';
+                    statusMessage = t('teamsPage.executionResumed');
                   } catch (cause) {
                     error = String(cause);
                   } finally {
                     busy = false;
                   }
-                }}>Enable execution</button
+                }}>{t('teamsPage.enableExecution')}</button
               >
             {/if}
             <span
               class="button-help"
-              title={team.execution_paused
-                ? 'Execution is paused'
-                : 'Stop running work and prevent new claims'}
+              title={team.execution_paused ? t('teamsPage.executionPaused') : t('teamsPage.stopHelp')}
             >
               <button
                 class="stop"
                 disabled={shuttingDownId === team.id || team.execution_paused}
                 onclick={() => void shutdown(team)}
                 ><span aria-hidden="true">■</span>{shuttingDownId === team.id
-                  ? 'Stopping…'
-                  : 'Stop work'}</button
+                  ? t('teamsPage.stopping')
+                  : t('teamsPage.stopWork')}</button
               >
             </span>
-            <button class="edit" onclick={() => void open(team)} aria-label={`Edit ${team.name}`}
-              ><span aria-hidden="true">✎</span> Settings</button
+            <button
+              class="edit"
+              onclick={() => void open(team)}
+              aria-label={t('teamsPage.editTeam', { name: team.name })}
+              ><span aria-hidden="true">✎</span>
+              {t('teamsPage.settings')}</button
             >
             {#if team.id !== '00000000-0000-0000-0000-000000000001'}<button
                 class="danger"
                 disabled={archivingId === team.id}
                 onclick={() => void remove(team)}
-                >{archivingId === team.id ? 'Archiving…' : 'Archive'}</button
+                >{archivingId === team.id
+                  ? t('teamsPage.archiving')
+                  : t('teamsPage.archive')}</button
               >{/if}
           </div>
         </footer>
@@ -253,37 +274,42 @@
 </main>
 
 {#if showForm}
-  <button class="backdrop" aria-label="Close" onclick={() => (showForm = false)}></button>
+  <button class="backdrop" aria-label={t('teamsPage.close')} onclick={() => (showForm = false)}
+  ></button>
   <aside class="drawer">
     <header>
       <div>
-        <span>TEAM CONFIGURATION</span>
-        <h2>{editing ? `Edit ${editing.name}` : 'Create a team'}</h2>
+        <span>{t('teamsPage.configEyebrow')}</span>
+        <h2>{editing ? t('teamsPage.editTeam', { name: editing.name }) : t('teamsPage.createTeamTitle')}</h2>
       </div>
       <button onclick={() => (showForm = false)}>×</button>
     </header>
     <div class="body">
-      <label><span>Name</span><input bind:value={name} placeholder="Payments engineering" /></label>
       <label
-        ><span>Description</span><textarea
+        ><span>{t('teamsPage.name')}</span><input
+          bind:value={name}
+          placeholder={t('teamsPage.namePlaceholder')}
+        /></label
+      >
+      <label
+        ><span>{t('teamsPage.descriptionLabel')}</span><textarea
           bind:value={description}
           rows="4"
-          placeholder="What this team owns and delivers…"
+          placeholder={t('teamsPage.descriptionPlaceholder')}
         ></textarea></label
       >
       <label
-        ><span>Parallel tasks inside this team</span><input
+        ><span>{t('teamsPage.parallelTasksLabel')}</span><input
           bind:value={concurrency}
           type="number"
           min="1"
           max="32"
-        /><small>Keep this at 1 for strict one-after-another execution.</small></label
+        /><small>{t('teamsPage.parallelTasksHelp')}</small></label
       >
       <fieldset>
-        <legend>Projects and RAG access</legend>
+        <legend>{t('teamsPage.projectsAccess')}</legend>
         <p>
-          Tasks from these repositories can be routed here. Configured agents inherit access to
-          their indexed code.
+          {t('teamsPage.projectsAccessDescription')}
         </p>
         <div class="repo-list mb-3">
           <label>
@@ -294,8 +320,8 @@
               onchange={() => (repositoryIds = [])}
             />
             <span
-              ><strong>All imported repositories</strong><small
-                >Includes future imports automatically.</small
+              ><strong>{t('teamsPage.allImportedRepos')}</strong><small
+                >{t('teamsPage.allImportedReposHelp')}</small
               ></span
             >
           </label>
@@ -310,7 +336,9 @@
                   .map((repository) => repository.id))}
             />
             <span
-              ><strong>Only selected repositories</strong><small>Restrict this Team.</small></span
+              ><strong>{t('teamsPage.onlySelectedRepos')}</strong><small
+                >{t('teamsPage.onlySelectedReposHelp')}</small
+              ></span
             >
           </label>
         </div>
@@ -322,26 +350,32 @@
                   onchange={() => toggleRepository(repository.id)}
                 /><span
                   ><strong>{repository.owner}/{repository.name}</strong><small
-                    >{repository.default_branch} · {repository.enabled
-                      ? 'Enabled'
-                      : 'Disabled'}</small
+                    >{t('teamsPage.repoBranchStatus', {
+                      branch: repository.default_branch,
+                      status: repository.enabled ? t('teamsPage.enabled') : t('teamsPage.disabled')
+                    })}</small
                   ></span
                 ></label
               >{/each}
           </div>{/if}
       </fieldset>
       <p>
-        Configure native profiles, validation and merge policy from the Team workspace after saving.
+        {t('teamsPage.postSaveNote')}
       </p>
     </div>
     <footer>
-      <button class="cancel" onclick={() => (showForm = false)}>Cancel</button>
+      <button class="cancel" onclick={() => (showForm = false)}>{t('teamsPage.cancel')}</button>
       <div class="save-group">
-        <span>{editing ? 'Update team settings' : 'Create a team'}</span><button
-          class="primary"
-          disabled={busy || !name.trim()}
-          onclick={() => void save()}
-          >{busy ? 'Saving…' : editing ? 'Save changes' : 'Create team'}</button
+        <span
+          >{editing
+            ? t('teamsPage.updateTeamSettings')
+            : t('teamsPage.createTeamTitle')}</span
+        ><button class="primary" disabled={busy || !name.trim()} onclick={() => void save()}
+          >{busy
+            ? t('teamsPage.saving')
+            : editing
+              ? t('teamsPage.saveChanges')
+              : t('teamsPage.createTeam')}</button
         >
       </div>
     </footer>

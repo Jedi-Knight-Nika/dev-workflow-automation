@@ -382,6 +382,29 @@ export type NativeRun = {
   requirement_version: number;
 };
 
+export type LiveExecution = {
+  id: string;
+  role_kind: string;
+  provider: string;
+  model: string;
+  harness: string | null;
+  status: string;
+  started_at: string;
+  finished_at: string | null;
+  telemetry: {
+    input_tokens_observed?: number | null;
+    active_context_estimate?: number | null;
+    phase_label?: string | null;
+    tool_call_count?: number;
+    diff_changes?: number;
+    source_read_count?: number;
+    targeted_check_improvements?: number;
+    tokens_since_last_progress?: number | null;
+    warnings?: string[];
+    stop_reason?: string | null;
+  } | null;
+};
+
 export type WorkerNode = {
   id: string;
   hostname: string;

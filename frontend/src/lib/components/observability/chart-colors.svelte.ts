@@ -1,9 +1,8 @@
 import { getTheme } from '$lib/theme.svelte';
+import { getAccentColors } from '$lib/accent.svelte';
 
 const PALETTES = {
   dark: {
-    brand: '#b26bff',
-    brand2: '#3fd8ff',
     warning: '#ffb648',
     accent: '#4ade80',
     danger: '#ff5f7a',
@@ -11,8 +10,6 @@ const PALETTES = {
     muted: '#9691ab'
   },
   light: {
-    brand: '#7c3aed',
-    brand2: '#0891b2',
     warning: '#b45309',
     accent: '#16a34a',
     danger: '#dc2626',
@@ -22,7 +19,7 @@ const PALETTES = {
 } as const;
 
 export function chartColors() {
-  return PALETTES[getTheme()];
+  return { ...PALETTES[getTheme()], ...getAccentColors() };
 }
 
 export function categoricalPalette(): string[] {

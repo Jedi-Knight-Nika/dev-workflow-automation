@@ -3,10 +3,10 @@ import { lifecycleEdges, lifecycleNodes } from './fixed-lifecycle';
 import { STAGES, type EngineeringTask } from './services/engineering';
 
 describe('fixed lifecycle map', () => {
-  it('has immutable topology and no graph editing controls', () => {
+  it('has immutable topology with movable but non-connectable nodes', () => {
     const nodes = lifecycleNodes([]);
     expect(nodes.map((node) => node.id)).toEqual([...STAGES]);
-    expect(nodes.every((node) => !node.draggable && !node.connectable && !node.deletable)).toBe(
+    expect(nodes.every((node) => node.draggable && !node.connectable && !node.deletable)).toBe(
       true
     );
     expect(

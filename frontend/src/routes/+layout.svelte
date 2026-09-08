@@ -12,8 +12,18 @@
   import ClickBurst from '$lib/components/ClickBurst.svelte';
   import { NAV_ITEMS, isActiveNavItem } from '$lib/nav';
   import { t } from '$lib/i18n/index.svelte';
+  import { getTheme } from '$lib/theme.svelte';
+  import { initAccent, reapplyAccentForTheme } from '$lib/accent.svelte';
 
   let { children }: { children: Snippet } = $props();
+
+  onMount(() => {
+    initAccent();
+  });
+  $effect(() => {
+    getTheme();
+    reapplyAccentForTheme();
+  });
 
   const reducedMotion = browser && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   const transitionDuration = reducedMotion ? 0 : 180;

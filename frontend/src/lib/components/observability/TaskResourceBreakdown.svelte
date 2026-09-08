@@ -150,24 +150,38 @@
 
 <style>
   .panel {
-    border: 1px solid var(--border, #334155);
+    border: 1px solid var(--color-line);
     border-radius: 1rem;
     padding: 1rem;
+    background: var(--color-panel);
     grid-column: 1/-1;
   }
   summary {
     cursor: pointer;
     padding-block: 0.6rem;
+    color: var(--color-brand-2);
+  }
+  summary:hover {
+    text-shadow: 0 0 10px color-mix(in srgb, var(--color-brand-2) 55%, transparent);
   }
   p {
     margin-block: 0.6rem;
     font-size: 0.85rem;
+    color: var(--color-text);
   }
   article {
     padding: 1rem;
-    background: rgb(100 116 139/0.08);
+    background: var(--color-panel-alt);
+    border: 1px solid var(--color-line);
     margin-block: 1rem;
     border-radius: 0.6rem;
+    transition:
+      border-color 0.25s var(--ease-smooth),
+      box-shadow 0.25s var(--ease-smooth);
+  }
+  article:hover {
+    border-color: color-mix(in srgb, var(--color-brand-2) 45%, var(--color-line));
+    box-shadow: 0 0 18px -6px color-mix(in srgb, var(--color-brand-2) 35%, transparent);
   }
   header {
     display: flex;
@@ -177,10 +191,15 @@
   button,
   select {
     padding: 0.4rem 0.6rem;
-    border: 1px solid var(--border, #334155);
+    border: 1px solid var(--color-line);
     border-radius: 0.4rem;
+    background: var(--color-input);
+    color: var(--color-text);
+  }
+  button:hover {
+    border-color: color-mix(in srgb, var(--color-brand-2) 50%, var(--color-line));
   }
   .warning {
-    color: #d97706;
+    color: var(--color-warning);
   }
 </style>

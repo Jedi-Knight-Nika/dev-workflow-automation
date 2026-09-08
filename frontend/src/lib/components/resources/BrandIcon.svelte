@@ -7,6 +7,7 @@
     SiJira,
     SiLinear,
     SiNpm,
+    SiOllama,
     SiOpenai,
     SiPypi,
     SiTrello
@@ -35,6 +36,10 @@
     <SiAnthropic {size} {title} color="#D97757" />
   {:else if normalized.includes('openai') || normalized.includes('gpt')}
     <SiOpenai {size} {title} color="#10A37F" />
+  {:else if normalized.includes('ollama') || normalized.includes('qwen')}
+    <SiOllama {size} {title} color="currentColor" />
+  {:else if normalized.includes('deepseek')}
+    <span class="deepseek" style={`font-size: ${Math.max(8, size * 0.42)}px`}>DS</span>
   {:else if normalized.includes('google') || normalized.includes('gemini')}
     <SiGooglegemini {size} {title} color="#8E75FF" />
   {:else if normalized.includes('npm')}
@@ -60,5 +65,16 @@
   .fallback {
     font-weight: 900;
     letter-spacing: -0.06em;
+  }
+  .deepseek {
+    display: grid;
+    width: 100%;
+    height: 100%;
+    place-items: center;
+    border-radius: 42% 58% 55% 45%;
+    background: #4d6bfe;
+    color: white;
+    font-weight: 900;
+    letter-spacing: -0.08em;
   }
 </style>

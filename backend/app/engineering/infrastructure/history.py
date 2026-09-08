@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.agent_runtime.infrastructure.models import AIRun
 from app.engineering.application.ports.job_enqueueing import EnqueuedJob
 from app.engineering.application.ports.task_history import (
+    LiveExecutionView,
     NativeRunView,
     TaskEventView,
     TaskMetricsView,
@@ -15,6 +16,26 @@ from app.engineering.application.task_usage import UsageSample, task_usage
 from app.engineering.infrastructure.job_views import job_to_view
 from app.engineering.infrastructure.models import ValidationRun
 from app.engineering.infrastructure.task_models import Job, TaskEvent
+
+_LIVE_TELEMETRY_FIELDS = {
+    "input_tokens_observed",
+    "active_context_estimate",
+    "phase_label",
+    "tool_call_count",
+    "diff_changes",
+    "source_read_count",
+    "targeted_check_improvements",
+    "tokens_since_last_progress",
+    "warnings",
+    "stop_reason",
+}
+
+
+def live_telemetry(value: dict[str, object] | None) -> dict[str, object] | None:
+    """Expose operational counters, never checkpoint, command, path, or source details."""
+    if not value:
+        return None
+    return {key: value[key] for key in _LIVE_TELEMETRY_FIELDS if key in value}
 
 
 class SqlAlchemyTaskHistoryQueries:
@@ -53,6 +74,27 @@ class SqlAlchemyTaskHistoryQueries:
             )
             for row in rows
         ]
+
+    async def live_execution(self, task_id: uuid.UUID) -> LiveExecutionView | None:
+        row = await self._session.scalar(
+            select(AIRun)
+            .where(AIRun.task_id == task_id)
+            .order_by((AIRun.status == "RUNNING").desc(), AIRun.started_at.desc())
+            .limit(1)
+        )
+        if row is None:
+            return None
+        return LiveExecutionView(
+            row.id,
+            row.role_kind,
+            row.provider,
+            row.model,
+            row.harness,
+            row.status,
+            row.started_at,
+            row.finished_at,
+            live_telemetry(row.token_efficiency),
+        )
 
     async def jobs(self, task_id: uuid.UUID) -> list[EnqueuedJob]:
         records = (

@@ -32,6 +32,7 @@ from app.engineering.domain.lifecycle import InvalidTransition, TaskStatus
 from app.interfaces.http.schemas.tasks import (
     EventRead,
     JobRead,
+    LiveExecutionRead,
     TaskCreate,
     TaskMessageCreate,
     TaskMessagePageRead,
@@ -179,6 +180,15 @@ async def native_runs(
     queries: TaskHistoryQueries = Depends(get_task_history_queries),
 ) -> list[dict[str, Any]]:
     return [asdict(run) for run in await queries.runs(task_id)]
+
+
+@router.get("/{task_id}/live-execution", response_model=LiveExecutionRead | None)
+async def live_execution(
+    task_id: uuid.UUID,
+    queries: TaskHistoryQueries = Depends(get_task_history_queries),
+) -> LiveExecutionRead | None:
+    value = await queries.live_execution(task_id)
+    return LiveExecutionRead.model_validate(value, from_attributes=True) if value else None
 
 
 @router.get("/{task_id}/events", response_model=list[EventRead])

@@ -256,18 +256,18 @@
   {:else if view === 'board'}
     <div class="grid grid-cols-1 gap-4 xl:grid-cols-3 2xl:grid-cols-6">
       {#each columns as column (column.id)}
-        <section class="border-line rounded-xl border bg-panel-alt/30 p-3">
-          <h2 class="mb-3 flex justify-between font-semibold">
+        <section class="border-line flex max-h-[75vh] flex-col rounded-xl border bg-panel-alt/30 p-3">
+          <h2 class="mb-3 flex shrink-0 justify-between font-semibold">
             {column.label}<span class="text-muted">{column.tasks.length}</span>
           </h2>
-          <div class="space-y-3">
+          <div class="min-h-0 space-y-3 overflow-y-auto pr-1">
             {#each column.tasks as task (task.id)}{@render card(task)}{/each}
           </div>
         </section>
       {/each}
     </div>
   {:else}
-    <div class="grid gap-3">
+    <div class="grid max-h-[75vh] gap-3 overflow-y-auto pr-1">
       {#each tasks as task (task.id)}{@render card(task)}{/each}
     </div>
   {/if}

@@ -6,6 +6,8 @@
   import AutomationPolicyEditor from '$lib/components/AutomationPolicyEditor.svelte';
   import EngineeringStatisticsPanel from '$lib/components/EngineeringStatisticsPanel.svelte';
   import TokenPolicyEditor from '$lib/components/TokenPolicyEditor.svelte';
+  import AiProviderSelect from '$lib/components/ai/AiProviderSelect.svelte';
+  import AiModelSelect from '$lib/components/ai/AiModelSelect.svelte';
   import OperationsDashboard from '$lib/components/observability/OperationsDashboard.svelte';
   import {
     getTeamActivity,
@@ -148,26 +150,22 @@
           <label
             >Display name<input bind:value={profile.display_name} maxlength="120" required /></label
           >
-          <label
-            >Provider<select
-              bind:value={profile.provider}
-              onchange={() => {
-                profile.harness =
-                  profile.role_kind === 'INTERPRETER'
-                    ? null
-                    : profile.provider === 'anthropic'
-                      ? 'claude'
-                      : 'codex';
-              }}
-            >
-              {#if profile.role_kind === 'INTERPRETER'}<option value="ollama">Ollama (local)</option
-                ><option value="deepseek">DeepSeek</option>{/if}
-              <option value="openai">OpenAI</option>{#if profile.role_kind !== 'INTERPRETER'}<option
-                  value="anthropic">Anthropic</option
-                >{/if}
-            </select></label
-          >
-          <label>Model<input bind:value={profile.model} maxlength="255" required /></label>
+          <AiProviderSelect
+            label="Provider"
+            bind:value={profile.provider}
+            providers={profile.role_kind === 'INTERPRETER'
+              ? ['ollama', 'deepseek', 'openai']
+              : ['openai', 'anthropic']}
+            onChange={() => {
+              profile.harness =
+                profile.role_kind === 'INTERPRETER'
+                  ? null
+                  : profile.provider === 'anthropic'
+                    ? 'claude'
+                    : 'codex';
+            }}
+          />
+          <AiModelSelect provider={profile.provider} bind:value={profile.model} />
           <label
             >Soft budget (USD)<input
               inputmode="decimal"

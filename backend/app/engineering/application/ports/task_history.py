@@ -52,6 +52,19 @@ class NativeRunView:
 
 
 @dataclass(frozen=True, slots=True)
+class LiveExecutionView:
+    id: uuid.UUID
+    role_kind: str
+    provider: str
+    model: str
+    harness: str | None
+    status: str
+    started_at: datetime
+    finished_at: datetime | None
+    telemetry: dict[str, Any] | None
+
+
+@dataclass(frozen=True, slots=True)
 class TaskRoleMetricsView:
     role: str
     provider: str
@@ -76,6 +89,7 @@ class TaskMetricsView:
 
 class TaskHistoryQueries(Protocol):
     async def runs(self, task_id: uuid.UUID) -> list[NativeRunView]: ...
+    async def live_execution(self, task_id: uuid.UUID) -> LiveExecutionView | None: ...
     async def jobs(self, task_id: uuid.UUID) -> list[EnqueuedJob]: ...
     async def events(self, task_id: uuid.UUID) -> list[TaskEventView]: ...
     async def validations(self, task_id: uuid.UUID) -> list[ValidationView]: ...

@@ -79,6 +79,10 @@
 <style>
   summary {
     cursor: pointer;
+    color: var(--color-brand-2);
+  }
+  summary:hover {
+    text-shadow: 0 0 10px color-mix(in srgb, var(--color-brand-2) 55%, transparent);
   }
   form {
     display: grid;
@@ -89,18 +93,32 @@
     display: grid;
     gap: 0.3rem;
     font-size: 0.8rem;
+    color: var(--color-text);
   }
   input,
   textarea,
   button {
-    border: 1px solid #64748b55;
+    border: 1px solid var(--color-line);
     border-radius: 0.4rem;
     padding: 0.5rem;
-    background: transparent;
+    background: var(--color-input);
+    color: var(--color-text);
+  }
+  input:focus,
+  textarea:focus,
+  button:focus-visible {
+    outline: none;
+    border-color: var(--color-brand-2);
+  }
+  button {
+    cursor: pointer;
+  }
+  button:hover:not(:disabled) {
+    border-color: color-mix(in srgb, var(--color-brand) 50%, var(--color-line));
   }
   p {
     font-size: 0.75rem;
-    opacity: 0.8;
+    color: var(--color-muted);
     overflow-wrap: anywhere;
   }
 </style>

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { resolve } from '$app/paths';
   import { onMount } from 'svelte';
+  import { t } from '$lib/i18n/index.svelte';
   import { API_BASE_URL } from '$lib/api';
   import { createLiveRefresh } from '$lib/live-refresh';
   import ErrorBanner from '$lib/components/ErrorBanner.svelte';
@@ -67,7 +68,7 @@
     if (!document.hidden) refresh.request();
   }
   function elapsed(startedAt: string | null) {
-    if (!startedAt) return 'STARTING';
+    if (!startedAt) return t('cockpit.starting');
     const seconds = Math.max(0, Math.floor((now - Date.parse(startedAt)) / 1000));
     return `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
   }
@@ -80,7 +81,7 @@
         telemetry = await getDashboardTelemetry();
         telemetryError = '';
       } catch {
-        telemetryError = 'Telemetry temporarily unavailable';
+        telemetryError = t('cockpit.telemetryUnavailable');
       } finally {
         telemetryLoading = false;
       }
@@ -112,26 +113,30 @@
   });
 </script>
 
-<svelte:head><title>Engineering Control Center</title></svelte:head>
+<svelte:head><title>{t('cockpit.pageTitle')}</title></svelte:head>
 <PageHeader
-  eyebrow="AI ENGINEERING OPERATIONS"
-  title="Control center"
-  description="Live workflow, team, usage, repository, and infrastructure state."
+  eyebrow={t('cockpit.eyebrow')}
+  title={t('cockpit.title')}
+  description={t('cockpit.description')}
 />
 <main class="cockpit">
   <div class="toolbar">
-    <span class="live"><i class:connected={live}></i>{live ? 'LIVE' : 'RECONNECTING'}</span>
+    <span class="live"
+      ><i class:connected={live}></i>{live ? t('cockpit.live') : t('cockpit.reconnecting')}</span
+    >
     <span class="text-xs text-muted" role="status"
       >{dashboard
-        ? `Updated ${Math.max(0, Math.floor((now - Date.parse(dashboard.generated_at)) / 1000))}s ago`
-        : 'Loading live state…'}{!live ? ' · polling every 15s' : ''}</span
+        ? t('cockpit.updatedSecondsAgo', {
+            seconds: Math.max(0, Math.floor((now - Date.parse(dashboard.generated_at)) / 1000))
+          })
+        : t('cockpit.loadingLiveState')}{!live ? t('cockpit.pollingSuffix') : ''}</span
     >
     <button
       class="rounded border border-line px-2 py-1 text-xs hover:bg-panel-alt"
-      onclick={scheduleRefresh}>Refresh</button
+      onclick={scheduleRefresh}>{t('common.refresh')}</button
     >
     <div class="periods">
-      {#each [['today', 'Today'], ['7d', '7 days'], ['30d', '30 days']] as item (item[0])}<button
+      {#each [['today', t('cockpit.periodToday')], ['7d', t('cockpit.period7d')], ['30d', t('cockpit.period30d')]] as item (item[0])}<button
           class:active={period === item[0]}
           onclick={() => void selectPeriod(item[0] as typeof period)}>{item[1]}</button
         >{/each}
@@ -181,17 +186,17 @@
         <div class="gauge" style={`--value:${dashboard.health_score * 3.6}deg`}>
           <span><b>{dashboard.health_score}%</b>{dashboard.system_status}</span>
         </div>
-        <small>SYSTEM HEALTH</small>
+        <small>{t('cockpit.systemHealth')}</small>
       </article>
-      {#each [['ACTIVE TASKS', dashboard.active_tasks, 'violet'], ['QUEUE', dashboard.queued_jobs, 'cyan'], ['READY TO MERGE', dashboard.ready_to_merge, 'green'], ['TOKENS', compact.format(dashboard.tokens), 'violet'], ['HUMAN NEEDED', dashboard.needs_human, dashboard.needs_human ? 'danger' : '']] as metric (metric[0])}<article
-          class="metric {metric[2]}"
+      {#each [['activeTasks', t('cockpit.metricActiveTasks'), dashboard.active_tasks, 'violet'], ['queue', t('cockpit.metricQueue'), dashboard.queued_jobs, 'cyan'], ['readyToMerge', t('cockpit.metricReadyToMerge'), dashboard.ready_to_merge, 'green'], ['tokens', t('cockpit.metricTokens'), compact.format(dashboard.tokens), 'violet'], ['humanNeeded', t('cockpit.metricHumanNeeded'), dashboard.needs_human, dashboard.needs_human ? 'danger' : '']] as metric (metric[0])}<article
+          class="metric {metric[3]}"
         >
-          <span>{metric[0]}</span><strong>{metric[1]}</strong><small
-            >{metric[0] === 'TOKENS'
+          <span>{metric[1]}</span><strong>{metric[2]}</strong><small
+            >{metric[0] === 'tokens'
               ? dashboard.estimated_cost === null
-                ? 'Cost unavailable'
-                : `$${dashboard.estimated_cost.toFixed(2)} estimated`
-              : 'now'}</small
+                ? t('cockpit.costUnavailable')
+                : t('cockpit.costEstimated', { cost: `$${dashboard.estimated_cost.toFixed(2)}` })
+              : t('cockpit.now')}</small
           >
         </article>{/each}
     </section>
@@ -200,7 +205,9 @@
       <article class="worker panel">
         <header>
           <span
-            >ACTIVE WORKER · {dashboard.running_jobs ?? (dashboard.active_worker ? 1 : 0)} RUNNING</span
+            >{t('cockpit.activeWorkerRunning', {
+              count: dashboard.running_jobs ?? (dashboard.active_worker ? 1 : 0)
+            })}</span
           ><i class:running={dashboard.active_worker}></i>
         </header>
         {#if dashboard.active_worker}<div class="worker-core">
@@ -213,20 +220,19 @@
             <h2>{dashboard.active_worker.agent_name || dashboard.active_worker.role}</h2>
             <p class="flex items-center justify-center gap-2">
               <BrandIcon brand={dashboard.active_worker.provider || ''} size={15} />
-              {dashboard.active_worker.provider || 'provider'} / {dashboard.active_worker.model ||
-                'model pending'}
+              {dashboard.active_worker.provider || t('cockpit.providerFallback')} / {dashboard
+                .active_worker.model || t('cockpit.modelPending')}
             </p>
           </div>
           <a href={resolve('/tasks/[id]', { id: dashboard.active_worker.task_id })}
-            ><small>{dashboard.active_worker.team_name || 'Unassigned'}</small><b
+            ><small>{dashboard.active_worker.team_name || t('cockpit.unassigned')}</small><b
               >{dashboard.active_worker.task_label}</b
             ></a
           >
           <footer>
-            <div><span>ELAPSED</span><b>{elapsed(dashboard.active_worker.started_at)}</b></div>
+            <div><span>{t('cockpit.elapsedLabel')}</span><b>{elapsed(dashboard.active_worker.started_at)}</b></div>
             <div>
-              <span title="Recorded usage; in-flight usage arrives after the provider response"
-                >RECORDED TOKENS</span
+              <span title={t('cockpit.recordedTokensTitle')}>{t('cockpit.recordedTokens')}</span
               ><b
                 >{compact.format(
                   dashboard.active_worker.input_tokens + dashboard.active_worker.output_tokens
@@ -234,23 +240,24 @@
               >
             </div>
             <div>
-              <span>ACTIVITY</span><b class="cyan-text"
-                >{dashboard.active_worker.action?.replaceAll('_', ' ') || 'RUNNING'}</b
+              <span>{t('cockpit.activityLabel')}</span><b class="cyan-text"
+                >{dashboard.active_worker.action?.replaceAll('_', ' ') ||
+                  t('cockpit.runningFallback')}</b
               >
             </div>
           </footer>{:else}<div class="worker-core idle">
             <div class="orb">—</div>
-            <h2>Execution lane idle</h2>
-            <p>Scheduler ready for the next job.</p>
+            <h2>{t('cockpit.executionLaneIdle')}</h2>
+            <p>{t('cockpit.schedulerReady')}</p>
           </div>{/if}
       </article>
       <article class="feed panel">
         <header>
           <div>
-            <span>LIVE ACTIVITY</span>
-            <h2>Operational timeline</h2>
+            <span>{t('cockpit.liveActivity')}</span>
+            <h2>{t('cockpit.operationalTimeline')}</h2>
           </div>
-          <small>{dashboard.recent_events.length} RECENT</small>
+          <small>{t('cockpit.recentCount', { count: dashboard.recent_events.length })}</small>
         </header>
         <div class="events">
           {#each dashboard.recent_events as event (event.id)}<a
@@ -264,7 +271,7 @@
                 <p>{event.team_name ? `${event.team_name} · ` : ''}{event.task_label}</p>
                 <small>{event.summary}</small>
               </div></a
-            >{:else}<div class="empty">No persisted activity yet.</div>{/each}
+            >{:else}<div class="empty">{t('cockpit.noActivityYet')}</div>{/each}
         </div>
       </article>
     </section>
@@ -295,10 +302,10 @@
 
     <div class="section-title">
       <div>
-        <span>TEAMS</span>
-        <h2>Engineering organization</h2>
+        <span>{t('cockpit.teamsEyebrow')}</span>
+        <h2>{t('cockpit.engineeringOrganization')}</h2>
       </div>
-      <a href={resolve('/teams')}>MANAGE →</a>
+      <a href={resolve('/teams')}>{t('cockpit.manage')} →</a>
     </div>
     <section class="teams">
       {#each dashboard.teams as team (team.team_id)}<article class="team">
@@ -310,7 +317,8 @@
             </div>
           </header>
           <div class="current">
-            <small>CURRENT TASK</small><b>{team.current_task_label || 'No active task'}</b
+            <small>{t('cockpit.currentTask')}</small><b
+              >{team.current_task_label || t('cockpit.noActiveTask')}</b
             >{#if team.agent_name}<span>
                 {team.agent_name} · {team.role}<br />
                 <span class="inline-flex items-center gap-1.5">
@@ -320,13 +328,13 @@
               </span>{/if}
           </div>
           <div class="team-stats">
-            <div><b>{compact.format(team.tokens)}</b><small>tokens</small></div>
-            <div><b>{team.queued_jobs}</b><small>queued</small></div>
-            <div><b>{team.open_pull_requests}</b><small>open PRs</small></div>
-            <div><b>{team.ready_to_merge}</b><small>merge ready</small></div>
+            <div><b>{compact.format(team.tokens)}</b><small>{t('cockpit.tokensLower')}</small></div>
+            <div><b>{team.queued_jobs}</b><small>{t('cockpit.queuedLower')}</small></div>
+            <div><b>{team.open_pull_requests}</b><small>{t('cockpit.openPRs')}</small></div>
+            <div><b>{team.ready_to_merge}</b><small>{t('cockpit.mergeReady')}</small></div>
           </div>
           <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
-          <a href={resolve('/teams/[id]', { id: team.team_id })}>VIEW TEAM →</a>
+          <a href={resolve('/teams/[id]', { id: team.team_id })}>{t('cockpit.viewTeam')} →</a>
         </article>{/each}
     </section>
 
@@ -334,13 +342,13 @@
       <article class="panel chart">
         <header>
           <div>
-            <span>THROUGHPUT</span>
-            <h2>Task outcomes</h2>
+            <span>{t('cockpit.throughput')}</span>
+            <h2>{t('cockpit.taskOutcomes')}</h2>
           </div>
           <small
-            >AUTONOMY {dashboard.autonomy_rate === null
-              ? '—'
-              : `${dashboard.autonomy_rate}%`}</small
+            >{t('cockpit.autonomy', {
+              value: dashboard.autonomy_rate === null ? '—' : `${dashboard.autonomy_rate}%`
+            })}</small
           >
         </header>
         <div class="bars">
@@ -359,16 +367,16 @@
             </div>{/each}
         </div>
         <footer>
-          <span>● Completed {dashboard.completed}</span><span class="red"
-            >● Failed {dashboard.failed}</span
+          <span>{t('cockpit.completedCount', { count: dashboard.completed })}</span><span
+            class="red">{t('cockpit.failedCount', { count: dashboard.failed })}</span
           >
         </footer>
       </article>
       <article class="panel usage">
         <header>
           <div>
-            <span>AI USAGE</span>
-            <h2>Tokens by role</h2>
+            <span>{t('cockpit.aiUsage')}</span>
+            <h2>{t('cockpit.tokensByRole')}</h2>
           </div>
           <b>{compact.format(dashboard.tokens)}</b>
         </header>
@@ -379,7 +387,7 @@
                 <i style={`width:${(total(item) / maxUsage(dashboard.usage_by_role)) * 100}%`}></i>
               </div>
               <b>{compact.format(total(item))}</b>
-            </div>{:else}<div class="empty">Usage appears after model calls.</div>{/each}
+            </div>{:else}<div class="empty">{t('cockpit.usageAppearsAfter')}</div>{/each}
         </div>
       </article>
     </section>
@@ -388,29 +396,31 @@
       <article class="panel queue">
         <header>
           <div>
-            <span>SCHEDULER</span>
-            <h2>Execution queue</h2>
+            <span>{t('cockpit.scheduler')}</span>
+            <h2>{t('cockpit.executionQueue')}</h2>
           </div>
           <b>{dashboard.queued_jobs}</b>
         </header>
         {#each dashboard.queue.slice(0, 8) as job, index (job.job_id)}<a
             href={resolve('/tasks/[id]', { id: job.task_id })}
-            ><b>{index ? String(index + 1).padStart(2, '0') : 'NEXT'}</b><i>P{job.priority}</i>
+            ><b>{index ? String(index + 1).padStart(2, '0') : t('cockpit.next')}</b><i
+              >P{job.priority}</i
+            >
             <div>
               <strong>{job.task_label}</strong><small
-                >{job.team_name || 'Unassigned'} · {job.role} · {job.action.replaceAll(
+                >{job.team_name || t('cockpit.unassigned')} · {job.role} · {job.action.replaceAll(
                   '_',
                   ' '
                 )}</small
               >
             </div></a
-          >{:else}<div class="empty">No queued work.</div>{/each}
+          >{:else}<div class="empty">{t('cockpit.noQueuedWork')}</div>{/each}
       </article>
       <article class="panel dependencies">
         <header>
           <div>
-            <span>DEPENDENCIES</span>
-            <h2>System health</h2>
+            <span>{t('cockpit.dependenciesEyebrow')}</span>
+            <h2>{t('cockpit.systemHealthTitle')}</h2>
           </div>
         </header>
         <div>
@@ -426,24 +436,26 @@
       <section class="panel telemetry">
         <header>
           <div>
-            <span>SERVER TELEMETRY</span>
-            <h2>Runtime resources</h2>
+            <span>{t('cockpit.serverTelemetry')}</span>
+            <h2>{t('cockpit.runtimeResources')}</h2>
           </div>
-          <small>5 SECOND LIVE SAMPLE</small>
+          <small>{t('cockpit.fiveSecondSample')}</small>
         </header>
         <div>
-          {#each [['CPU', telemetry.cpu_percent], ['MEMORY', telemetry.memory_percent], ['DISK', telemetry.disk_percent]] as meter (meter[0])}
+          {#each [['cpu', t('cockpit.cpu'), telemetry.cpu_percent], ['memory', t('cockpit.memory'), telemetry.memory_percent], ['disk', t('cockpit.disk'), telemetry.disk_percent]] as meter (meter[0])}
             <article>
-              <div class="telemetry-ring" style={`--meter:${Number(meter[1]) * 3.6}deg`}>
-                <b>{Number(meter[1]).toFixed(0)}%</b>
+              <div class="telemetry-ring" style={`--meter:${Number(meter[2]) * 3.6}deg`}>
+                <b>{Number(meter[2]).toFixed(0)}%</b>
               </div>
-              <span>{meter[0]}</span>{#if meter[0] === 'MEMORY'}<small
+              <span>{meter[1]}</span>{#if meter[0] === 'memory'}<small
                   >{bytes(telemetry.memory_used_bytes)} / {bytes(
                     telemetry.memory_total_bytes
                   )}</small
-                >{:else if meter[0] === 'DISK'}<small
+                >{:else if meter[0] === 'disk'}<small
                   >{bytes(telemetry.disk_used_bytes)} / {bytes(telemetry.disk_total_bytes)}</small
-                >{:else}<small>Load {telemetry.load_average?.[0].toFixed(2) ?? '—'}</small>{/if}
+                >{:else}<small
+                  >{t('cockpit.load', { value: telemetry.load_average?.[0].toFixed(2) ?? '—' })}</small
+                >{/if}
             </article>
           {/each}
         </div>
@@ -554,7 +566,7 @@
   }
   .metric.cyan strong,
   .cyan-text {
-    color: #3fd8ff;
+    color: var(--color-brand-2);
   }
   .metric.danger {
     border-color: #ef444477;
@@ -617,7 +629,7 @@
     color: var(--color-muted);
   }
   .worker {
-    background: radial-gradient(circle at 50% 35%, #b26bff18, transparent 45%), var(--color-panel);
+    background: radial-gradient(circle at 50% 35%, color-mix(in srgb, var(--color-brand) 9%, transparent), transparent 45%), var(--color-panel);
   }
   .worker header > i {
     width: 7px;
@@ -626,8 +638,8 @@
     background: var(--color-muted);
   }
   .worker header > i.running {
-    background: #3fd8ff;
-    box-shadow: 0 0 12px #3fd8ff;
+    background: var(--color-brand-2);
+    box-shadow: 0 0 12px var(--color-brand-2);
   }
   .worker-core {
     text-align: center;
@@ -639,8 +651,8 @@
     margin: auto;
     display: grid;
     place-items: center;
-    border: 9px solid #b26bff15;
-    outline: 1px solid #b26bff66;
+    border: 9px solid color-mix(in srgb, var(--color-brand) 8%, transparent);
+    outline: 1px solid color-mix(in srgb, var(--color-brand) 40%, transparent);
     border-radius: 50%;
     font: 800 1.2rem var(--font-mono);
     color: var(--color-brand);
@@ -709,7 +721,7 @@
     height: 6px;
     margin-top: 0.2rem;
     border-radius: 50%;
-    background: #3fd8ff;
+    background: var(--color-brand-2);
   }
   .events i.warning {
     background: #f59e0b;
@@ -747,8 +759,8 @@
     display: grid;
     place-items: center;
     border-radius: 0.6rem;
-    background: #3fd8ff15;
-    color: #3fd8ff;
+    background: color-mix(in srgb, var(--color-brand-2) 8%, transparent);
+    color: var(--color-brand-2);
     font: 800 0.7rem var(--font-mono);
   }
   .team h3 {
@@ -760,7 +772,7 @@
     color: var(--color-muted);
   }
   .team header .working {
-    color: #3fd8ff;
+    color: var(--color-brand-2);
   }
   .team header .needs_human {
     color: #f59e0b;
@@ -866,7 +878,7 @@
   .usage-row i {
     display: block;
     height: 100%;
-    background: linear-gradient(90deg, var(--color-brand), #3fd8ff);
+    background: linear-gradient(90deg, var(--color-brand), var(--color-brand-2));
   }
   .usage-row > b {
     text-align: right;
@@ -964,7 +976,7 @@
     border-radius: 50%;
     background:
       radial-gradient(circle, var(--color-panel) 61%, transparent 63%),
-      conic-gradient(#3fd8ff var(--meter), var(--color-line) 0);
+      conic-gradient(var(--color-brand-2) var(--meter), var(--color-line) 0);
   }
   .telemetry-ring b {
     font: 700 1rem var(--font-mono);

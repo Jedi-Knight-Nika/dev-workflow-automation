@@ -1,6 +1,7 @@
 import { api } from '$lib/api';
 import type {
   Job,
+  LiveExecution,
   NativeRun,
   Task,
   TaskEvent,
@@ -58,6 +59,8 @@ export const createTask = (input: CreateTaskInput) =>
   api<Task>('/tasks', { method: 'POST', body: JSON.stringify(input) });
 export const listTaskJobs = (id: string) => api<Job[]>('/tasks/' + id + '/jobs');
 export const listTaskRuns = (id: string) => api<NativeRun[]>('/tasks/' + id + '/runs');
+export const getLiveExecution = (id: string) =>
+  api<LiveExecution | null>('/tasks/' + id + '/live-execution');
 export const listTaskEvents = (id: string) => api<TaskEvent[]>('/tasks/' + id + '/events');
 export const listTaskValidations = (id: string) =>
   api<ValidationRecord[]>('/tasks/' + id + '/validations');

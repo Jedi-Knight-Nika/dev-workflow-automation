@@ -219,7 +219,7 @@
     <TaskWorkspacePanel {task} />
     <ValidationList {validations} />
     <JobList {jobs} />
-    <RunList {runs} />
+    <RunList {runs} taskId={task.id} />
     <div class="min-w-0 xl:col-span-2"><TimelineList {events} /></div>
   {:else}
     <p class="p-5 text-muted">Loading task and execution evidence…</p>

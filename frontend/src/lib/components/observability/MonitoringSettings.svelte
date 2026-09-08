@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import { getMonitoringSettings } from '$lib/services/observability';
   import { api } from '$lib/api';
+  import { t } from '$lib/i18n/index.svelte';
   import type { MonitoringSettings } from '$lib/types/observability';
   let settings = $state<MonitoringSettings | null>(null);
   let error = $state('');
@@ -16,9 +17,9 @@
         method: 'PUT',
         body: JSON.stringify(settings)
       });
-      notice = 'Monitoring preferences saved.';
+      notice = t('monitoring.saved');
     } catch {
-      error = 'Could not save monitoring preferences';
+      error = t('monitoring.saveFailed');
     } finally {
       saving = false;
     }
@@ -30,7 +31,7 @@
         if (!disposed) settings = value;
       })
       .catch(() => {
-        if (!disposed) error = 'Monitoring settings unavailable';
+        if (!disposed) error = t('monitoring.unavailable');
       });
     return () => {
       disposed = true;
@@ -38,30 +39,34 @@
   });
 </script>
 
-<section class="border-line rounded-xl border p-5">
-  <h2>Observability & forecasts</h2>
-  <p>
-    Dashboard preferences apply immediately. Installing collectors and changing retention require a
-    monitoring deployment restart. The monthly budget is an advisory display target.
-  </p>
-  {#if notice}<p role="status">{notice}</p>{/if}
+<section class="panel">
+  <h2>{t('monitoring.title')}</h2>
+  <p>{t('monitoring.description')}</p>
+  {#if notice}<p role="status" class="notice">{notice}</p>{/if}
   {#if settings}<form
       onsubmit={(event) => {
         event.preventDefault();
         void save();
       }}
     >
-      <label
-        ><input type="checkbox" bind:checked={settings.enabled} /> Enable infrastructure monitoring</label
+      <label class="checkbox"
+        ><input type="checkbox" bind:checked={settings.enabled} />{t(
+          'monitoring.enableMonitoring'
+        )}</label
+      >
+      <label class="checkbox"
+        ><input type="checkbox" bind:checked={settings.alertmanager_enabled} />{t(
+          'monitoring.enableAlerts'
+        )}</label
+      >
+      <label class="checkbox"
+        ><input type="checkbox" bind:checked={settings.forecasts_enabled} />{t(
+          'monitoring.enableForecasts'
+        )}</label
       >
       <label
-        ><input type="checkbox" bind:checked={settings.alertmanager_enabled} /> Enable alert ingestion</label
-      >
-      <label
-        ><input type="checkbox" bind:checked={settings.forecasts_enabled} /> Enable statistical forecasts</label
-      >
-      <label
-        >Metrics retention days<input
+        >{t('monitoring.retentionDays')}<input
+          class="input"
           type="number"
           min="1"
           max="90"
@@ -69,13 +74,15 @@
         /></label
       >
       <label
-        >Metrics maximum disk size<input
+        >{t('monitoring.retentionSize')}<input
+          class="input"
           bind:value={settings.retention_size}
           pattern="[1-9][0-9]*(MB|GB|TB)"
         /></label
       >
       <label
-        >Live refresh seconds<input
+        >{t('monitoring.refreshSeconds')}<input
+          class="input"
           type="number"
           min="5"
           max="60"
@@ -83,7 +90,8 @@
         /></label
       >
       <label
-        >CPU warning %<input
+        >{t('monitoring.cpuWarning')}<input
+          class="input"
           type="number"
           min="1"
           max="100"
@@ -91,7 +99,8 @@
         /></label
       >
       <label
-        >RAM warning %<input
+        >{t('monitoring.ramWarning')}<input
+          class="input"
           type="number"
           min="1"
           max="100"
@@ -99,7 +108,8 @@
         /></label
       >
       <label
-        >Disk warning %<input
+        >{t('monitoring.diskWarning')}<input
+          class="input"
           type="number"
           min="1"
           max="100"
@@ -107,7 +117,8 @@
         /></label
       >
       <label
-        >Queue warning seconds<input
+        >{t('monitoring.queueWarning')}<input
+          class="input"
           type="number"
           min="30"
           max="86400"
@@ -115,7 +126,8 @@
         /></label
       >
       <label
-        >Forecast minimum samples<input
+        >{t('monitoring.forecastMinSamples')}<input
+          class="input"
           type="number"
           min="3"
           max="100"
@@ -123,7 +135,8 @@
         /></label
       >
       <label
-        >Default forecast days<input
+        >{t('monitoring.forecastHorizon')}<input
+          class="input"
           type="number"
           min="1"
           max="30"
@@ -131,7 +144,8 @@
         /></label
       >
       <label
-        >Monthly AI budget USD<input
+        >{t('monitoring.monthlyBudget')}<input
+          class="input"
           type="number"
           min="0.01"
           step="0.01"
@@ -142,20 +156,39 @@
                 ? Number(event.currentTarget.value)
                 : null;
           }}
-          placeholder="No target configured"
+          placeholder={t('monitoring.noBudgetTarget')}
         /></label
       >
-      <button disabled={saving}>{saving ? 'Saving…' : 'Save monitoring preferences'}</button>
+      <button class="btn-primary" disabled={saving}
+        >{saving ? t('monitoring.saving') : t('monitoring.save')}</button
+      >
     </form>{/if}
-  {#if error}<p role="status">{error}</p>{/if}{#if settings}<dl>
-      {#each Object.entries(settings) as [key, value] (key)}<div>
-          <dt>{key.replaceAll('_', ' ')}</dt>
-          <dd>{String(value)}</dd>
-        </div>{/each}
-    </dl>{/if}
+  {#if error}<p role="status" class="error">{error}</p>{/if}
 </section>
 
 <style>
+  .panel {
+    border: 1px solid var(--color-line);
+    border-radius: 1rem;
+    background: var(--color-panel);
+    padding: 1.25rem;
+  }
+  h2 {
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: var(--color-heading);
+    margin-bottom: 0.5rem;
+  }
+  p {
+    font-size: 0.85rem;
+    color: var(--color-muted);
+  }
+  .notice {
+    color: var(--color-accent);
+  }
+  .error {
+    color: var(--color-danger);
+  }
   form {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -166,39 +199,20 @@
     display: grid;
     gap: 0.4rem;
     font-size: 0.85rem;
+    color: var(--color-text);
   }
-  input,
-  button {
-    border: 1px solid #64748b66;
-    border-radius: 0.4rem;
-    padding: 0.5rem;
-    background: transparent;
+  label.checkbox {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 0.5rem;
   }
   input[type='checkbox'] {
     width: 1rem;
+    height: 1rem;
+    accent-color: var(--color-brand);
   }
-  h2 {
-    font-size: 1.1rem;
-    margin-bottom: 0.5rem;
-  }
-  p {
-    font-size: 0.85rem;
-    opacity: 0.7;
-  }
-  dl {
-    display: grid;
-    gap: 0.5rem;
-    margin-top: 1rem;
-  }
-  dl div {
-    display: flex;
-    justify-content: space-between;
-    gap: 1rem;
-  }
-  dt {
-    text-transform: capitalize;
-  }
-  dd {
-    font-variant-numeric: tabular-nums;
+  button {
+    justify-self: start;
   }
 </style>

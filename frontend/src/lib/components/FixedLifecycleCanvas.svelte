@@ -4,22 +4,83 @@
   import { bytes, count, duration, money } from './observability/format';
   import { resolve } from '$app/paths';
   import { t } from '$lib/i18n/index.svelte';
-  import { Background, Controls, MarkerType, SvelteFlow } from '@xyflow/svelte';
+  import { Background, Controls, MarkerType, SvelteFlow, type NodeTypes } from '@xyflow/svelte';
   import '@xyflow/svelte/dist/style.css';
-  import { lifecycleEdges, lifecycleNodes } from '$lib/fixed-lifecycle';
+  import {
+    lifecycleEdges,
+    lifecycleNodes,
+    type LifecycleNicknames,
+    type LifecyclePositions
+  } from '$lib/fixed-lifecycle';
   import { type EngineeringTask, type TeamActivity } from '$lib/services/engineering';
+  import LifecycleNode from './LifecycleNode.svelte';
+  import LiveExecutionModal from './task-detail/LiveExecutionModal.svelte';
 
   let { activity }: { activity: TeamActivity } = $props();
   let container: HTMLDivElement;
   let fullscreen = $state(false);
   let error = $state('');
   let selectedId = $state('');
+  let savedPositions = $state<LifecyclePositions>({});
+  let nicknames = $state<LifecycleNicknames>({});
+  let liveExecution = $state<{ taskId: string; title: string } | null>(null);
+  const nodeTypes: NodeTypes = { lifecycle: LifecycleNode };
+  const storageKey = $derived(`engineering-canvas:${activity.team_id}`);
   let selected = $derived(
     activity.tasks.find((task) => task.id === selectedId) ?? activity.tasks[0]
   );
-  onMount(subscribeOperations);
+  onMount(() => {
+    const unsubscribe = subscribeOperations();
+    try {
+      const saved = JSON.parse(localStorage.getItem(storageKey) ?? '{}') as {
+        positions?: LifecyclePositions;
+        nicknames?: LifecycleNicknames;
+      };
+      savedPositions = saved.positions ?? {};
+      nicknames = saved.nicknames ?? {};
+    } catch {
+      savedPositions = {};
+      nicknames = {};
+    }
+    return unsubscribe;
+  });
+
+  function persistLayout(nextPositions = savedPositions, nextNicknames = nicknames) {
+    localStorage.setItem(
+      storageKey,
+      JSON.stringify({ positions: nextPositions, nicknames: nextNicknames })
+    );
+  }
+
+  function renameNode(id: string, nickname: string) {
+    nicknames = { ...nicknames, [id]: nickname };
+    persistLayout(savedPositions, nicknames);
+  }
+
+  function openLiveExecution(taskId: string, title: string) {
+    liveExecution = { taskId, title };
+  }
+
+  function saveNodePosition(event: {
+    targetNode: { id: string; position: { x: number; y: number } } | null;
+  }) {
+    if (!event.targetNode) return;
+    savedPositions = {
+      ...savedPositions,
+      [event.targetNode.id]: { ...event.targetNode.position }
+    };
+    persistLayout(savedPositions, nicknames);
+  }
+
   let nodes = $derived(
-    lifecycleNodes(activity.tasks, selected).map((node) => {
+    lifecycleNodes(
+      activity.tasks,
+      selected,
+      savedPositions,
+      nicknames,
+      renameNode,
+      openLiveExecution
+    ).map((node) => {
       const runner = operations.live?.active_runners.find(
         (r) =>
           r.team_id === activity.team_id &&
@@ -29,6 +90,12 @@
       const waiting = activity.tasks.find(
         (t) => t.stage === node.id && ['WAITING_HUMAN', 'WAITING_EXTERNAL'].includes(t.status ?? '')
       );
+      const aiStage = ['PLANNING', 'DEVELOPING', 'FIXING'].includes(node.id);
+      const liveTaskId = aiStage
+        ? (runner?.task_id ??
+          activity.tasks.find((task) => task.stage === node.id && task.status === 'ACTIVE')?.id ??
+          null)
+        : null;
       const detail = runner
         ? `${runner.profile_name || runner.service_kind}\n${runner.task_key || runner.task_title || ''}\n${runner.harness || ''} ${runner.model || ''}\n${count(runner.input_tokens)} in · ${money(runner.known_cost_usd)}\nRAM ${bytes(runner.resources?.memory)} · ${duration(runner.wall_seconds)}`
         : waiting
@@ -36,8 +103,12 @@
           : '';
       return {
         ...node,
-        data: { ...node.data, label: `${node.data.label}${detail ? '\n' + detail : ''}` },
-        style: `${node.style || ''}; white-space: pre-line; width: 205px; font-size: 11px`
+        data: {
+          ...node.data,
+          nickname: nicknames[node.id] ?? runner?.profile_name ?? node.data.nickname,
+          detail,
+          liveTaskId
+        }
       };
     })
   );
@@ -96,10 +167,12 @@
         <SvelteFlow
           {nodes}
           {edges}
+          {nodeTypes}
           fitView
-          nodesDraggable={false}
+          nodesDraggable
           nodesConnectable={false}
-          elementsSelectable={false}
+          elementsSelectable
+          onnodedragstop={saveNodePosition}
           deleteKey={null}
         >
           <Background />
@@ -144,6 +217,13 @@
     </aside>
   </div>
 </div>
+{#if liveExecution}
+  <LiveExecutionModal
+    taskId={liveExecution.taskId}
+    title={liveExecution.title}
+    onClose={() => (liveExecution = null)}
+  />
+{/if}
 
 <style>
   .canvas {
@@ -217,22 +297,26 @@
     grid-template-columns: minmax(0, 1fr) minmax(260px, 340px);
     gap: 1.5rem;
     min-height: 0;
+    height: 560px;
     flex: 1;
   }
   .map {
     padding: 1rem;
     min-width: 0;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
     border: 1px solid var(--color-line);
     border-radius: 12px;
     background: var(--color-panel);
   }
   .flow {
-    height: 440px;
-    min-height: 320px;
+    flex: 1;
+    min-height: 0;
     border-radius: 10px;
     overflow: hidden;
   }
-  .canvas:fullscreen .flow {
+  .canvas:fullscreen .workspace {
     height: calc(100dvh - 240px);
   }
   .guide {
@@ -247,10 +331,11 @@
   }
   aside {
     padding: 1rem;
+    height: 100%;
     border: 1px solid var(--color-line);
     border-radius: 12px;
     background: var(--color-panel);
-    overflow: auto;
+    overflow-y: auto;
   }
   .task {
     width: 100%;
@@ -293,8 +378,14 @@
   @media (max-width: 850px) {
     .workspace {
       grid-template-columns: 1fr;
+      height: auto;
+    }
+    .map {
+      height: 480px;
     }
     aside {
+      height: auto;
+      max-height: 420px;
       border-left: 0;
     }
   }
@@ -330,23 +421,41 @@
   }
   .flow :global(.svelte-flow__node) {
     font-family: inherit;
-    box-shadow: 0 2px 10px -6px color-mix(in srgb, var(--color-text) 25%, transparent);
+    border: 0;
+    border-radius: 12px;
+    background: transparent;
+    box-shadow: none;
+    cursor: grab;
+    padding: 0;
     transition:
       box-shadow 0.25s var(--ease-smooth),
       border-color 0.25s var(--ease-smooth),
       transform 0.2s var(--ease-smooth);
   }
+  .flow :global(.svelte-flow__node.dragging) {
+    cursor: grabbing;
+  }
+  .flow :global(.svelte-flow__node.selected) {
+    box-shadow:
+      0 0 0 2px var(--color-brand),
+      0 0 24px -3px var(--color-brand);
+  }
   .flow :global(.svelte-flow__node.selectable:hover) {
     transform: translateY(-1px);
   }
   .flow :global(.svelte-flow__edge.animated path) {
-    stroke-dasharray: 5;
-    animation: dashdraw 1.1s linear infinite;
-    filter: drop-shadow(0 0 5px color-mix(in srgb, var(--color-brand-2) 70%, transparent));
+    stroke-dasharray: 4 8;
+    animation: data-flow 0.8s linear infinite;
+    filter: drop-shadow(0 0 6px color-mix(in srgb, var(--color-brand-2) 85%, transparent));
   }
   .flow :global(.svelte-flow__edge:hover .svelte-flow__edge-path) {
     stroke: var(--color-brand);
     filter: drop-shadow(0 0 6px color-mix(in srgb, var(--color-brand) 60%, transparent));
+  }
+  @keyframes data-flow {
+    to {
+      stroke-dashoffset: -24;
+    }
   }
   @media (prefers-reduced-motion: reduce) {
     .flow :global(.svelte-flow__edge.animated path) {

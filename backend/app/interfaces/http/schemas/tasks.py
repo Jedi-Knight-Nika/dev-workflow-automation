@@ -142,6 +142,19 @@ class EventRead(BaseModel):
     created_at: datetime
 
 
+class LiveExecutionRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    role_kind: str
+    provider: str
+    model: str
+    harness: str | None
+    status: str
+    started_at: datetime
+    finished_at: datetime | None
+    telemetry: dict[str, Any] | None
+
+
 class TaskMessageCreate(BaseModel):
     body: str = Field(min_length=1, max_length=8000)
     reply_to_id: int | None = Field(default=None, ge=1)
