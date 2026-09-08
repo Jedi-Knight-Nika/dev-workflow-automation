@@ -1,35 +1,28 @@
 <script lang="ts">
   import { onMount } from 'svelte';
 
-  type Particle = { angle: number; distance: number };
-  type Burst = { id: number; x: number; y: number; color: string; particles: Particle[] };
+  type Burst = { id: number; x: number; y: number; color: string };
 
   let bursts = $state<Burst[]>([]);
   let nextId = 0;
   const MAX_BURSTS = 6;
-  const PARTICLE_COUNT = 6;
-  const LIFETIME_MS = 650;
+  const LIFETIME_MS = 720;
 
   onMount(() => {
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
 
-    function handleClick(event: MouseEvent) {
+    function handlePointerDown(event: PointerEvent) {
+      if (event.button !== 0) return;
       const color = Math.random() > 0.5 ? 'var(--color-brand)' : 'var(--color-brand-2)';
-      const particles: Particle[] = Array.from({ length: PARTICLE_COUNT }, (_, index) => ({
-        angle: (360 / PARTICLE_COUNT) * index + (Math.random() * 26 - 13),
-        distance: 22 + Math.random() * 18
-      }));
       const id = nextId++;
-      bursts = [...bursts, { id, x: event.clientX, y: event.clientY, color, particles }].slice(
-        -MAX_BURSTS
-      );
+      bursts = [...bursts, { id, x: event.clientX, y: event.clientY, color }].slice(-MAX_BURSTS);
       setTimeout(() => {
         bursts = bursts.filter((burst) => burst.id !== id);
       }, LIFETIME_MS);
     }
 
-    window.addEventListener('click', handleClick, { passive: true });
-    return () => window.removeEventListener('click', handleClick);
+    window.addEventListener('pointerdown', handlePointerDown, { passive: true });
+    return () => window.removeEventListener('pointerdown', handlePointerDown);
   });
 </script>
 
@@ -39,45 +32,60 @@
     style="transform: translate3d({burst.x}px, {burst.y}px, 0);"
   >
     <span
-      class="absolute rounded-full"
+      class="absolute rounded-full click-bloom"
       style="
-        width: 10px; height: 10px; margin: -5px 0 0 -5px; border: 1px solid {burst.color};
-        animation: click-ring {LIFETIME_MS}ms ease-out forwards;
+        width: 18px; height: 18px; margin: -9px 0 0 -9px;
+        background: radial-gradient(circle, color-mix(in srgb, {burst.color} 60%, transparent), transparent 70%);
+        animation: click-bloom {LIFETIME_MS}ms ease-out forwards;
       "
     ></span>
-    {#each burst.particles as particle (particle.angle)}
-      <span
-        class="absolute rounded-full"
-        style="
-          width: 4px; height: 4px; margin: -2px 0 0 -2px; background: {burst.color};
-          --angle: {particle.angle}deg; --distance: {particle.distance}px;
-          animation: click-particle {LIFETIME_MS}ms ease-out forwards;
-        "
-      ></span>
-    {/each}
+    <span
+      class="absolute rounded-full"
+      style="width: 12px; height: 12px; margin: -6px 0 0 -6px; border: 1px solid {burst.color}; animation: click-ring {LIFETIME_MS}ms cubic-bezier(0.16, 0.72, 0.24, 1) forwards;"
+    ></span>
+    <span
+      class="absolute rounded-full"
+      style="width: 12px; height: 12px; margin: -6px 0 0 -6px; border: 1px solid color-mix(in srgb, {burst.color} 55%, transparent); animation: click-ring-soft {LIFETIME_MS}ms cubic-bezier(0.16, 0.72, 0.24, 1) forwards;"
+    ></span>
   </div>
 {/each}
 
 <style>
   @keyframes -global-click-ring {
     0% {
-      transform: scale(0.3);
-      opacity: 0.8;
+      transform: scale(0.35);
+      opacity: 0.9;
     }
     100% {
-      transform: scale(3.2);
+      transform: scale(4.5);
       opacity: 0;
     }
   }
 
-  @keyframes -global-click-particle {
+  @keyframes -global-click-ring-soft {
     0% {
-      transform: rotate(var(--angle)) translateX(0) rotate(calc(var(--angle) * -1));
-      opacity: 1;
+      transform: scale(0.45);
+      opacity: 0;
+    }
+    22% {
+      opacity: 0.45;
     }
     100% {
-      transform: rotate(var(--angle)) translateX(var(--distance)) rotate(calc(var(--angle) * -1));
+      transform: scale(7);
       opacity: 0;
+    }
+  }
+
+  @keyframes -global-click-bloom {
+    0% {
+      transform: scale(0.35);
+      opacity: 0.85;
+      filter: blur(1px);
+    }
+    100% {
+      transform: scale(3.8);
+      opacity: 0;
+      filter: blur(8px);
     }
   }
 </style>
