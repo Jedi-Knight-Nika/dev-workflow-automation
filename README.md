@@ -9,6 +9,7 @@ The workflow is fixed. Models write and reason; deterministic application code o
 - [Architecture and feature reference](PRODUCT.md)
 - [How task execution and token accounting work](docs/v2-implementation.md)
 - [Fresh database and deployment setup](docs/initial-setup.md)
+- [First bounded native-agent smoke test](docs/first-task-smoke-test.md)
 - [Development, tests and operational checks](DEVELOPMENT.md)
 - [Refactor verification and remaining acceptance checks](docs/refactor-verification.md)
 - [Design specification](autonomous_engineering_worker_v2_technical_architecture.md)
