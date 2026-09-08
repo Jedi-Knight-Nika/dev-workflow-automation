@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
+import httpx
 import pytest
 
 from app.agent_runtime.application.harness import HarnessSettings
@@ -14,8 +15,11 @@ from app.agent_runtime.infrastructure.container import (
     developer_container_spec,
     validation_container_spec,
 )
+from app.delivery.infrastructure.git_runner import GitManifest
+from app.delivery.infrastructure.git_transport import run_git
 from app.engineering.infrastructure.validation import run_check
 from app.intake.infrastructure.slack import verify_slack_signature
+from app.platform.configuration.settings import Settings
 
 
 def mounts(tmp_path: Path) -> RunnerMounts:
@@ -62,6 +66,39 @@ def test_validation_has_no_native_state_network_or_credentials(tmp_path: Path) -
     assert all(str(paths.state) not in value for value in spec["HostConfig"]["Binds"])
     assert "/home/runner" in spec["HostConfig"]["Tmpfs"]
     assert not any("KEY=" in value or "TOKEN=" in value for value in spec["Env"])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["prepare", "publish"])
+async def test_git_bypasses_image_entrypoint(tmp_path: Path, operation: str) -> None:
+    paths = mounts(tmp_path)
+    manifest = GitManifest(
+        operation=operation,
+        owner="example",
+        repository="repo",
+        branch=f"agent/v2-{paths.task_id}",
+        base_branch="main",
+        expected_sha="a" * 40 if operation == "publish" else None,
+    )
+    transport = httpx.MockTransport(lambda request: httpx.Response(200, json={"Internal": True}))
+    with patch(
+        "app.delivery.infrastructure.git_transport.run_container_job", new_callable=AsyncMock
+    ) as run:
+        async with httpx.AsyncClient(transport=transport, base_url="http://docker") as client:
+            await run_git(
+                client,
+                Settings(developer_egress_proxy="http://proxy:3128"),
+                paths,
+                manifest,
+                "test-token",
+                "git-test",
+            )
+    spec = run.call_args.args[2]
+    assert spec["Entrypoint"] == ["/app/.venv/bin/python"]
+    assert spec["Cmd"] == ["-m", "app.delivery.infrastructure.git_runner"]
+    assert all(":/home/runner:" not in bind for bind in spec["HostConfig"]["Binds"])
+    mode = "ro" if operation == "publish" else "rw"
+    assert spec["HostConfig"]["Binds"][0] == f"{paths.workspace}:/workspace:{mode}"
 
 
 def test_runner_rejects_shared_mounts_secrets_and_host_network(tmp_path: Path) -> None:

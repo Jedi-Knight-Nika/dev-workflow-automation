@@ -42,7 +42,10 @@ async def run_git(
         network=settings.developer_container_network,
         provider_environment={},
     )
-    spec["Cmd"] = ["/app/.venv/bin/python", "-m", "app.delivery.infrastructure.git_runner"]
+    # Credentialed Git operations must bypass image-specific dependency setup.
+    # Publication mounts source read-only and must never execute repository tools.
+    spec["Entrypoint"] = ["/app/.venv/bin/python"]
+    spec["Cmd"] = ["-m", "app.delivery.infrastructure.git_runner"]
     spec["Env"] = [
         f"GITHUB_TOKEN={token}",
         f"HTTPS_PROXY={settings.developer_egress_proxy}",

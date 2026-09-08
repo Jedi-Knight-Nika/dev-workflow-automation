@@ -65,6 +65,15 @@ The API has no Docker socket. Only the trusted controller mounts it. Native chil
 
 A stock runner cannot test every repository without dependency preparation. Build a project-specific dependency image; do not grant validation internet or production credentials to hide missing dependencies.
 
+For frontend tasks in this repository, build `deploy/Dockerfile.repository-runner` from the
+repository root after building the native `engineering-developer:local` base image. Use
+`--build-arg NATIVE_RUNNER_IMAGE=<your-base-image>` if the base has another name, and set
+`V2_RUNNER_IMAGE=engineering-repository-runner:local`. The image includes the locked frontend
+dependencies and prepares them in the task checkout without network access. Lockfile changes
+require rebuilding this image. Configure validation argv for `git diff --check` and
+`npm --prefix frontend run check`; these cover frontend lint, formatting, types, unit tests
+and the production build. Add repository-specific backend/browser checks where needed.
+
 ## Team admission checklist
 
 1. Configure GitHub and import the exact repository. Confirm its default branch.

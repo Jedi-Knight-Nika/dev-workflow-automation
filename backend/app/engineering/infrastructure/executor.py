@@ -15,6 +15,7 @@ from app.agent_runtime.infrastructure.container import RunnerMounts, validation_
 from app.agent_runtime.infrastructure.container_job import run_container_job
 from app.agent_runtime.infrastructure.docker_harness import DockerHarness, atomic_json
 from app.agent_runtime.infrastructure.models import DeveloperSession, PricingCatalog
+from app.agent_runtime.infrastructure.reservations import development_allowance
 from app.agent_runtime.infrastructure.runner import Manifest
 from app.delivery.infrastructure.git_runner import GitManifest
 from app.delivery.infrastructure.git_transport import github_token, run_git
@@ -23,6 +24,7 @@ from app.delivery.infrastructure.workflow import delivery_gate, merge_phase
 from app.engineering.application.develop import DevelopmentBlocked, DevelopTask, SessionContext
 from app.engineering.application.jobs import PhaseBlocked, PhaseLease
 from app.engineering.domain.lifecycle import Action, WaitReason
+from app.engineering.domain.publication_title import publication_title
 from app.engineering.infrastructure.consultation import consult, save_consultation_feedback
 from app.engineering.infrastructure.enrollment import prepare_directories
 from app.engineering.infrastructure.models import ValidationRun
@@ -32,7 +34,6 @@ from app.platform.configuration.settings import Settings
 from app.platform.integrations.models import Integration
 from app.platform.security.crypto import cipher
 from app.repositories.infrastructure.models import Repository
-from app.teams.infrastructure.automation import read_policy
 from app.teams.infrastructure.models import TeamAgentProfile
 from app.teams.infrastructure.team_models import Team
 
@@ -191,11 +192,13 @@ class SqlPhaseExecutor:
                         WaitReason.BUDGET_EXHAUSTED,
                         "Task cost is incomplete or its USD budget is exhausted",
                     )
-                async with self.sessions() as session:
-                    policy = await read_policy(session, team.id)
-                remaining = min(profile.hard_budget_usd, policy.task_budget_usd) - consumed
-                if remaining <= 0:
-                    raise PhaseBlocked(WaitReason.BUDGET_EXHAUSTED, "Task USD budget is exhausted")
+                try:
+                    async with self.sessions() as session:
+                        remaining = await development_allowance(
+                            session, task, profile.hard_budget_usd
+                        )
+                except DevelopmentBlocked as exc:
+                    raise PhaseBlocked(WaitReason.BUDGET_EXHAUSTED, str(exc)) from exc
                 store.reservation_usd = remaining
                 request = f"{task.title}\n\n{task.description}".strip()
                 if not native.native_session_id and native.checkpoint.get("handoff"):
@@ -370,7 +373,7 @@ class SqlPhaseExecutor:
             pull = await GitHubDelivery(api, repository.owner, repository.name).publish(
                 branch=task.branch_name or "",
                 base=str(native.checkpoint.get("base_branch") or repository.default_branch),
-                title=task.title,
+                title=publication_title(task.title),
                 body=f"Task: {task.external_key or task.id}\n\n{str(native.checkpoint.get('summary') or '')[-8000:]}\n\nDeterministic validation passed at `{validated}`. Review and current-SHA approval are required before merge.",
                 owner=repository.owner,
                 expected_sha=validated,
@@ -398,7 +401,7 @@ class SqlPhaseExecutor:
             )
         manifest = ValidationManifest(
             branch=task.branch_name,
-            title=task.title,
+            title=publication_title(task.title),
             author_name=team.name,
             base_sha=str(native.checkpoint.get("base_sha") or ""),
             commands=commands,

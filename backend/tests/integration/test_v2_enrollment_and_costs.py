@@ -14,6 +14,7 @@ from app.agent_runtime.application.harness import TurnReceipt
 from app.agent_runtime.domain.usage import Usage
 from app.agent_runtime.infrastructure.accounting import SqlDevelopmentStore
 from app.agent_runtime.infrastructure.models import AIRun, DeveloperSession, PricingCatalog
+from app.agent_runtime.infrastructure.reservations import development_allowance, reserve_budget
 from app.delivery.infrastructure import workflow as delivery_workflow
 from app.engineering.application.develop import DevelopmentBlocked
 from app.engineering.domain.lifecycle import Action
@@ -280,6 +281,62 @@ async def test_reservation_is_atomic_and_unknown_cost_blocks_team(
             assert (
                 row and row.reserved_cost_usd == Decimal("0.5") and row.calculated_cost_usd is None
             )
+
+
+async def test_development_uses_remaining_team_budget_and_rechecks_concurrent_spending(
+    postgres_session_factory: async_sessionmaker[AsyncSession], tmp_path: Path
+) -> None:
+    async with scenario(postgres_session_factory, tmp_path) as (team_id, repo_id, task_id, _):
+        other_id = uuid4()
+        async with postgres_session_factory.begin() as session:
+            session.add(
+                Task(id=other_id, title="Previous work", team_id=team_id, repository_id=repo_id)
+            )
+            await session.flush()
+            session.add(
+                AIRun(
+                    task_id=other_id,
+                    role_kind="DEVELOPER",
+                    provider="openai",
+                    model="unit",
+                    prompt_version="test",
+                    status="COMPLETED",
+                    calculated_cost_usd=Decimal("0.09"),
+                )
+            )
+        async with postgres_session_factory.begin() as session:
+            task = await session.get(Task, task_id)
+            assert task
+            allowance = await development_allowance(session, task, Decimal(1))
+            assert allowance == Decimal("0.91")
+            assert await development_allowance(session, task, Decimal("0.5")) == Decimal("0.5")
+            await reserve_budget(session, task_id, allowance)
+            # Another task wins the reservation between planning and admission.
+            session.add(
+                AIRun(
+                    task_id=other_id,
+                    role_kind="INTERPRETER",
+                    provider="openai",
+                    model="unit",
+                    prompt_version="test",
+                    status="RUNNING",
+                    reserved_cost_usd=Decimal("0.1"),
+                )
+            )
+        async with postgres_session_factory.begin() as session:
+            task = await session.get(Task, task_id)
+            assert task
+            assert await development_allowance(session, task, Decimal(1)) == Decimal("0.81")
+            with pytest.raises(DevelopmentBlocked, match="reservation"):
+                await reserve_budget(session, task_id, allowance)
+            prior = await session.scalar(
+                select(AIRun).where(AIRun.task_id == other_id, AIRun.status == "RUNNING")
+            )
+            assert prior
+            prior.status = "FAILED"
+            await session.flush()
+            with pytest.raises(DevelopmentBlocked, match="Unknown"):
+                await development_allowance(session, task, Decimal(1))
 
 
 async def test_dashboard_reports_native_usage_without_duplicate_accounting(

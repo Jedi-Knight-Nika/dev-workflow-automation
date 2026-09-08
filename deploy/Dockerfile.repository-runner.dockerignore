@@ -1,0 +1,7 @@
+**
+!frontend/
+!frontend/package.json
+!frontend/package-lock.json
+!frontend/svelte.config.js
+!deploy/
+!deploy/prepare-repository.sh

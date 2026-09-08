@@ -1,0 +1,16 @@
+# Build from the repository root after building the native runner base.
+# docker build -f deploy/Dockerfile.repository-runner -t engineering-repository-runner:local .
+ARG NATIVE_RUNNER_IMAGE=engineering-developer:local
+FROM node:22-slim AS frontend-dependencies
+WORKDIR /opt/frontend
+COPY frontend/package.json frontend/package-lock.json frontend/svelte.config.js ./
+RUN npm ci
+
+FROM ${NATIVE_RUNNER_IMAGE}
+USER root
+COPY --from=frontend-dependencies /opt/frontend/node_modules /opt/frontend/node_modules
+COPY frontend/package-lock.json /opt/frontend/package-lock.json
+COPY --chmod=755 deploy/prepare-repository.sh /usr/local/bin/prepare-repository
+USER 10001:10001
+WORKDIR /workspace
+ENTRYPOINT ["/usr/local/bin/prepare-repository"]
