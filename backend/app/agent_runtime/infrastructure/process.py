@@ -14,6 +14,7 @@ async def capture(
     env: Mapping[str, str] | None = None,
     timeout: int = 300,
     output_limit: int = 65536,
+    include_stderr: bool = False,
 ) -> bytes:
     if not argv or timeout < 1 or output_limit < 1:
         raise ValueError("Invalid process limits")
@@ -22,10 +23,13 @@ async def capture(
         cwd=cwd,
         env=env,
         stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.PIPE if include_stderr else asyncio.subprocess.DEVNULL,
         start_new_session=True,
     )
     output = bytearray()
+    stderr_task = (
+        asyncio.create_task(process.stderr.read(output_limit)) if include_stderr and process.stderr else None
+    )
     try:
         async with asyncio.timeout(timeout):
             assert process.stdout
@@ -35,6 +39,10 @@ async def capture(
                 output.extend(block)
             await process.wait()
         if process.returncode:
+            if stderr_task:
+                detail = (await stderr_task).decode("utf-8", "replace")
+                detail = " ".join(detail.split())[:1000]
+                raise RuntimeError(f"Operation failed: {detail or 'no diagnostic output'}")
             raise RuntimeError("Operation failed; raw stderr withheld")
     except BaseException:
         # Git can spawn transport helpers. Cancellation must stop the group,
@@ -46,5 +54,7 @@ async def capture(
         # Drain the already-buffered pipe after killing all writers. wait()
         # alone can deadlock when asyncio paused reading a full stdout buffer.
         await process.communicate()
+        if stderr_task:
+            stderr_task.cancel()
         raise
     return bytes(output)

@@ -64,6 +64,7 @@ async def git(directory: Path, *args: str, token: str | None = None) -> str:
         ("git", *args),
         cwd=directory,
         env=environment,
+        include_stderr=True,
     )
     return output.decode().strip()
 

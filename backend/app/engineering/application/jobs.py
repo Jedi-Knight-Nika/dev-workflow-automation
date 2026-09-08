@@ -84,6 +84,17 @@ class RunEngineeringJob:
         except Exception as exc:  # noqa: BLE001 - sanitize the job boundary; never restart an unknown turn
             operation.cancel()
             await asyncio.gather(operation, return_exceptions=True)
+            # Keep the durable record sanitized, but leave a bounded diagnostic in
+            # controller logs so isolated runner failures are actionable.
+            import structlog
+
+            detail = " ".join(str(exc).split())[:500]
+            for secret in ("GITHUB_TOKEN=", "Authorization:", "Bearer "):
+                if secret in detail:
+                    detail = detail.split(secret, 1)[0] + secret + "<redacted>"
+            structlog.get_logger().warning(
+                "phase_execution_failed", action=lease.action, error_type=type(exc).__name__, detail=detail
+            )
             # SDK/transport errors can contain credentials or prompt text. Do not persist them.
             await self.jobs.block(
                 lease, WaitReason.MISSING_CONFIGURATION, f"Execution failed: {type(exc).__name__}"

@@ -8,6 +8,29 @@ import httpx
 from app.agent_runtime.infrastructure.docker_harness import DockerFrames
 
 
+async def _failure_detail(client: httpx.AsyncClient, container_id: str) -> str:
+    """Read only a bounded diagnostic before removing a failed short-lived runner."""
+    try:
+        response = await client.get(
+            f"/containers/{container_id}/logs",
+            params={"stdout": "true", "stderr": "true"},
+        )
+        response.raise_for_status()
+        raw = response.content
+        chunks: list[bytes] = []
+        offset = 0
+        while offset + 8 <= len(raw) and sum(map(len, chunks)) < 8192:
+            size = int.from_bytes(raw[offset + 4 : offset + 8], "big")
+            if size < 0 or offset + 8 + size > len(raw):
+                break
+            chunks.append(raw[offset + 8 : offset + 8 + size])
+            offset += 8 + size
+        detail = " ".join(b"".join(chunks).decode("utf-8", "replace").split())
+        return detail[-1000:]
+    except Exception:  # noqa: BLE001 -- diagnostics must never mask cleanup
+        return "no diagnostic output"
+
+
 async def run_container_job(
     client: httpx.AsyncClient, name: str, spec: dict[str, Any], timeout: int
 ) -> dict[str, Any]:
@@ -23,7 +46,8 @@ async def run_container_job(
             response = await client.post(f"/containers/{container_id}/wait", timeout=None)
         response.raise_for_status()
         if response.json()["StatusCode"] != 0:
-            raise RuntimeError("Isolated operation failed; workspace retained for inspection")
+            detail = await _failure_detail(client, container_id)
+            raise RuntimeError(f"Isolated operation failed; workspace retained for inspection: {detail}")
         frames, events = DockerFrames(), []
         async with client.stream(
             "GET", f"/containers/{container_id}/logs", params={"stdout": "true"}

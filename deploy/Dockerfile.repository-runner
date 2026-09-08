@@ -11,6 +11,9 @@ USER root
 COPY --from=frontend-dependencies /opt/frontend/node_modules /opt/frontend/node_modules
 COPY frontend/package-lock.json /opt/frontend/package-lock.json
 COPY --chmod=755 deploy/prepare-repository.sh /usr/local/bin/prepare-repository
+# This image is built separately from the native base; copy the current
+# control-plane package so its manifest/schema validators cannot go stale.
+COPY backend/app /app/app
 USER 10001:10001
 WORKDIR /workspace
 ENTRYPOINT ["/usr/local/bin/prepare-repository"]
