@@ -75,15 +75,17 @@ services:
   ollama:
     # Set a tested image digest for your production CPU/GPU platform.
     image: ${OLLAMA_IMAGE:?Set a verified Ollama image tag or digest}
-    profiles: [local-interpreter]
+    # Idle runtime serves Settings-managed local Jarvis and the optional Interpreter.
     environment:
       OLLAMA_HOST: 0.0.0.0:11434
       OLLAMA_MAX_LOADED_MODELS: "1"
       OLLAMA_NUM_PARALLEL: "1"
       OLLAMA_KEEP_ALIVE: 5m
+      OLLAMA_NO_CLOUD: "1"
     volumes:
       - ollama_models:/root/.ollama
-    networks: [interpreter-private]
+    # No published port. Outbound access is for operator-requested model downloads.
+    networks: [interpreter-private, model-downloads]
     mem_limit: ${OLLAMA_MEMORY_LIMIT:-4g}
     cpus: ${OLLAMA_CPUS:-2}
     restart: unless-stopped
@@ -93,6 +95,7 @@ networks:
     name: engineering-provider-internal
     internal: true
   provider-public: {}
+  model-downloads: {}
   interpreter-private:
     internal: true
 
