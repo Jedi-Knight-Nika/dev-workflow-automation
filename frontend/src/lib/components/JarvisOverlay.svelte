@@ -103,7 +103,10 @@
     position: absolute;
     inset: -48px;
     background-image:
-      linear-gradient(color-mix(in srgb, var(--color-brand-2) 12%, transparent) 1px, transparent 1px),
+      linear-gradient(
+        color-mix(in srgb, var(--color-brand-2) 12%, transparent) 1px,
+        transparent 1px
+      ),
       linear-gradient(
         90deg,
         color-mix(in srgb, var(--color-brand-2) 12%, transparent) 1px,

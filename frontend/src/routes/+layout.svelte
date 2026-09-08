@@ -13,6 +13,7 @@
   import { t, initLocale } from '$lib/i18n/index.svelte';
   import { getTheme, initTheme } from '$lib/theme.svelte';
   import { initAccent, reapplyAccentForTheme } from '$lib/accent.svelte';
+  import { initFontSize } from '$lib/font-size.svelte';
   import { getDisplayMode, initDisplayMode } from '$lib/display.svelte';
 
   let { children }: { children: Snippet } = $props();
@@ -21,6 +22,7 @@
     initTheme();
     initLocale();
     initDisplayMode();
+    initFontSize();
     return initAccent();
   });
   $effect(() => {
@@ -154,9 +156,13 @@
             stroke-linejoin="round"
           >
             {#if isFullscreen}
-              <path d="M8 3v3a2 2 0 0 1-2 2H3M21 8h-3a2 2 0 0 1-2-2V3M3 16h3a2 2 0 0 1 2 2v3M16 21v-3a2 2 0 0 1 2-2h3" />
+              <path
+                d="M8 3v3a2 2 0 0 1-2 2H3M21 8h-3a2 2 0 0 1-2-2V3M3 16h3a2 2 0 0 1 2 2v3M16 21v-3a2 2 0 0 1 2-2h3"
+              />
             {:else}
-              <path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M21 16v3a2 2 0 0 1-2 2h-3M8 21H5a2 2 0 0 1-2-2v-3" />
+              <path
+                d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M21 16v3a2 2 0 0 1-2 2h-3M8 21H5a2 2 0 0 1-2-2v-3"
+              />
             {/if}
           </svg>
           {isFullscreen ? t('nav.exitFullscreen') : t('nav.enterFullscreen')}

@@ -5,6 +5,7 @@
   import MonitoringSettings from '$lib/components/observability/MonitoringSettings.svelte';
   import ObserverSettings from '$lib/observer/ObserverSettings.svelte';
   import AccentPicker from '$lib/components/AccentPicker.svelte';
+  import FontSizePicker from '$lib/components/FontSizePicker.svelte';
   import DisplayModePicker from '$lib/components/DisplayModePicker.svelte';
   import AppearanceSettings from '$lib/components/AppearanceSettings.svelte';
   import ErrorBanner from '$lib/components/ErrorBanner.svelte';
@@ -50,6 +51,7 @@
   <AppearanceSettings />
   <DisplayModePicker />
   <AccentPicker />
+  <FontSizePicker />
   <MonitoringSettings />
   <ObserverSettings />
   {#if error}<ErrorBanner message={error} />{/if}

@@ -687,6 +687,11 @@ export const en = {
   'accent.customLabel': 'Custom',
   'accent.customHint': 'Drag to pick any hue',
   'accent.hueSlider': 'Accent hue',
+  'fontSize.title': 'Font size',
+  'fontSize.description': 'Adjust the text size across the interface.',
+  'fontSize.slider': 'Font size',
+  'fontSize.value': '{size}px font size',
+  'fontSize.defaultHint': 'Default: {size}px',
 
   'display.title': 'Display mode',
   'display.description':
