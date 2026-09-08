@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import PageHeader from '$lib/components/PageHeader.svelte';
   import ErrorBanner from '$lib/components/ErrorBanner.svelte';
+  import RepositoryRuntimeEditor from '$lib/components/RepositoryRuntimeEditor.svelte';
   import {
     listRepositories,
     discoverGithubRepositories,
@@ -139,6 +140,7 @@
     {#each rows as repo (repo.id)}
       <section class="border-line space-y-3 rounded-xl border bg-panel p-5">
         <h2 class="font-semibold">{repo.owner}/{repo.name}</h2>
+        <RepositoryRuntimeEditor repositoryId={repo.id} />
         <p class="text-muted text-sm">
           {repo.default_branch} · {repo.archived_at
             ? 'Archived'

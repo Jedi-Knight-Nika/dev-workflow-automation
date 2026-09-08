@@ -5,6 +5,7 @@
   import FixedLifecycleCanvas from '$lib/components/FixedLifecycleCanvas.svelte';
   import AutomationPolicyEditor from '$lib/components/AutomationPolicyEditor.svelte';
   import V2StatisticsPanel from '$lib/components/V2StatisticsPanel.svelte';
+  import OperationsDashboard from '$lib/components/observability/OperationsDashboard.svelte';
   import {
     getTeamActivity,
     listProfiles,
@@ -117,7 +118,9 @@
   {#if activity}{#key activity.team_id}<AutomationPolicyEditor
         teamId={activity.team_id}
       />{/key}{/if}
-  {#if activity}{#key activity.team_id}<V2StatisticsPanel teamId={activity.team_id} />{/key}{/if}
+  {#if activity}{#key activity.team_id}<OperationsDashboard
+        teamId={activity.team_id}
+      /><V2StatisticsPanel teamId={activity.team_id} />{/key}{/if}
   <section class="profiles">
     <h2>Fixed agent profiles</h2>
     <p>

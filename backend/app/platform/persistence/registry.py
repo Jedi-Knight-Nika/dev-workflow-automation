@@ -1,6 +1,7 @@
 """Composition registry for the current database schema."""
 
 from app.agent_runtime.infrastructure.models import AIRun, DeveloperSession, PricingCatalog
+from app.analytics.infrastructure.models import TaskForecast
 from app.delivery.infrastructure.status_sync import ExternalStatusSync
 from app.engineering.domain.lifecycle import TaskStatus
 from app.engineering.infrastructure.message_models import TaskMessage
@@ -9,6 +10,12 @@ from app.engineering.infrastructure.task_models import Job, Task, TaskEvent, Tas
 from app.intake.infrastructure.models import LocalModelRun
 from app.intake.infrastructure.task_snapshot import ExternalTaskSnapshot
 from app.intake.infrastructure.webhook_models import WebhookDelivery
+from app.observability.infrastructure.models import (
+    InfrastructureEvent,
+    RunnerResourceBinding,
+    RunnerResourceSummary,
+    ServiceIncident,
+)
 from app.platform.configuration.models import AccountSettings, SettingsAuditEvent
 from app.platform.integrations.models import Integration
 from app.platform.scheduling.models import WorkerNode
@@ -24,6 +31,7 @@ __all__ = [
     "DeveloperSession",
     "ExternalStatusSync",
     "ExternalTaskSnapshot",
+    "InfrastructureEvent",
     "Integration",
     "IntegrationStatus",
     "Job",
@@ -32,10 +40,14 @@ __all__ = [
     "PricingCatalog",
     "Repository",
     "ReviewCycle",
+    "RunnerResourceBinding",
+    "RunnerResourceSummary",
+    "ServiceIncident",
     "SettingsAuditEvent",
     "Task",
     "TaskAssignment",
     "TaskEvent",
+    "TaskForecast",
     "TaskMessage",
     "TaskPhaseRun",
     "TaskRepositoryScope",

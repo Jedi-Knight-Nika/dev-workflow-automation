@@ -12,6 +12,8 @@ from sqlalchemy import Connection, inspect, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 import app.platform.persistence.registry  # noqa: F401 - register the complete application metadata
+from app.agent_runtime.infrastructure.models import AIRun, DeveloperSession
+from app.engineering.infrastructure.task_models import Task
 from app.platform.persistence.base import Base
 
 DEFAULT_TEAM = UUID("00000000-0000-0000-0000-000000000001")
@@ -20,6 +22,15 @@ DEFAULT_TEAM = UUID("00000000-0000-0000-0000-000000000001")
 def initial_revision():
     path = Path("migrations/versions/0001_initial.py")
     spec = importlib.util.spec_from_file_location("initial_revision", path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def supporting_revision(name="0002_observability_analytics"):
+    path = Path(f"migrations/versions/{name}.py")
+    spec = importlib.util.spec_from_file_location("supporting_revision", path)
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -38,6 +49,15 @@ def exercise_fresh_setup(connection: Connection) -> None:
     context = MigrationContext.configure(connection)
     with Operations.context(context):
         revision.upgrade()
+        baseline_profiles = connection.execute(
+            text("SELECT * FROM team_agent_profiles ORDER BY id")
+        ).all()
+        supporting_revision().upgrade()
+        supporting_revision("0003_operational_configuration").upgrade()
+        assert (
+            connection.execute(text("SELECT * FROM team_agent_profiles ORDER BY id")).all()
+            == baseline_profiles
+        )
         assert set(inspect(connection).get_table_names()) == set(Base.metadata.tables)
         # Protect against losing FK/query indexes or model constraints when the
         # historical chain is discarded. This is actual PostgreSQL reflection.
@@ -101,8 +121,64 @@ def exercise_existing_database(connection: Connection) -> None:
     assert connection.scalar(text("SELECT title FROM old_ticket")) == "Do not destroy this"
 
 
+def exercise_supporting_upgrade_preserves_records(connection: Connection) -> None:
+    isolated_schema(connection)
+    with Operations.context(MigrationContext.configure(connection)):
+        initial_revision().upgrade()
+        task_id, session_id = uuid4(), uuid4()
+        connection.execute(
+            Task.__table__.insert().values(
+                id=task_id, title="Existing ticket", team_id=DEFAULT_TEAM
+            )
+        )
+        connection.execute(
+            DeveloperSession.__table__.insert().values(
+                id=session_id,
+                task_id=task_id,
+                harness="codex",
+                harness_version="test",
+                provider="test",
+                model="test",
+                native_session_id="preserved-native-session",
+                workspace_path="/fixture/workspace",
+                state_path="/fixture/state",
+            )
+        )
+        connection.execute(
+            AIRun.__table__.insert().values(
+                task_id=task_id,
+                session_id=session_id,
+                role_kind="DEVELOPER",
+                provider="test",
+                model="test",
+                prompt_version="test",
+                provider_cost_usd="1.25",
+                input_tokens=123,
+                output_tokens=45,
+            )
+        )
+        tables = inspect(connection).get_table_names()
+
+        def snapshot():
+            return {
+                name: connection.execute(text(f'SELECT * FROM "{name}" ORDER BY 1')).all()
+                for name in tables
+            }
+
+        before = snapshot()
+        supporting_revision().upgrade()
+        assert snapshot() == before
+
+
 @pytest.mark.asyncio
-@pytest.mark.parametrize("exercise", [exercise_fresh_setup, exercise_existing_database])
+@pytest.mark.parametrize(
+    "exercise",
+    [
+        exercise_fresh_setup,
+        exercise_existing_database,
+        exercise_supporting_upgrade_preserves_records,
+    ],
+)
 async def test_initial_schema_is_complete_and_refuses_existing_data(
     postgres_session_factory: async_sessionmaker[AsyncSession], exercise
 ) -> None:

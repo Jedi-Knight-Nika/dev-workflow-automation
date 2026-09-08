@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import { resolve } from '$app/paths';
   import PageHeader from '$lib/components/PageHeader.svelte';
+  import MonitoringSettings from '$lib/components/observability/MonitoringSettings.svelte';
   import ErrorBanner from '$lib/components/ErrorBanner.svelte';
   import { getAccountSettings, updateAccountSettings } from '$lib/services/settings';
   import type { AccountSettings } from '$lib/types';
@@ -41,6 +42,7 @@
   description="Display preferences and platform-enforced execution boundaries."
 />
 <main class="max-w-4xl space-y-6 p-4 sm:p-6 md:p-10">
+  <MonitoringSettings />
   {#if error}<ErrorBanner message={error} />{/if}
   {#if message}<p role="status" class="text-accent">{message}</p>{/if}
   {#if settings}

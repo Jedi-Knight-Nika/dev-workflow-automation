@@ -5,6 +5,7 @@
   import { createLiveRefresh } from '$lib/live-refresh';
   import ErrorBanner from '$lib/components/ErrorBanner.svelte';
   import V2StatisticsPanel from '$lib/components/V2StatisticsPanel.svelte';
+  import OperationsDashboard from '$lib/components/observability/OperationsDashboard.svelte';
   import PageHeader from '$lib/components/PageHeader.svelte';
   import Skeleton from '$lib/components/Skeleton.svelte';
   import PixelAgentAvatar from '$lib/components/agents/PixelAgentAvatar.svelte';
@@ -449,16 +450,21 @@
       </section>
     {/if}
   {/if}
+  <OperationsDashboard />
   <V2StatisticsPanel />
 </main>
 
 <style>
   .cockpit {
+    grid-template-columns: minmax(0, 1fr);
     max-width: 1500px;
     margin: auto;
     padding: 1.25rem;
     display: grid;
     gap: 1.25rem;
+  }
+  .cockpit > :global(*) {
+    min-width: 0;
   }
   .toolbar,
   .section-title,

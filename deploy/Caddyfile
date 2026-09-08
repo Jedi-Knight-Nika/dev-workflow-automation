@@ -1,5 +1,8 @@
 {$DOMAIN} {
 	encode zstd gzip
+	# Metrics and alert ingestion are internal-only, even for authenticated operators.
+	@monitoring path /metrics /api/v1/observability/alerts
+	respond @monitoring 404
 
 	# Provider callbacks authenticate their original body signatures in the API.
 	handle /webhooks/* {

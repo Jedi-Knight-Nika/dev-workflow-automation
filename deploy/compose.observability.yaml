@@ -1,0 +1,116 @@
+# Optional overlay. Paths are relative to the first Compose file's directory.
+# Set OBSERVABILITY_CONFIG_ROOT to the absolute repository monitoring directory.
+x-monitor: &monitor
+  restart: unless-stopped
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  pids_limit: 100
+  mem_limit: 128m
+  cpus: 0.25
+  networks: [observability]
+
+services:
+  backend:
+    networks: [default, observability]
+    environment: &settings
+      OBSERVABILITY_ENABLED: ${OBSERVABILITY_ENABLED:-false}
+      PROMETHEUS_URL: http://prometheus:9090
+      OBSERVABILITY_HOST_ID: ${OBSERVABILITY_HOST_ID:-local}
+      OBSERVABILITY_COMPOSE_PROJECT: ${OBSERVABILITY_COMPOSE_PROJECT:-autonomous-engineering-worker}
+      OBSERVABILITY_RETENTION_DAYS: ${OBSERVABILITY_RETENTION_DAYS:-30}
+      OBSERVABILITY_RETENTION_SIZE: ${OBSERVABILITY_RETENTION_SIZE:-5GB}
+      OBSERVABILITY_LIVE_REFRESH_SECONDS: ${OBSERVABILITY_LIVE_REFRESH_SECONDS:-5}
+      METRICS_TOKEN_FILE: /run/secrets/metrics_token
+      OBSERVABILITY_ALERT_TOKEN_FILE: /run/secrets/alert_token
+      FORECASTS_ENABLED: ${FORECASTS_ENABLED:-false}
+      FORECAST_MIN_SAMPLES: ${FORECAST_MIN_SAMPLES:-5}
+    secrets: [metrics_token, alert_token]
+  worker:
+    networks: [default, observability]
+    environment: *settings
+    secrets: [metrics_token, alert_token]
+  prometheus:
+    <<: *monitor
+    image: ${PROMETHEUS_IMAGE:-prom/prometheus:v3.14.0}
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=${OBSERVABILITY_RETENTION_DAYS:-30}d
+      - --storage.tsdb.retention.size=${OBSERVABILITY_RETENTION_SIZE:-5GB}
+      - --query.timeout=5s
+      - --query.max-concurrency=8
+    volumes:
+      - ${OBSERVABILITY_CONFIG_ROOT:?Set absolute monitoring config directory}/prometheus:/etc/prometheus:ro
+      - prometheus_data:/prometheus
+    secrets: [metrics_token]
+    mem_limit: ${PROMETHEUS_MEMORY_LIMIT:-768m}
+    cpus: ${PROMETHEUS_CPUS:-0.75}
+  cadvisor:
+    # Trusted host collector, not a task runner. Mounts disclose host state.
+    image: ${CADVISOR_IMAGE:-ghcr.io/google/cadvisor:v0.60.5}
+    restart: unless-stopped
+    privileged: true
+    read_only: true
+    devices: [/dev/kmsg:/dev/kmsg]
+    command:
+      - --docker_only=true
+      - --housekeeping_interval=10s
+      - --store_container_labels=false
+      - --whitelisted_container_labels=com.docker.compose.service
+      - --disable_metrics=percpu,referenced_memory,resctrl,hugetlb,tcp,udp,advtcp
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker:/var/lib/docker:ro
+      - /dev/disk:/dev/disk:ro
+    networks: [observability]
+    pids_limit: 200
+    mem_limit: ${CADVISOR_MEMORY_LIMIT:-384m}
+    cpus: ${CADVISOR_CPUS:-0.5}
+  node-exporter:
+    <<: *monitor
+    image: ${NODE_EXPORTER_IMAGE:-prom/node-exporter:v1.12.1}
+    command: [--path.rootfs=/host, --path.procfs=/host/proc, --path.sysfs=/host/sys]
+    volumes: ['/:/host:ro,rslave']
+  postgres-exporter:
+    <<: *monitor
+    image: ${POSTGRES_EXPORTER_IMAGE:-quay.io/prometheuscommunity/postgres-exporter:v0.20.1}
+    networks: [observability, default]
+    environment:
+      DATA_SOURCE_URI: postgres:5432/${OBSERVABILITY_POSTGRES_DB:-${POSTGRES_DB:-engineering_worker}}?sslmode=disable
+      DATA_SOURCE_USER: aew_monitor
+      DATA_SOURCE_PASS_FILE: /run/secrets/postgres_monitor_password
+      PG_EXPORTER_COLLECTION_TIMEOUT: 3s
+    secrets: [postgres_monitor_password]
+  blackbox-exporter:
+    <<: *monitor
+    image: ${BLACKBOX_EXPORTER_IMAGE:-prom/blackbox-exporter:v0.28.0}
+    command: [--config.file=/etc/blackbox/blackbox.yml]
+    networks: [observability, default]
+    volumes:
+      - ${OBSERVABILITY_CONFIG_ROOT}/blackbox:/etc/blackbox:ro
+  alertmanager:
+    <<: *monitor
+    image: ${ALERTMANAGER_IMAGE:-prom/alertmanager:v0.34.0}
+    profiles: [alerts]
+    command: [--config.file=/etc/alertmanager/alertmanager.yml, --storage.path=/alertmanager, --cluster.listen-address=]
+    volumes:
+      - ${OBSERVABILITY_CONFIG_ROOT}/alertmanager:/etc/alertmanager:ro
+      - alertmanager_data:/alertmanager
+    secrets: [alert_token]
+
+networks:
+  observability:
+    internal: true
+volumes:
+  prometheus_data:
+  alertmanager_data:
+secrets:
+  metrics_token:
+    file: ${METRICS_TOKEN_FILE:?Set metrics token file}
+  alert_token:
+    file: ${OBSERVABILITY_ALERT_TOKEN_FILE:?Set alert token file}
+  postgres_monitor_password:
+    file: ${POSTGRES_MONITOR_PASSWORD_FILE:?Set dedicated database monitoring password file}

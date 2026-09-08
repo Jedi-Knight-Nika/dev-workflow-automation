@@ -8,12 +8,12 @@ from alembic.script import ScriptDirectory
 from app.platform.configuration.settings import Settings
 
 
-def test_one_initial_revision_can_generate_sql_without_a_database() -> None:
+def test_initial_and_additive_revisions_can_generate_sql_without_a_database() -> None:
     output = StringIO()
     config = Config("alembic.ini", output_buffer=output)
     revisions = ScriptDirectory.from_config(config)
-    assert revisions.get_heads() == ["0001_initial"]
-    assert len(list(revisions.walk_revisions())) == 1
+    assert revisions.get_heads() == ["0003_operational_configuration"]
+    assert len(list(revisions.walk_revisions())) == 3
     command.upgrade(config, "head", sql=True)
     sql = output.getvalue()
     assert "CREATE TABLE developer_sessions" in sql
@@ -22,6 +22,8 @@ def test_one_initial_revision_can_generate_sql_without_a_database() -> None:
     assert "ALTER TABLE" not in sql
     assert "CREATE EXTENSION" not in sql
     assert "DROP TABLE" not in sql
+    assert "CREATE TABLE runner_resource_bindings" in sql
+    assert "CREATE TABLE task_forecasts" in sql
 
 
 def test_fresh_installation_never_enables_paid_execution() -> None:

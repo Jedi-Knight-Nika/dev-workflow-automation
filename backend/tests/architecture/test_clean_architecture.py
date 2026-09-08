@@ -124,7 +124,17 @@ async def test_create_task_use_case_rolls_back_as_one_transaction() -> None:
 
 
 @pytest.mark.parametrize(
-    "context", ["engineering", "agent_runtime", "delivery", "teams", "intake", "repositories"]
+    "context",
+    [
+        "engineering",
+        "agent_runtime",
+        "delivery",
+        "teams",
+        "intake",
+        "repositories",
+        "observability",
+        "analytics",
+    ],
 )
 @pytest.mark.parametrize("layer", ["domain", "application"])
 def test_inner_layers_are_framework_independent(context: str, layer: str) -> None:

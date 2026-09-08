@@ -1,0 +1,16 @@
+# Docker Desktop collectors measure the Linux VM, not the macOS host.
+# Layer after compose.observability.yaml. Production Linux uses the original mounts.
+services:
+  cadvisor:
+    devices: !reset []
+    volumes:
+      - /:/rootfs:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /sys:/sys:ro
+  node-exporter:
+    volumes: !reset []
+    command:
+      - --path.rootfs=/
+      - --path.procfs=/proc
+      - --path.sysfs=/sys
+      - --collector.filesystem.fs-types-exclude=^(autofs|binfmt_misc|bpf|cgroup2?|configfs|debugfs|devpts|devtmpfs|fusectl|hugetlbfs|mqueue|proc|pstore|securityfs|selinuxfs|sysfs|tmpfs|tracefs)$

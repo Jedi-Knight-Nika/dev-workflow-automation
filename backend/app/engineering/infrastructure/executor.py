@@ -33,7 +33,7 @@ from app.engineering.infrastructure.validator_runner import ValidationManifest
 from app.platform.configuration.settings import Settings
 from app.platform.integrations.models import Integration
 from app.platform.security.crypto import cipher
-from app.repositories.infrastructure.models import Repository
+from app.repositories.infrastructure.models import Repository, RepositoryRuntimeProfile
 from app.teams.infrastructure.models import TeamAgentProfile
 from app.teams.infrastructure.team_models import Team
 
@@ -41,6 +41,14 @@ from app.teams.infrastructure.team_models import Team
 class SqlPhaseExecutor:
     def __init__(self, sessions: async_sessionmaker[AsyncSession], settings: Settings) -> None:
         self.sessions, self.settings = sessions, settings
+
+    async def runtime_profile(self, task: Task) -> RepositoryRuntimeProfile | None:
+        async with self.sessions() as session:
+            return (
+                await session.get(RepositoryRuntimeProfile, task.repository_id)
+                if task.repository_id
+                else None
+            )
 
     def _mounts(
         self, lease: PhaseLease, native: DeveloperSession, *, compaction: bool = False
@@ -245,11 +253,14 @@ class SqlPhaseExecutor:
                     "HTTPS_PROXY": self.settings.developer_egress_proxy,
                     "HTTP_PROXY": self.settings.developer_egress_proxy,
                 }
+                runtime = await self.runtime_profile(task)
                 harness = DockerHarness(
                     client,
                     mounts=mounts,
                     manifest=manifest,
-                    image=self.settings.developer_container_image,
+                    image=runtime.developer_image_ref
+                    if runtime
+                    else self.settings.developer_container_image,
                     network=self.settings.developer_container_network,
                     environment=environment,
                     job_id=lease.job_id,
@@ -393,7 +404,12 @@ class SqlPhaseExecutor:
         native: DeveloperSession,
         team: Team,
     ) -> Action:
-        commands = self.settings.v2_validation_commands.get(str(task.repository_id), [])
+        runtime = await self.runtime_profile(task)
+        commands = (
+            runtime.validation_commands
+            if runtime
+            else self.settings.v2_validation_commands.get(str(task.repository_id), [])
+        )
         if not commands or not task.branch_name:
             raise PhaseBlocked(
                 WaitReason.MISSING_CONFIGURATION,
@@ -409,7 +425,12 @@ class SqlPhaseExecutor:
         )
         mounts = self._mounts(lease, native)
         atomic_json(mounts.manifest, manifest.model_dump(mode="json"))
-        spec = validation_container_spec(mounts, image=self.settings.developer_container_image)
+        spec = validation_container_spec(
+            mounts,
+            image=runtime.validator_image_ref
+            if runtime
+            else self.settings.developer_container_image,
+        )
         spec["Labels"]["job_id"] = str(lease.job_id)
         validation_started = datetime.now(UTC)
         result = await run_container_job(
@@ -428,6 +449,19 @@ class SqlPhaseExecutor:
             ):
                 raise ValueError("Task changed while validating")
             passed = result.get("passed") is True
+            if passed and runtime:
+                configured = await session.get(RepositoryRuntimeProfile, runtime.repository_id)
+                if (
+                    configured
+                    and configured.validator_image_ref == runtime.validator_image_ref
+                    and configured.validation_commands == commands
+                ):
+                    configured.last_verified_at = datetime.now(UTC)
+                    configured.image_digest = (
+                        runtime.validator_image_ref.split("@", 1)[1]
+                        if "@sha256:" in runtime.validator_image_ref
+                        else None
+                    )
             for check in result["checks"]:
                 session.add(
                     ValidationRun(

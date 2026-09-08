@@ -4,7 +4,7 @@
 
 Use a new empty PostgreSQL database. API startup runs `alembic upgrade head` before serving requests.
 
-The only revision is `backend/migrations/versions/0001_initial.py`. It applies frozen `initial_schema.sql` and `initial_entities.sql` snapshots. The schema contains the 24 current application tables listed in [PRODUCT.md](../PRODUCT.md). Existing incompatible tables/revisions are refused, not silently dropped or stamped.
+The baseline revision `backend/migrations/versions/0001_initial.py` applies frozen `initial_schema.sql` and `initial_entities.sql` snapshots. V2.1 adds `0002_observability_analytics` and `0003_operational_configuration` without recreating the original tables or resetting existing data. Existing incompatible tables/revisions are refused, not silently dropped or stamped. Back up and test migrations against a restored copy before production rollout.
 
 Initial entities:
 
@@ -38,11 +38,12 @@ Local ports bind to 127.0.0.1:3000 and 127.0.0.1:8000. Scheduling stays disabled
 
 ## Production native execution
 
-For a local native instance, use the same overlay with root `compose.yaml`. In the selected
-ignored environment file set `V2_BUILD_CONTEXT=./backend`, an absolute `V2_DATA_ROOT`, a
-new database and a prepared `V2_RUNNER_IMAGE`. Always pass that environment file explicitly;
-do not accidentally reconnect the base `.env` database. Keep the scheduler disabled until
-the Team admission checklist is complete.
+For a local native instance, use the same overlay with root `compose.yaml`. In the
+ignored `.env` set `V2_BUILD_CONTEXT=./backend`, an absolute `V2_DATA_ROOT`, the one
+application database and a prepared `V2_RUNNER_IMAGE`. The configured V2.1 local
+instance includes the native and observability overlays through `COMPOSE_FILE`;
+`docker compose up -d --build` starts the full app. Keep the scheduler disabled
+on a fresh installation until the Team admission checklist is complete.
 
 Use both production files:
 

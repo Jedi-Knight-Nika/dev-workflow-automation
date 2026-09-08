@@ -140,6 +140,27 @@ Optional roles produce one bounded artifact. Repeated completed planning for the
 
 Native harness context and cache reads can still be billed. Bash is an editing/testing tool, not a way to eliminate model tokens. See [the execution/accounting contract](docs/v2-implementation.md).
 
+## V2.1 operations and engineering intelligence
+
+The product includes a live Svelte/ECharts dashboard backed by private Prometheus
+and durable PostgreSQL facts. It shows host and service CPU/RAM/disk/network,
+container state, active runner attribution, availability and incident history.
+Task drill-downs combine retained runner summaries, individual AI receipts,
+phase/wait breakdowns and forecast-versus-actual evidence. The fixed Team canvas
+adds live activity/resource badges without changing its topology.
+
+AI cost and token analytics distinguish unknown values, cache/reasoning subsets,
+compaction, failed spend and local Interpreter activity. Statistical task, queue
+and period forecasts have confidence and sample counts, make no paid AI calls,
+and never control task admission. Monitoring preferences and repository-specific
+Developer/validator images and argv validation commands are editable in the app.
+
+All application contexts use one PostgreSQL database. Prometheus stores resource
+time series only; it is not another application or billing database. The local
+`.env` selects the complete native/monitoring Compose stack for `docker compose
+up -d --build`. See [the code and architecture mapping](docs/v2.1-architecture.md)
+for implementation paths and [the rollout ledger](docs/v2.1-rollout.md) for evidence.
+
 ## Acceptance boundary
 
 Local automated tests exercise the state machine, fresh PostgreSQL schema, budgets, native protocol, ingestion, publication/merge mocks, controls and browser behavior. Real SDK sessions, deployment container isolation, dependency images, backup/restore and a representative paid-task benchmark require the actual deployment host.

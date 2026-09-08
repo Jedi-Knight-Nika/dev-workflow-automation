@@ -1,0 +1,69 @@
+groups:
+  - name: aew-operations
+    rules:
+      - alert: ServiceUnavailable
+        expr: probe_success == 0
+        for: 1m
+        labels: {severity: critical}
+      - alert: MonitoringTargetUnavailable
+        expr: up == 0
+        for: 2m
+        labels: {severity: warning}
+      - alert: HostRAMPressure
+        expr: 1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes > scalar(max(aew_monitoring_ram_warning)) / 100
+        for: 5m
+        labels: {severity: warning, service: host}
+      - alert: HostCPUPressure
+        expr: 1 - avg(rate(node_cpu_seconds_total{mode="idle"}[5m])) > scalar(max(aew_monitoring_cpu_warning)) / 100
+        for: 10m
+        labels: {severity: warning, service: host}
+      - alert: HostDiskPressure
+        expr: 1 - node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"} > scalar(max(aew_monitoring_disk_warning)) / 100
+        for: 5m
+        labels: {severity: critical, service: host}
+      - alert: QueueStalled
+        expr: aew_scheduler_oldest_queued_seconds > scalar(max(aew_monitoring_queue_warning_seconds))
+        for: 5m
+        labels: {severity: warning, service: worker-controller}
+      - alert: DatabaseUnavailable
+        expr: pg_up == 0
+        for: 1m
+        labels: {severity: critical, service: postgres}
+      - alert: ContainerMemoryPressure
+        expr: container_memory_working_set_bytes / (container_spec_memory_limit_bytes > 0) > 0.9
+        for: 5m
+        labels: {severity: warning}
+      - alert: ContainerThrottling
+        expr: rate(container_cpu_cfs_throttled_seconds_total[5m]) > 0.25
+        for: 5m
+        labels: {severity: warning}
+      - alert: RunnerOOM
+        expr: increase(aew_runner_oom_events[5m]) > 0
+        labels: {severity: critical, service: worker-controller}
+      - alert: RestartLoop
+        expr: increase(aew_container_restarts[10m]) > 3
+        labels: {severity: warning, service: worker-controller}
+      - alert: WorkerHeartbeatStale
+        expr: aew_worker_heartbeat_age_seconds > 60
+        for: 1m
+        labels: {severity: critical, service: worker-controller}
+      - alert: UnknownStoppedBilling
+        expr: aew_unknown_stopped_ai_cost_runs > 0
+        for: 1m
+        labels: {severity: warning, service: ai-accounting}
+      - alert: ProviderFailureSpike
+        expr: sum by (provider) (increase(aew_provider_failures_total[10m])) > 5
+        for: 2m
+        labels: {severity: warning}
+      - alert: ProviderRateLimits
+        expr: sum by (provider) (increase(aew_provider_rate_limits_total[10m])) > 3
+        for: 2m
+        labels: {severity: warning}
+      - alert: WebhookFailures
+        expr: sum(increase(aew_webhook_deliveries_total{result="FAILED"}[10m])) > 3
+        for: 2m
+        labels: {severity: warning, service: backend}
+      - alert: HostSwapPressure
+        expr: node_memory_SwapTotal_bytes - node_memory_SwapFree_bytes > 1073741824
+        for: 5m
+        labels: {severity: warning, service: host}

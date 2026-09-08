@@ -64,9 +64,36 @@ class Settings(BaseSettings):
     github_issue_routes: dict[str, dict[str, str]] = Field(default_factory=dict)
     trello_webhook_secret: str = ""
     trello_webhook_callback_url: str = ""
+    # Supporting planes are opt-in and never participate in execution admission.
+    observability_enabled: bool = False
+    prometheus_url: str = "http://prometheus:9090"
+    observability_host_id: str = Field(default="local", pattern=r"^[a-zA-Z0-9_-]{1,80}$")
+    observability_compose_project: str = "autonomous-engineering-worker"
+    observability_timeout_seconds: float = Field(default=3, ge=0.2, le=10)
+    observability_live_refresh_seconds: int = Field(default=5, ge=5, le=60)
+    observability_retention_days: int = Field(default=30, ge=1, le=90)
+    observability_retention_size: str = Field(default="5GB", pattern=r"^[1-9][0-9]*(MB|GB|TB)$")
+    observability_cpu_warning: int = Field(default=90, ge=1, le=100)
+    observability_ram_warning: int = Field(default=85, ge=1, le=100)
+    observability_disk_warning: int = Field(default=85, ge=1, le=100)
+    observability_queue_warning_seconds: int = Field(default=900, ge=30, le=86400)
+    observability_alert_token: str = ""
+    metrics_token: str = ""
+    metrics_token_file: Path | None = None
+    observability_alert_token_file: Path | None = None
+    forecasts_enabled: bool = False
+    forecast_min_samples: int = Field(default=5, ge=3, le=100)
+    forecast_horizon_days: int = Field(default=7, ge=1, le=30)
 
     @model_validator(mode="after")
     def validate_production_secrets(self) -> "Settings":
+        for target in ("metrics_token", "observability_alert_token"):
+            file = getattr(self, target + "_file")
+            if file is not None:
+                value = file.read_text().strip()
+                if len(value) < 32 or len(value) > 256:
+                    raise ValueError("Monitoring secret files require 32–256 characters")
+                setattr(self, target, value)
         if self.environment.lower() != "production":
             return self
         secrets = {

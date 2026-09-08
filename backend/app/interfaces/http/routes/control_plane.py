@@ -1,7 +1,9 @@
 import uuid
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import RedirectResponse
+from pydantic import BaseModel, Field, field_validator
 
 from app.agent_runtime.application.discover_provider_catalog import DiscoverProviderCatalog
 from app.agent_runtime.application.ports.provider_catalog import (
@@ -18,6 +20,7 @@ from app.bootstrap.dependencies import (
     get_repository_management_workflow,
     get_worker_queries,
 )
+from app.bootstrap.repository_runtime import repository_runtimes
 from app.interfaces.http.schemas.dashboard import DashboardActivityRead
 from app.interfaces.http.schemas.integrations import (
     DiscoveredRepository,
@@ -68,8 +71,53 @@ from app.repositories.application.ports.repository_management import (
     ManagedRepositoryNotFound,
     RepositoryManagementWorkflow,
 )
+from app.repositories.application.runtime_profiles import RepositoryRuntimes
 
 router = APIRouter(tags=["control-plane"])
+
+
+class RuntimeProfileWrite(BaseModel):
+    developer_image_ref: str = Field(
+        min_length=1, max_length=500, pattern=r"^[a-zA-Z0-9][a-zA-Z0-9_./:@-]+$"
+    )
+    validator_image_ref: str = Field(
+        min_length=1, max_length=500, pattern=r"^[a-zA-Z0-9][a-zA-Z0-9_./:@-]+$"
+    )
+    validation_commands: list[list[str]] = Field(min_length=1, max_length=30)
+
+    @field_validator("validation_commands")
+    @classmethod
+    def bounded_commands(cls, commands: list[list[str]]) -> list[list[str]]:
+        if any(
+            not argv
+            or len(argv) > 50
+            or any(not arg or len(arg) > 1000 or "\x00" in arg for arg in argv)
+            for argv in commands
+        ):
+            raise ValueError("Use 1–50 non-empty bounded arguments per command")
+        return commands
+
+
+@router.get("/repositories/{repository_id}/runtime")
+async def read_repository_runtime(
+    repository_id: uuid.UUID, store: RepositoryRuntimes = Depends(repository_runtimes)
+) -> dict[str, Any]:
+    try:
+        return await store.read(repository_id)
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+@router.put("/repositories/{repository_id}/runtime")
+async def save_repository_runtime(
+    repository_id: uuid.UUID,
+    body: RuntimeProfileWrite,
+    store: RepositoryRuntimes = Depends(repository_runtimes),
+) -> dict[str, Any]:
+    try:
+        return await store.save(repository_id, body.model_dump())
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
 
 
 @router.get("/activity", response_model=DashboardActivityRead)

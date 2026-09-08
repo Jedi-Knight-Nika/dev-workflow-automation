@@ -42,6 +42,7 @@
   },
   "dependencies": {
     "@icons-pack/svelte-simple-icons": "^6.5.0",
-    "@xyflow/svelte": "^1.6.6"
+    "@xyflow/svelte": "^1.6.6",
+    "echarts": "^6.1.0"
   }
 }

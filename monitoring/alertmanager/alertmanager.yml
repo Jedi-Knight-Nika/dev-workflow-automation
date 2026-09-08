@@ -1,0 +1,15 @@
+route:
+  receiver: product
+  group_by: [alertname, service, job]
+  group_wait: 15s
+  group_interval: 1m
+  repeat_interval: 4h
+receivers:
+  - name: product
+    webhook_configs:
+      - url: http://backend:8000/api/v1/observability/alerts
+        send_resolved: true
+        max_alerts: 100
+        http_config:
+          authorization:
+            credentials_file: /run/secrets/alert_token

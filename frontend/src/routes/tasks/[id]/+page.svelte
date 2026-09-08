@@ -3,6 +3,7 @@
   import { SvelteMap } from 'svelte/reactivity';
   import { onMount } from 'svelte';
   import PageHeader from '$lib/components/PageHeader.svelte';
+  import TaskResourceBreakdown from '$lib/components/observability/TaskResourceBreakdown.svelte';
   import ErrorBanner from '$lib/components/ErrorBanner.svelte';
   import TaskControls from '$lib/components/task-detail/TaskControls.svelte';
   import TaskConversation from '$lib/components/task-detail/TaskConversation.svelte';
@@ -223,4 +224,5 @@
   {:else}
     <p class="p-5 text-muted">Loading task and execution evidence…</p>
   {/if}
+  {#if task}{#key task.id}<TaskResourceBreakdown taskId={task.id} />{/key}{/if}
 </main>

@@ -10,11 +10,15 @@ from starlette.middleware.base import RequestResponseEndpoint
 from starlette.requests import Request
 from starlette.responses import Response
 
+from app.bootstrap.observability import observe_request
 from app.bootstrap.scheduler import create_scheduler
+from app.interfaces.http.routes.analytics import router as analytics_router
 from app.interfaces.http.routes.control_plane import router as control_plane_router
 from app.interfaces.http.routes.dashboard import router as dashboard_router
 from app.interfaces.http.routes.events import router as events_router
 from app.interfaces.http.routes.health import router as health_router
+from app.interfaces.http.routes.metrics import router as metrics_router
+from app.interfaces.http.routes.observability import router as observability_router
 from app.interfaces.http.routes.settings import router as settings_router
 from app.interfaces.http.routes.tasks import router as tasks_router
 from app.interfaces.http.routes.teams import router as teams_router
@@ -64,6 +68,9 @@ app.include_router(control_plane_router, prefix="/api/v1")
 app.include_router(events_router, prefix="/api/v1")
 app.include_router(webhooks_router)
 app.include_router(v2_router, prefix="/api/v1")
+app.include_router(observability_router, prefix="/api/v1")
+app.include_router(analytics_router, prefix="/api/v1")
+app.include_router(metrics_router)
 
 
 @app.middleware("http")
@@ -73,6 +80,7 @@ async def request_log(request: Request, call_next: RequestResponseEndpoint) -> R
     try:
         response = await call_next(request)
     except Exception:
+        observe_request(request.url.path, request.method, 500, perf_counter() - started)
         log.exception(
             "http_request_failed",
             request_id=request_id,
@@ -82,6 +90,9 @@ async def request_log(request: Request, call_next: RequestResponseEndpoint) -> R
         )
         raise
     response.headers["x-request-id"] = request_id
+    observe_request(
+        request.url.path, request.method, response.status_code, perf_counter() - started
+    )
     log.info(
         "http_request_completed",
         request_id=request_id,

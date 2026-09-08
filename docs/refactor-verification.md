@@ -116,8 +116,11 @@ metadata were copied; the previous database was left intact. `.env.native` point
 database and `.runtime` stores task checkouts/native state. Both are ignored/protected local
 data, not committed configuration. Root `.env` still points to the previous database.
 
-Use `--env-file .env.native -f compose.yaml -f deploy/compose.v2.yaml` for this local instance.
-Plain base Compose commands do not select its native runtime configuration.
+Superseded by the V2.1 consolidation on September 8: the redundant legacy/test
+databases were deleted with operator authorization, the native database was renamed
+`engineering_worker`, and its runtime and monitoring configuration moved into `.env`.
+Plain `docker compose up -d --build` now selects the complete local stack through
+`COMPOSE_FILE` and `COMPOSE_PROFILES`; there is no separate preview database.
 
 ## Remaining acceptance / caveats
 

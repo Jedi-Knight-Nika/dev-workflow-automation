@@ -38,7 +38,9 @@ export function lifecycleNodes(tasks: EngineeringTask[], selected?: EngineeringT
       draggable: false,
       connectable: false,
       deletable: false,
-      style: active ? 'border-color: #2dd4bf; background: #134e4a; color: white' : undefined
+      style: active
+        ? 'border-color: var(--color-accent); background: color-mix(in srgb, var(--color-accent) 16%, var(--color-panel)); color: var(--color-heading); box-shadow: 0 0 18px -2px color-mix(in srgb, var(--color-accent) 55%, transparent);'
+        : undefined
     };
   });
 }
@@ -48,6 +50,7 @@ export const lifecycleEdges: Edge[] = connections.map(([source, target]) => ({
   source,
   target,
   deletable: false,
-  animated: false,
-  type: 'smoothstep'
+  animated: true,
+  type: 'smoothstep',
+  style: 'stroke: var(--color-brand-2); stroke-width: 1.6px;'
 }));
