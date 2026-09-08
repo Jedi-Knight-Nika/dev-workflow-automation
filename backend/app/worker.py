@@ -37,6 +37,7 @@ from app.infrastructure.persistence.consultations import available_consultants
 from app.infrastructure.persistence.task_memory import TaskMemoryService
 from app.infrastructure.security.crypto import cipher
 from app.infrastructure.tools import GatewayContext, ToolGateway, ToolNeedsApproval
+from app.infrastructure.workers.attempt_grants import approved_attempt_limits
 from app.infrastructure.workers.context_compiler import ContextCompiler
 from app.infrastructure.workers.context_efficiency import ROLE_PROTOCOLS, request_token_reserve
 from app.infrastructure.workers.executor import (
@@ -576,6 +577,9 @@ async def enforce_spending_budget(
     reserved_tokens: int = 0,
 ) -> None:
     account = await session.get(AccountSettings, "default")
+    grant = await approved_attempt_limits(
+        session, job, settings.max_job_tokens, settings.max_job_model_calls
+    )
     pending_tokens = sum(
         (attempt.response.input_tokens or 0) + (attempt.response.output_tokens or 0)
         for attempt in pending_attempts
@@ -644,6 +648,10 @@ async def enforce_spending_budget(
             "job": settings.max_job_model_calls,
             "task": settings.max_task_model_calls,
         }.get(scope)
+        if scope == "task" and grant is not None:
+            # Only the explicitly named job gets a new ceiling. Every historical
+            # response is still counted; job/team/dollar guards remain unchanged.
+            token_limit, call_limit = grant
         if call_limit and int(used_calls) + len(pending_attempts) >= call_limit:
             raise BudgetExceeded(
                 f"{scope.title()} model-call budget exhausted ({int(used_calls) + len(pending_attempts)}/{call_limit})",

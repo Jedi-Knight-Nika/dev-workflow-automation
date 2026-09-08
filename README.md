@@ -26,6 +26,14 @@ docker compose up --build
 Read [PRODUCT.md](PRODUCT.md) for the complete product and architecture reference, and
 [DEVELOPMENT.md](DEVELOPMENT.md) for setup, operations, and validation commands.
 
+See [How AI task execution currently works](docs/ai-task-lifecycle-current.md) for an
+English, source-backed walkthrough from task creation to merge, including role handoffs,
+workspace tools, context, token budgets, and known completion limitations.
+
+See [Project architecture and detailed feature inventory](docs/project-architecture-and-features.md)
+for the technology stack, deployment, domain/data model, UI and API features,
+integrations, security boundaries, operations, and current limitations.
+
 See [Role-by-role efficiency research](docs/role-efficiency-research.md) for the latest
 Planner, Executor, routing, review, and validation optimizations and their test evidence.
 
