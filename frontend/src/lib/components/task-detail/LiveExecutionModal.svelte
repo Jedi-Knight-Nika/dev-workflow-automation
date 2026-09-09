@@ -11,6 +11,8 @@
   let activeRun = $state<LiveExecution | null>(null);
   let previous: LiveExecution['telemetry'] = null;
   let connected = $state(false);
+  let position = $state({ x: 0, y: 0 });
+  let drag = $state<{ pointerId: number; offsetX: number; offsetY: number } | null>(null);
 
   const stamp = () => new Date().toLocaleTimeString([], { hour12: false });
   const push = async (message: string) => {
@@ -68,8 +70,44 @@
     }
   }
 
+  function startDrag(event: PointerEvent) {
+    if (
+      event.pointerType !== 'mouse' ||
+      event.button !== 0 ||
+      (event.target instanceof Element && event.target.closest('button'))
+    )
+      return;
+    const bounds = dialog.getBoundingClientRect();
+    drag = {
+      pointerId: event.pointerId,
+      offsetX: event.clientX - bounds.left,
+      offsetY: event.clientY - bounds.top
+    };
+    dialog.setPointerCapture(event.pointerId);
+    event.preventDefault();
+  }
+
+  function moveDrag(event: PointerEvent) {
+    if (!drag || event.pointerId !== drag.pointerId) return;
+    const bounds = dialog.getBoundingClientRect();
+    position = {
+      x: Math.max(0, Math.min(window.innerWidth - bounds.width, event.clientX - drag.offsetX)),
+      y: Math.max(0, Math.min(window.innerHeight - bounds.height, event.clientY - drag.offsetY))
+    };
+  }
+
+  function finishDrag(event: PointerEvent) {
+    if (!drag || event.pointerId !== drag.pointerId) return;
+    drag = null;
+    if (dialog.hasPointerCapture(event.pointerId)) dialog.releasePointerCapture(event.pointerId);
+  }
+
   onMount(() => {
     dialog.showModal();
+    void tick().then(() => {
+      const bounds = dialog.getBoundingClientRect();
+      position = { x: bounds.left, y: bounds.top };
+    });
     void push('Opening bounded execution telemetry…');
     void poll();
     const timer = setInterval(() => {
@@ -81,13 +119,22 @@
 
 <dialog
   bind:this={dialog}
+  style:left={`${position.x}px`}
+  style:top={`${position.y}px`}
   onclose={onClose}
   onclick={(event) => {
     if (event.target === dialog) dialog.close();
   }}
 >
   <section>
-    <header>
+    <header
+      role="presentation"
+      class:dragging={drag !== null}
+      onpointerdown={startDrag}
+      onpointermove={moveDrag}
+      onpointerup={finishDrag}
+      onpointercancel={finishDrag}
+    >
       <div class="identity">
         <span class:connected class="live-dot"></span>
         <BrandIcon brand={activeRun?.provider || 'ai'} size={19} />
@@ -113,8 +160,15 @@
 
 <style>
   dialog {
+    position: fixed;
     width: min(900px, calc(100vw - 2rem));
-    max-width: none;
+    height: min(600px, calc(100dvh - 2rem));
+    min-width: min(320px, calc(100vw - 2rem));
+    min-height: 280px;
+    max-width: calc(100vw - 2rem);
+    max-height: calc(100dvh - 2rem);
+    margin: 0;
+    resize: both;
     border: 1px solid color-mix(in srgb, #22d3ee 48%, var(--color-line));
     border-radius: 15px;
     padding: 0;
@@ -128,7 +182,8 @@
     backdrop-filter: blur(8px);
   }
   section {
-    min-height: 430px;
+    min-height: 0;
+    height: 100%;
     display: grid;
     grid-template-rows: auto 1fr auto;
   }
@@ -144,6 +199,11 @@
   header {
     padding: 0.9rem 1rem;
     border-bottom: 1px solid #243140;
+    cursor: grab;
+    user-select: none;
+  }
+  header.dragging {
+    cursor: grabbing;
   }
   footer {
     padding: 0.65rem 1rem;
@@ -201,8 +261,7 @@
     animation: pulse 1.4s ease-in-out infinite;
   }
   .terminal {
-    min-height: 340px;
-    max-height: min(62vh, 620px);
+    min-height: 0;
     overflow: auto;
     padding: 1rem 1.1rem;
     background:
