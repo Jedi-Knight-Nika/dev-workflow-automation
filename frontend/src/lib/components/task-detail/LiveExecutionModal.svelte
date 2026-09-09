@@ -11,6 +11,13 @@
   let activeRun = $state<LiveExecution | null>(null);
   let previous: LiveExecution['telemetry'] = null;
   let connected = $state(false);
+  let layout = $state<{ x: number; y: number; width: number; height: number } | null>(null);
+  let interaction: {
+    type: 'drag' | 'resize';
+    pointerX: number;
+    pointerY: number;
+    layout: { x: number; y: number; width: number; height: number };
+  } | null = null;
 
   const stamp = () => new Date().toLocaleTimeString([], { hour12: false });
   const push = async (message: string) => {
@@ -68,26 +75,93 @@
     }
   }
 
+  function clamp(value: number, minimum: number, maximum: number) {
+    return Math.min(Math.max(value, minimum), maximum);
+  }
+
+  function currentLayout() {
+    if (layout) return layout;
+    const rect = dialog.getBoundingClientRect();
+    return { x: rect.left, y: rect.top, width: rect.width, height: rect.height };
+  }
+
+  function endInteraction() {
+    interaction = null;
+    window.removeEventListener('pointermove', moveWindow);
+    window.removeEventListener('pointerup', endInteraction);
+    window.removeEventListener('pointercancel', endInteraction);
+  }
+
+  function moveWindow(event: PointerEvent) {
+    if (!interaction) return;
+    const deltaX = event.clientX - interaction.pointerX;
+    const deltaY = event.clientY - interaction.pointerY;
+    const initial = interaction.layout;
+
+    if (interaction.type === 'drag') {
+      layout = {
+        ...initial,
+        x: clamp(initial.x + deltaX, 0, Math.max(0, window.innerWidth - initial.width)),
+        y: clamp(initial.y + deltaY, 0, Math.max(0, window.innerHeight - initial.height))
+      };
+    } else {
+      layout = {
+        ...initial,
+        width: clamp(initial.width + deltaX, 360, Math.max(360, window.innerWidth - initial.x)),
+        height: clamp(initial.height + deltaY, 280, Math.max(280, window.innerHeight - initial.y))
+      };
+    }
+  }
+
+  function beginInteraction(event: PointerEvent, type: 'drag' | 'resize') {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    interaction = {
+      type,
+      pointerX: event.clientX,
+      pointerY: event.clientY,
+      layout: currentLayout()
+    };
+    window.addEventListener('pointermove', moveWindow);
+    window.addEventListener('pointerup', endInteraction);
+    window.addEventListener('pointercancel', endInteraction);
+  }
+
+  function beginDrag(event: PointerEvent) {
+    if (event.target instanceof Element && event.target.closest('button')) return;
+    beginInteraction(event, 'drag');
+  }
+
   onMount(() => {
     dialog.showModal();
+    requestAnimationFrame(() => {
+      const rect = dialog.getBoundingClientRect();
+      layout = { x: rect.left, y: rect.top, width: rect.width, height: rect.height };
+    });
     void push('Opening bounded execution telemetry…');
     void poll();
     const timer = setInterval(() => {
       if (!document.hidden) void poll();
     }, 2500);
-    return () => clearInterval(timer);
+    return () => {
+      clearInterval(timer);
+      endInteraction();
+    };
   });
 </script>
 
 <dialog
   bind:this={dialog}
+  style={layout
+    ? `left: ${layout.x}px; top: ${layout.y}px; width: ${layout.width}px; height: ${layout.height}px`
+    : ''}
   onclose={onClose}
   onclick={(event) => {
     if (event.target === dialog) dialog.close();
   }}
 >
   <section>
-    <header>
+    <header onpointerdown={beginDrag}>
       <div class="identity">
         <span class:connected class="live-dot"></span>
         <BrandIcon brand={activeRun?.provider || 'ai'} size={19} />
@@ -108,6 +182,13 @@
       <span>{activeRun ? `${activeRun.provider} · ${activeRun.model}` : 'Awaiting run'}</span>
       <span>Bounded telemetry only · no prompts, source, or credentials</span>
     </footer>
+    <div
+      class="resize-handle"
+      role="separator"
+      aria-label="Resize live execution window"
+      aria-orientation="horizontal"
+      onpointerdown={(event) => beginInteraction(event, 'resize')}
+    ></div>
   </section>
 </dialog>
 
@@ -115,10 +196,15 @@
   dialog {
     width: min(900px, calc(100vw - 2rem));
     max-width: none;
+    box-sizing: border-box;
+    position: fixed;
+    margin: 0;
     border: 1px solid color-mix(in srgb, #22d3ee 48%, var(--color-line));
     border-radius: 15px;
     padding: 0;
     overflow: hidden;
+    min-width: 360px;
+    min-height: 280px;
     background: #070b12;
     color: #d8fdf7;
     box-shadow: 0 0 80px -20px #22d3ee88;
@@ -131,6 +217,7 @@
     min-height: 430px;
     display: grid;
     grid-template-rows: auto 1fr auto;
+    height: 100%;
   }
   header,
   footer {
@@ -144,6 +231,8 @@
   header {
     padding: 0.9rem 1rem;
     border-bottom: 1px solid #243140;
+    cursor: grab;
+    user-select: none;
   }
   footer {
     padding: 0.65rem 1rem;
@@ -152,6 +241,9 @@
     font:
       0.62rem ui-monospace,
       monospace;
+  }
+  header:active {
+    cursor: grabbing;
   }
   .identity {
     display: flex;
@@ -202,8 +294,9 @@
   }
   .terminal {
     min-height: 340px;
-    max-height: min(62vh, 620px);
+    max-height: none;
     overflow: auto;
+    min-height: 0;
     padding: 1rem 1.1rem;
     background:
       radial-gradient(circle at 100% 0, #08334444, transparent 45%),
@@ -242,6 +335,24 @@
     50% {
       opacity: 0;
     }
+  }
+  .resize-handle {
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    width: 22px;
+    height: 22px;
+    cursor: nwse-resize;
+  }
+  .resize-handle::after {
+    content: '';
+    position: absolute;
+    right: 5px;
+    bottom: 5px;
+    width: 8px;
+    height: 8px;
+    border-right: 2px solid #5eead4;
+    border-bottom: 2px solid #5eead4;
   }
   @media (prefers-reduced-motion: reduce) {
     .live-dot.connected,
