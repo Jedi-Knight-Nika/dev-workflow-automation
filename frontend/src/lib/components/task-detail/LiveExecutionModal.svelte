@@ -11,6 +11,8 @@
   let activeRun = $state<LiveExecution | null>(null);
   let previous: LiveExecution['telemetry'] = null;
   let connected = $state(false);
+  const minimumWidth = 360;
+  const minimumHeight = 430;
   let layout = $state<{ x: number; y: number; width: number; height: number } | null>(null);
   let interaction: {
     type: 'drag' | 'resize';
@@ -79,10 +81,27 @@
     return Math.min(Math.max(value, minimum), maximum);
   }
 
+  function fitInViewport(next: { x: number; y: number; width: number; height: number }) {
+    const maximumWidth = window.innerWidth;
+    const maximumHeight = window.innerHeight;
+    const width = clamp(next.width, Math.min(minimumWidth, maximumWidth), maximumWidth);
+    const height = clamp(next.height, Math.min(minimumHeight, maximumHeight), maximumHeight);
+    return {
+      x: clamp(next.x, 0, Math.max(0, maximumWidth - width)),
+      y: clamp(next.y, 0, Math.max(0, maximumHeight - height)),
+      width,
+      height
+    };
+  }
+
   function currentLayout() {
-    if (layout) return layout;
+    if (layout) return fitInViewport(layout);
     const rect = dialog.getBoundingClientRect();
-    return { x: rect.left, y: rect.top, width: rect.width, height: rect.height };
+    return fitInViewport({ x: rect.left, y: rect.top, width: rect.width, height: rect.height });
+  }
+
+  function fitWindowInViewport() {
+    if (layout) layout = fitInViewport(layout);
   }
 
   function endInteraction() {
@@ -99,17 +118,17 @@
     const initial = interaction.layout;
 
     if (interaction.type === 'drag') {
-      layout = {
+      layout = fitInViewport({
         ...initial,
-        x: clamp(initial.x + deltaX, 0, Math.max(0, window.innerWidth - initial.width)),
-        y: clamp(initial.y + deltaY, 0, Math.max(0, window.innerHeight - initial.height))
-      };
+        x: initial.x + deltaX,
+        y: initial.y + deltaY
+      });
     } else {
-      layout = {
+      layout = fitInViewport({
         ...initial,
-        width: clamp(initial.width + deltaX, 360, Math.max(360, window.innerWidth - initial.x)),
-        height: clamp(initial.height + deltaY, 280, Math.max(280, window.innerHeight - initial.y))
-      };
+        width: initial.width + deltaX,
+        height: initial.height + deltaY
+      });
     }
   }
 
@@ -132,12 +151,32 @@
     beginInteraction(event, 'drag');
   }
 
+  function resizeWithKeyboard(event: KeyboardEvent) {
+    const increment = event.shiftKey ? 40 : 10;
+    const changes: Record<string, { width?: number; height?: number }> = {
+      ArrowRight: { width: increment },
+      ArrowLeft: { width: -increment },
+      ArrowDown: { height: increment },
+      ArrowUp: { height: -increment }
+    };
+    const change = changes[event.key];
+    if (!change) return;
+    event.preventDefault();
+    const current = currentLayout();
+    layout = fitInViewport({
+      ...current,
+      width: current.width + (change.width ?? 0),
+      height: current.height + (change.height ?? 0)
+    });
+  }
+
   onMount(() => {
     dialog.showModal();
     requestAnimationFrame(() => {
       const rect = dialog.getBoundingClientRect();
-      layout = { x: rect.left, y: rect.top, width: rect.width, height: rect.height };
+      layout = fitInViewport({ x: rect.left, y: rect.top, width: rect.width, height: rect.height });
     });
+    window.addEventListener('resize', fitWindowInViewport);
     void push('Opening bounded execution telemetry…');
     void poll();
     const timer = setInterval(() => {
@@ -146,6 +185,7 @@
     return () => {
       clearInterval(timer);
       endInteraction();
+      window.removeEventListener('resize', fitWindowInViewport);
     };
   });
 </script>
@@ -153,7 +193,7 @@
 <dialog
   bind:this={dialog}
   style={layout
-    ? `left: ${layout.x}px; top: ${layout.y}px; width: ${layout.width}px; height: ${layout.height}px`
+    ? `left: ${layout.x}px; top: ${layout.y}px; width: ${layout.width}px; height: ${layout.height}px; transform: none`
     : ''}
   onclose={onClose}
   onclick={(event) => {
@@ -182,29 +222,33 @@
       <span>{activeRun ? `${activeRun.provider} · ${activeRun.model}` : 'Awaiting run'}</span>
       <span>Bounded telemetry only · no prompts, source, or credentials</span>
     </footer>
-    <div
+    <button
+      type="button"
       class="resize-handle"
-      role="separator"
       aria-label="Resize live execution window"
-      aria-orientation="horizontal"
       onpointerdown={(event) => beginInteraction(event, 'resize')}
-    ></div>
+      onkeydown={resizeWithKeyboard}
+    ></button>
   </section>
 </dialog>
 
 <style>
   dialog {
+    --minimum-window-height: min(430px, 100dvh);
     width: min(900px, calc(100vw - 2rem));
     max-width: none;
     box-sizing: border-box;
     position: fixed;
     margin: 0;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
     border: 1px solid color-mix(in srgb, #22d3ee 48%, var(--color-line));
     border-radius: 15px;
     padding: 0;
     overflow: hidden;
-    min-width: 360px;
-    min-height: 280px;
+    min-width: min(360px, 100vw);
+    min-height: var(--minimum-window-height);
     background: #070b12;
     color: #d8fdf7;
     box-shadow: 0 0 80px -20px #22d3ee88;
@@ -214,7 +258,8 @@
     backdrop-filter: blur(8px);
   }
   section {
-    min-height: 430px;
+    box-sizing: border-box;
+    min-height: var(--minimum-window-height);
     display: grid;
     grid-template-rows: auto 1fr auto;
     height: 100%;
@@ -293,7 +338,6 @@
     animation: pulse 1.4s ease-in-out infinite;
   }
   .terminal {
-    min-height: 340px;
     max-height: none;
     overflow: auto;
     min-height: 0;
@@ -342,7 +386,14 @@
     bottom: 0;
     width: 22px;
     height: 22px;
+    border: 0;
+    padding: 0;
+    background: transparent;
     cursor: nwse-resize;
+  }
+  .resize-handle:focus-visible {
+    outline: 2px solid #5eead4;
+    outline-offset: -3px;
   }
   .resize-handle::after {
     content: '';
@@ -353,6 +404,11 @@
     height: 8px;
     border-right: 2px solid #5eead4;
     border-bottom: 2px solid #5eead4;
+  }
+  @media (max-height: 430px) {
+    dialog {
+      --minimum-window-height: 100dvh;
+    }
   }
   @media (prefers-reduced-motion: reduce) {
     .live-dot.connected,
