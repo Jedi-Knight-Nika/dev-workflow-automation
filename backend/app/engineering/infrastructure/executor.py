@@ -222,7 +222,10 @@ class SqlPhaseExecutor:
                         }
                     )
                 supervisor_guidance = ""
-                from app.agent_runtime.infrastructure.patch_recovery import can_resume_patch
+                from app.agent_runtime.infrastructure.patch_recovery import (
+                    can_resume_patch,
+                    needs_source_selection,
+                )
 
                 async with self.sessions() as session:
                     patch_resume_allowed = (
@@ -231,9 +234,12 @@ class SqlPhaseExecutor:
                         and not native.checkpoint.get("next_feedback")
                         and await can_resume_patch(session, native, task.requirement_version)
                     )
+                    relocalize = patch_resume_allowed and await needs_source_selection(
+                        session, native
+                    )
                 if (
                     self.settings.supervisor_enabled
-                    and not patch_resume_allowed
+                    and (not patch_resume_allowed or relocalize)
                     and not compaction
                     and not continuity
                     and not (native.harness == "patch" and task.stage == "FIXING")

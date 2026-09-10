@@ -24,7 +24,11 @@ from app.intake.infrastructure.cloud_wire import normalized_usage, response_text
 from app.platform.configuration.settings import Settings
 from app.platform.integrations.models import Integration
 from app.platform.security.crypto import cipher
-from app.supervisor.infrastructure.localization import candidate_paths
+from app.supervisor.infrastructure.localization import (
+    candidate_paths,
+    repository_entrypoints,
+    repository_paths,
+)
 from app.supervisor.infrastructure.memory import task_memory
 from app.supervisor.infrastructure.schemas import (
     CHECKPOINT_POLICY,
@@ -64,6 +68,12 @@ async def supervise(
         native = await session.get(DeveloperSession, native_id)
         if native is None or native.task_id != task.id:
             raise ValueError("Supervisor session does not belong to task")
+        inventory = (
+            []
+            if anomaly
+            else await asyncio.to_thread(repository_paths, Path(native.workspace_path))
+        )
+        fresh_intake = not anomaly and task.stage == "DEVELOPING"
         packet = json.dumps(
             {
                 "task_id": str(task.id),
@@ -72,9 +82,15 @@ async def supervise(
                 "stage": task.stage,
                 "current_sha": task.current_revision,
                 "feedback": native.checkpoint.get("next_feedback"),
-                "memory": None if anomaly else native.checkpoint.get("supervisor_memory"),
-                "task_memory": await task_memory(session, task.id),
+                "memory": None
+                if anomaly or fresh_intake
+                else native.checkpoint.get("supervisor_memory"),
+                "task_memory": [] if fresh_intake else await task_memory(session, task.id),
                 "runtime_anomaly": anomaly,
+                "repository_paths": inventory,
+                "repository_entrypoints": await asyncio.to_thread(
+                    repository_entrypoints, Path(native.workspace_path), inventory
+                ),
                 "unverified_filename_matches": await asyncio.to_thread(
                     candidate_paths,
                     Path(native.workspace_path),
@@ -115,6 +131,9 @@ async def supervise(
             price.cache_write_per_million,
         )
         output_limit = 250 if anomaly else 1200
+        schema = (SupervisorCheckpoint if anomaly else SupervisorDecision).model_json_schema()
+        if not anomaly:
+            schema["required"] = list(schema["properties"])
         payload = {
             "model": settings.supervisor_model,
             "store": False,
@@ -130,9 +149,7 @@ async def supervise(
                     "type": "json_schema",
                     "name": "supervisor_decision",
                     "strict": True,
-                    "schema": (
-                        SupervisorCheckpoint if anomaly else SupervisorDecision
-                    ).model_json_schema(),
+                    "schema": schema,
                 },
             },
         }
@@ -217,6 +234,8 @@ async def supervise(
         )
         if decision.action not in allowed:
             raise ValueError("Supervisor action does not match trigger")
+        if any(path not in inventory for path in decision.target_paths):
+            raise ValueError("Supervisor selected a path outside the supplied repository inventory")
         if len(decision.model_dump_json().encode()) > 7000:
             raise ValueError("Supervisor decision exceeds bound")
         async with sessions.begin() as session:

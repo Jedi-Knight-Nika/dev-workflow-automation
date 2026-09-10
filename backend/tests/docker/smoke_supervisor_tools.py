@@ -15,11 +15,19 @@ from app.agent_runtime.infrastructure.repo_index import investigate
 workspace = Path("/workspace")
 frontend = workspace / "frontend"
 frontend.mkdir()
-for name in ("package.json", ".prettierrc", "eslint.config.js", "svelte.config.js", "tsconfig.json"):
+for name in (
+    "package.json",
+    ".prettierrc",
+    "eslint.config.js",
+    "svelte.config.js",
+    "tsconfig.json",
+):
     shutil.copyfile(Path("/fixtures") / name, frontend / name)
 shutil.copytree("/opt/frontend/node_modules", frontend / "node_modules", symlinks=True)
 (frontend / "src/lib").mkdir(parents=True)
-(frontend / "src/app.html").write_text('<!doctype html><html lang="en"><head>%sveltekit.head%</head><body><div>%sveltekit.body%</div></body></html>')
+(frontend / "src/app.html").write_text(
+    '<!doctype html><html lang="en"><head>%sveltekit.head%</head><body><div>%sveltekit.body%</div></body></html>'
+)
 (frontend / "src/lib/Window.svelte").write_text("<script>const count = 0;</script><p>{count}</p>\n")
 (frontend / "window.test.ts").write_text(
     "import {test, expect} from 'vitest'; test('runtime', () => expect(1+1).toBe(2));\n"
@@ -107,24 +115,45 @@ print(
 from app.agent_runtime.application.harness import HarnessSettings
 from app.agent_runtime.infrastructure.responses import ResponsesHarness
 
-experiment = ResponsesHarness(HarnessSettings(model="gpt-5.6-terra", workspace=workspace, instructions="test"))
+experiment = ResponsesHarness(
+    HarnessSettings(model="gpt-5.6-terra", workspace=workspace, instructions="test")
+)
 try:
     experiment._start_sandbox()
     located = experiment._tool("repo_investigate", json.dumps({"objective": "Window count"}))
     assert "frontend/src/lib/Window.svelte" in located["candidate_paths"], located
-    inspected = experiment._tool("inspect_ranges", json.dumps({"ranges": [{"path": "frontend/src/lib/Window.svelte", "start": 1, "end": 30}]}))
-    edited = experiment._tool("edit_file", json.dumps({"path": "frontend/src/lib/Window.svelte", "sha256": inspected[0]["sha256"], "old_text": "const count = 0", "new_text": "const count = 1"}))
+    inspected = experiment._tool(
+        "inspect_ranges",
+        json.dumps({"ranges": [{"path": "frontend/src/lib/Window.svelte", "start": 1, "end": 30}]}),
+    )
+    edited = experiment._tool(
+        "edit_file",
+        json.dumps(
+            {
+                "path": "frontend/src/lib/Window.svelte",
+                "sha256": inspected[0]["sha256"],
+                "old_text": "const count = 0",
+                "new_text": "const count = 1",
+            }
+        ),
+    )
     assert edited["edited"] == "frontend/src/lib/Window.svelte", edited
-    checked = experiment._tool("run_developer_checks", json.dumps({"paths": ["frontend/src/lib/Window.svelte"]}))
+    checked = experiment._tool(
+        "run_developer_checks", json.dumps({"paths": ["frontend/src/lib/Window.svelte"]})
+    )
     assert checked["exit_code"] == 0, checked
 finally:
     if experiment.client:
         experiment.client.close()
-print("PASS: Responses compound investigation, inspection, exact edit and internally awaited checks; no model calls")
+print(
+    "PASS: Responses compound investigation, inspection, exact edit and internally awaited checks; no model calls"
+)
 
 from app.agent_runtime.infrastructure.patch_pipeline import PatchPipelineHarness
 
-patcher = PatchPipelineHarness(HarnessSettings(model="gpt-5.6-terra", workspace=workspace, instructions="test"))
+patcher = PatchPipelineHarness(
+    HarnessSettings(model="gpt-5.6-terra", workspace=workspace, instructions="test")
+)
 try:
     patcher._start_sandbox()
     packet = patcher._tool("prepare", json.dumps({"objective": "Window count"}))
@@ -132,8 +161,19 @@ try:
     assert selected["path"] == "frontend/src/lib/Window.svelte", packet
     import difflib
 
-    patch = "".join(difflib.unified_diff(selected["text"].splitlines(keepends=True), selected["text"].replace("const count = 1", "const count = 2").splitlines(keepends=True), fromfile="a/" + selected["path"], tofile="b/" + selected["path"]))
-    applied = patcher._tool("apply", json.dumps({"patch": patch, "hashes": {selected["path"]: selected["sha256"]}}))
+    patch = "".join(
+        difflib.unified_diff(
+            selected["text"].splitlines(keepends=True),
+            selected["text"]
+            .replace("const count = 1", "const count = 2")
+            .splitlines(keepends=True),
+            fromfile="a/" + selected["path"],
+            tofile="b/" + selected["path"],
+        )
+    )
+    applied = patcher._tool(
+        "apply", json.dumps({"patch": patch, "hashes": {selected["path"]: selected["sha256"]}})
+    )
     assert applied["changed_files"] == [selected["path"]], applied
     checked = patcher._tool("check", json.dumps({"paths": applied["changed_files"]}))
     assert checked["exit_code"] == 0, checked

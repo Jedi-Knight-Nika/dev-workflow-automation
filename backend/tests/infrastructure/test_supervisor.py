@@ -9,7 +9,11 @@ from app.engineering.application.jobs import PhaseBlocked, PhaseLease
 from app.engineering.infrastructure.lease_guard import assert_current
 from app.engineering.infrastructure.task_models import Job, Task
 from app.platform.scheduling.states import JobState
-from app.supervisor.infrastructure.localization import candidate_paths
+from app.supervisor.infrastructure.localization import (
+    candidate_paths,
+    repository_entrypoints,
+    repository_paths,
+)
 from app.supervisor.infrastructure.schemas import SupervisorDecision
 
 
@@ -19,6 +23,31 @@ def test_empty_localization_does_not_scan_workspace(tmp_path, monkeypatch):
 
     monkeypatch.setattr("app.supervisor.infrastructure.localization.os.walk", unexpected_walk)
     assert candidate_paths(tmp_path, "?!") == []
+
+
+def test_inventory_balances_areas_and_excludes_dependencies(tmp_path):
+    for i in range(180):
+        path = tmp_path / f"server/module{i}.py"
+        path.parent.mkdir(exist_ok=True)
+        path.touch()
+    for name in ("client/splash.html", "client/theme.css", "node_modules/secret.js"):
+        path = tmp_path / name
+        path.parent.mkdir(exist_ok=True)
+        path.touch()
+    paths = repository_paths(tmp_path)
+    assert "client/splash.html" in paths and "client/theme.css" in paths
+    assert "node_modules/secret.js" not in paths
+    assert len(paths) <= 160 and sum(len(p.encode()) for p in paths) <= 10000
+
+
+def test_entrypoint_evidence_is_bounded_and_prioritizes_actual_html(tmp_path):
+    names = ["app.html", *[f"config{i}.json" for i in range(10)]]
+    for name in names:
+        (tmp_path / name).write_text("x" * 10000)
+    evidence = repository_entrypoints(tmp_path, list(reversed(names)))
+    assert evidence[0]["path"] == "app.html"
+    assert sum(len(row["source_prefix"].encode()) for row in evidence) <= 6000
+    assert all(len(row["source_prefix"]) <= 1500 for row in evidence)
 
 
 def test_supervisor_cannot_authorize_merge_or_freeform_commands() -> None:

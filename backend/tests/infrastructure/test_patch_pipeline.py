@@ -13,6 +13,45 @@ from app.agent_runtime.infrastructure import patch_pipeline
 from app.agent_runtime.infrastructure.patch_tools import apply
 
 
+def test_supervisor_selection_beats_lexical_document_and_keeps_linked_sources(
+    tmp_path, monkeypatch
+):
+    from app.agent_runtime.infrastructure import patch_tools
+    from app.supervisor.infrastructure.schemas import SupervisorDecision
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    target = tmp_path / "client/splash.html"
+    target.parent.mkdir()
+    target.write_text('<link href="theme.css"><script src="boot.js"></script>')
+    (target.parent / "theme.css").write_text("body { color: red; }")
+    (target.parent / "boot.js").write_text("const ready = true;")
+    (tmp_path / "NOTES.md").write_text("old startup text " * 3000)
+    decision = SupervisorDecision(
+        action="DELEGATE_IMPLEMENTATION",
+        task_class="STANDARD",
+        confidence=0.8,
+        assessment="Change startup appearance",
+        execution_brief="Inspect startup UI",
+        acceptance_criteria=[],
+        unresolved_items=[],
+        physical_object="startup window",
+        operations=[],
+        preserve=[],
+        do_not_assume=[],
+        target_paths=["client/splash.html"],
+    )
+    prompt = "old startup text" + decision.developer_guidance()
+    packet = patch_tools.prepare(tmp_path, prompt)
+    assert [s["path"] for s in packet["sources"]] == [
+        "client/splash.html",
+        "client/theme.css",
+        "client/boot.js",
+    ]
+    decision.target_paths = ["../outside.html"]
+    with pytest.raises(ValueError):
+        patch_tools.prepare(tmp_path, "old startup text" + decision.developer_guidance())
+
+
 def test_localization_uses_original_and_skips_oversized_related_file(tmp_path, monkeypatch):
     from app.agent_runtime.infrastructure import patch_tools
 

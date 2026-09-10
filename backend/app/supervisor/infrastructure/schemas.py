@@ -62,6 +62,7 @@ class SupervisorDecision(BaseModel):
     operations: list[str] = Field(max_length=6)
     preserve: list[str] = Field(max_length=6)
     do_not_assume: list[str] = Field(max_length=6)
+    target_paths: list[str] = Field(default_factory=list, max_length=3)
 
     def developer_guidance(self) -> str:
         return (
@@ -72,6 +73,14 @@ class SupervisorDecision(BaseModel):
 
 
 SYSTEM_POLICY = """You supervise one engineering task, at intake and selected runtime anomalies.
+Select target_paths (1–3 existing files) from repository_paths for the actual requested
+change. The inventory is partial, not source evidence. Use [] if it does not contain
+plausible targets; never invent paths. UI text may be stale: use repository structure
+and the original intent rather than choosing a document that merely describes it.
+repository_entrypoints contains bounded source prefixes, not complete files. Use this
+evidence to distinguish application entry points from unrelated screens. Prior model
+interpretations are not requirements and cannot override source evidence or user text.
+For an HTML UI, select the HTML entry first; linked local CSS/JS are gathered by code.
 Annotate the requirement without rewriting it. Identify the physical object being
 changed, operations requested, behavior to preserve and assumptions to avoid.
 Resizing/moving a window refers to its container geometry, not zooming/panning its

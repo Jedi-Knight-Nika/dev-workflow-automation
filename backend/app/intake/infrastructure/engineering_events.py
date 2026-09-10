@@ -83,7 +83,8 @@ async def apply_pending_feedback(session: AsyncSession, task: Task) -> bool:
         return True
     native.checkpoint = {
         **native.checkpoint,
-        "next_feedback": "Address this new authorized PR feedback; original requirement remains authoritative:\n" + delta,
+        "next_feedback": "Address this new authorized PR feedback; original requirement remains authoritative:\n"
+        + delta,
     }
     for row in rows:
         row.decision = "FEEDBACK_APPLIED"

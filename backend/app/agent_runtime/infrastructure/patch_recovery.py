@@ -50,3 +50,18 @@ async def can_resume_patch(session: AsyncSession, native: DeveloperSession, vers
     return bool(runs) and all(
         r.requirement_version == version and (unspent_failure(r) or rejected_patch(r)) for r in runs
     )
+
+
+async def needs_source_selection(session: AsyncSession, native: DeveloperSession) -> bool:
+    """A pre-model localization failure needs a new plan, not replay of the failed lookup."""
+    run = await session.scalar(
+        select(AIRun)
+        .where(
+            AIRun.session_id == native.id,
+            AIRun.native_session_id == native.native_session_id,
+            AIRun.role_kind == "DEVELOPER",
+        )
+        .order_by(AIRun.started_at.desc())
+        .limit(1)
+    )
+    return bool(run and unspent_failure(run) and "localization failed" in (run.artifact or ""))

@@ -21,7 +21,20 @@ def prepare(workspace: Path, objective: str, paths: list[str] | None = None) -> 
     query = query.split("\n\nTrello:", 1)[0]
     # This pipeline supplies complete, hashed files below, not discovery snippets.
     mapped = investigate(workspace, query[:6000], include_source_slices=False)
-    selected = paths if paths is not None else mapped["candidate_paths"]
+    hints = []
+    if paths is None and "Advisory Supervisor annotations" in objective:
+        annotation = objective.rsplit("Advisory Supervisor annotations", 1)[1]
+        start = annotation.find("\n{")
+        if start >= 0:
+            guidance, _ = json.JSONDecoder().raw_decode(annotation[start + 1 :])
+            hints = guidance.get("target_paths", [])
+            if (
+                not isinstance(hints, list)
+                or len(hints) > 3
+                or any(not isinstance(p, str) for p in hints)
+            ):
+                raise ValueError("Invalid Supervisor source selection")
+    selected = paths if paths is not None else hints or mapped["candidate_paths"]
     if paths is None and selected and Path(selected[0]).suffix == ".html":
         target = source_path(workspace, selected[0])
         related = []

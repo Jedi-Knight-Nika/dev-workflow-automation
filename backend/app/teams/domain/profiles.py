@@ -39,9 +39,7 @@ class AgentProfile:
                 raise ValueError("Interpreter must use a supported classification provider")
         elif self.harness in {"responses", "patch"}:
             if self.role_kind != RoleKind.DEVELOPER or self.provider != "openai":
-                raise ValueError(
-                    "Responses is available only for OpenAI Developer profiles"
-                )
+                raise ValueError("Responses is available only for OpenAI Developer profiles")
         elif (self.harness, self.provider) not in {("codex", "openai"), ("claude", "anthropic")}:
             raise ValueError("Coding profiles require a matching supported harness/provider")
         if self.effort not in {"none", "low", "medium", "high"}:

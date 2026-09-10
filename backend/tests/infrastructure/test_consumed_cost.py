@@ -33,9 +33,7 @@ async def test_consumed_cost_aggregates_without_losing_unknown_or_zero(receipts,
             [(task_id.hex, *row) for row in receipts],
         )
         # Other tasks must not affect this task's total or unknown-cost state.
-        connection.execute(
-            "INSERT INTO ai_runs VALUES (?, 'RUNNING', NULL, NULL)", (uuid4().hex,)
-        )
+        connection.execute("INSERT INTO ai_runs VALUES (?, 'RUNNING', NULL, NULL)", (uuid4().hex,))
 
         async def execute(statement):
             sql = str(
