@@ -9,10 +9,18 @@
   </head>
 
   <body>
-    <main class="container">
-      <h1>Autonomous Engineering Worker</h1>
-      <p id="status">Starting local stack (docker compose)&hellip;</p>
-      <p id="hint">First run can take a while while images build.</p>
+    <main class="container" aria-labelledby="status">
+      <div class="loader" aria-hidden="true">
+        <span class="diamond diamond--outer"></span>
+        <span class="diamond diamond--inner"></span>
+      </div>
+      <section class="loading-copy">
+        <h1 id="status">Preparing your workspace</h1>
+        <p id="hint">
+          Getting everything ready for you. This may take a moment on first
+          launch.
+        </p>
+      </section>
     </main>
   </body>
 </html>
