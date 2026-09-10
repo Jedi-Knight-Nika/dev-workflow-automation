@@ -14,7 +14,7 @@ from app.intake.infrastructure.metered import CloudInterpreter
 from app.intake.infrastructure.ollama import classification_messages
 from app.platform.configuration.settings import Settings
 from app.supervisor.infrastructure.memory import task_memory
-from app.supervisor.infrastructure.schemas import SYSTEM_POLICY
+from app.supervisor.infrastructure.prompts import SYSTEM_POLICY
 
 
 async def review_supervisor(

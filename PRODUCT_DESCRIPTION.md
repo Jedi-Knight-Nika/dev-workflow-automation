@@ -11,28 +11,67 @@ Core rule: models produce engineering work; deterministic code owns authority, s
 The configured test workflow uses Luna for bounded supervision and Terra LOW through
 the `patch` Developer harness. The patch pipeline localizes existing source, requests
 one complete multi-hunk patch, applies it deterministically, and runs targeted checks.
-It permits at most one model repair: two Developer model calls per pipeline attempt.
+`FAST_PATCH` permits at most one model repair: two Developer model calls per fast attempt.
 Full offline validation, publication, review, and merge remain separate gated stages.
+
+The same harness also supports adaptive bounded execution. Supervisor annotations select
+`STRUCTURED_MULTI_PATCH` for decomposable work or `BOUNDED_AGENTIC` for uncertain
+localization/root cause; ordinary tasks remain fast patches. Complex/high-risk task
+classification requests a plan rather than selecting an unbounded coding harness.
+A fast response that explicitly reports insufficient context may escalate once into
+planning; a pre-model localization failure may enter bounded investigation.
+
+Multi-patch execution makes one structured planning request, validates an acyclic graph
+of at most six units, and runs those units sequentially in the existing isolated checkout.
+Each unit gets current hashed source, original requirements, integration invariants and
+compact prior results—not previous conversations. Each unit permits one patch and one
+repair. Intermediate checks format/lint; frontend-wide typechecking is deferred until
+all units are assembled. Integration permits one extra bounded repair when the relevant
+scope fits a three-file packet, then requires all developer checks to pass before handing
+off to the unchanged full validator. This does not prove UI behavior or Tauri build quality:
+the repository's configured full validation must cover those surfaces where required.
+
+Investigation is read-only and limited to two structured requests with a bounded repository
+search and batch of at most three source reads between them. It must produce findings before planning;
+it has no shell, edit, GitHub or merge tool. No hosted JavaScript tool runtime is needed.
+All adaptive requests share the existing turn cost/input allowance and a ceiling of
+16 calls, including any preceding fast attempt. Planning/investigation request medium
+effort subject to the Team ceiling; patching stays low. The configured Developer model
+and its verified pricing remain unchanged—there is no silent model-tier escalation.
+
+Plans, requests, usage, work-unit results, source hashes and check logs are durable runner
+artifacts. Requests are persisted before admission. A resumed already-attempted generation
+does not repeat paid calls, including after a crash with unknown usage; inspection or an
+explicit fresh-generation workflow is required. Exhausted recovery remains a visible stop,
+not an automatic budget reset. Live Execution displays mode, phase and completed unit count.
 
 Localization uses a SHA/content-keyed repository index and bounded source packets.
 Tree-sitter covers Python, JavaScript, TypeScript and Svelte scripts; other supported
 text files use lexical matching. Imports, callers and related tests are candidates,
-not a complete type-resolved dependency graph. Patch scope is limited to up to three
-existing files, with source and patch size ceilings. Creating or deleting files and
-installing dependencies are not supported by this harness. Insufficient localization
+not a complete type-resolved dependency graph. Relative JS imports and unambiguous Python
+module imports have resolved dependency paths. Large required files use bounded, task-ranked
+source ranges with whole-file hashes; omitted lines are explicitly marked unknown.
+Patch scope is limited to up to three files per unit, with source and patch size ceilings.
+Work plans may explicitly declare new non-executable text files in existing source
+directories; application verifies they do not already exist. Deleting/renaming files,
+creating directories and installing dependencies remain unsupported. Insufficient localization
 or exhausted repair attempts can still require human attention.
 
 Native Codex, Claude and the frontend-scoped Responses tool loop remain selectable
 alternatives. Selecting Responses does not select the two-call patch pipeline.
 Its compound tools batch deterministic work; it is not hosted programmatic JavaScript
 tool calling. Model, effort and harness selection remain Team/profile configuration,
-not an automatic capability-based fallback ladder.
+not an automatic model-capability fallback ladder. Adaptive patch composition never switches
+to those open-ended coding harnesses automatically. Parallel units, cross-repository plans,
+automatic stronger-model routing, visual evaluation and broader framework adapters remain
+future work, not claims about this rollout.
 
 ### Bounded Supervisor
 
 `SUPERVISOR_ENABLED=true` enables one bounded Luna supervision request before each
 Developer job, including repair jobs. The Supervisor receives the current requirement,
-feedback, prior bounded supervision memory and up to eight unverified filename matches.
+feedback, bounded repository inventory/entry-point evidence and unverified filename matches.
+Fresh intake does not replay a previous failed interpretation as authoritative memory.
 It returns advisory annotations (object, operations, preserved behavior, assumptions)
 or an essential clarification request. The verbatim original requirement takes precedence.
 Self-reported confidence is not an authorization or escalation gate.

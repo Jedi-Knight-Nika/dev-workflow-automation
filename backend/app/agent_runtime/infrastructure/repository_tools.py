@@ -72,7 +72,9 @@ def lint_evidence(workspace: Path, result: dict[str, Any]) -> dict[str, Any]:
         return {}
 
 
-async def check_frontend(workspace: Path, paths: list[str]) -> dict[str, Any]:
+async def check_frontend(
+    workspace: Path, paths: list[str], *, typecheck: bool = True
+) -> dict[str, Any]:
     """Format selected files, then typecheck + file-scoped lint in one model round trip.
 
     Type checking remains project-wide because Svelte imports cross file boundaries.
@@ -100,7 +102,8 @@ async def check_frontend(workspace: Path, paths: list[str]) -> dict[str, Any]:
 
     formatted = await check("format")
     # Do not run tools concurrently with the formatter modifying their input files.
-    results = [formatted, *await asyncio.gather(check("typecheck"), check("lint"))]
+    names = ["typecheck", "lint"] if typecheck else ["lint"]
+    results = [formatted, *await asyncio.gather(*(check(name) for name in names))]
     return {
         "kind": "frontend_checks",
         "paths": paths,

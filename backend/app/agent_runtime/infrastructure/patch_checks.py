@@ -9,15 +9,19 @@ from app.agent_runtime.infrastructure.repository_tools import check_frontend
 from app.agent_runtime.infrastructure.source_paths import source_path
 
 
-async def check_repository(workspace: Path, paths: list[str]) -> dict[str, Any]:
-    if not paths or len(paths) > 3:
-        raise ValueError("Check 1–3 localized files")
+async def check_repository(
+    workspace: Path, paths: list[str], *, intermediate: bool = False
+) -> dict[str, Any]:
+    if not paths or len(paths) > 18:
+        raise ValueError("Check 1–18 localized files")
     for path in paths:
         source_path(workspace, path)
     frontend = [p for p in paths if p.startswith("frontend/src/")]
     checks = []
     if frontend:
-        checks.extend((await check_frontend(workspace, frontend))["checks"])
+        checks.extend(
+            (await check_frontend(workspace, frontend, typecheck=not intermediate))["checks"]
+        )
     commands = []
     others = [p for p in paths if p not in frontend]
     prettier = {
@@ -88,4 +92,5 @@ async def check_repository(workspace: Path, paths: list[str]) -> dict[str, Any]:
         "checks": checks,
         "exit_code": int(any(c["exit_code"] != 0 for c in checks)),
         "coverage": "Targeted formatting/syntax checks only; configured full validator remains required.",
+        "intermediate": intermediate,
     }

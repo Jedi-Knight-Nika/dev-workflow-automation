@@ -51,6 +51,7 @@ class ResponsesHarness:
     tool_names = frozenset(tool["name"] for tool in TOOLS)
     tool_bytes = 40000
     result_bytes = 20000
+    max_history_bytes = 300000
 
     def __init__(self, settings: HarnessSettings):
         self.settings = settings
@@ -79,7 +80,7 @@ class ResponsesHarness:
     async def resume(self, native_session_id: str) -> None:
         self.id = str(UUID(native_session_id))
         path = self.root / f"{self.id}.json"
-        if path.is_symlink() or path.stat().st_size > 300000:
+        if path.is_symlink() or path.stat().st_size > self.max_history_bytes:
             raise WorkspaceUnavailable("Invalid Responses session")
         self.history = json.loads(path.read_bytes())
         if not isinstance(self.history, list):

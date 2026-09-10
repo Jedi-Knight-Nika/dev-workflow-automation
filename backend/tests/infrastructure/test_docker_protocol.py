@@ -11,11 +11,11 @@ import pytest
 from app.agent_runtime.application.harness import TurnReceipt
 from app.agent_runtime.domain.usage import Usage
 from app.agent_runtime.infrastructure.container import RunnerMounts
+from app.agent_runtime.infrastructure.control_files import atomic_json
 from app.agent_runtime.infrastructure.docker_harness import (
     DockerFrames,
     DockerHarness,
     RunnerProtocolError,
-    atomic_json,
 )
 from app.agent_runtime.infrastructure.runner import Manifest, await_controller
 from app.agent_runtime.infrastructure.workspace_lock import workspace_lock

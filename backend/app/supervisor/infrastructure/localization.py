@@ -3,6 +3,7 @@
 import os
 import re
 from collections import defaultdict, deque
+from heapq import nsmallest
 from pathlib import Path
 
 from app.agent_runtime.infrastructure.source_paths import source_path
@@ -39,6 +40,8 @@ def repository_paths(workspace: Path) -> list[str]:
             and not (Path(root) / name).is_symlink()
         )
         for name in sorted(files):
+            if scanned >= 4000:
+                break
             scanned += 1
             path = Path(root) / name
             if path.is_symlink() or name.startswith("."):
@@ -106,9 +109,7 @@ def candidate_paths(workspace: Path, objective: str) -> list[str]:
         for name in sorted(files):
             scanned += 1
             if scanned > 4000:
-                return [
-                    path for _, path in sorted(matches, key=lambda pair: (-pair[0], pair[1]))[:8]
-                ]
+                break
             path = Path(root) / name
             if path.is_symlink():
                 continue
@@ -117,4 +118,6 @@ def candidate_paths(workspace: Path, objective: str) -> list[str]:
             score = sum(word in folded for word in words)
             if score and len(relative) <= 240:
                 matches.append((score, relative))
-    return [path for _, path in sorted(matches, key=lambda pair: (-pair[0], pair[1]))[:8]]
+        if scanned > 4000:
+            break
+    return [path for _, path in nsmallest(8, matches, key=lambda pair: (-pair[0], pair[1]))]

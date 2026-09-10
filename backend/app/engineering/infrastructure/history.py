@@ -29,6 +29,11 @@ _LIVE_TELEMETRY_FIELDS = {
     "tokens_since_last_progress",
     "warnings",
     "stop_reason",
+    "execution_mode",
+    "execution_phase",
+    "completed_work_units",
+    "total_work_units",
+    "model_calls_by_kind",
 }
 
 

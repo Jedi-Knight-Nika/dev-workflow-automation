@@ -16,12 +16,12 @@
     type Viewport
   } from './position';
   import { observerApi, streamAnswer } from './api';
+  import { applyReplyEvent, uniqueSources } from './messages';
   import { getAssistantName, setAssistantName } from './identity.svelte';
   import type {
     AttentionEvent,
     Briefing,
     Conversation,
-    Evidence,
     FocusMode,
     ObserverMessage,
     ObserverScope,
@@ -280,22 +280,16 @@
         created.request_id,
         (event) => {
           if (controller.signal.aborted) return;
+          const failureMessage = event.message || `${assistantName} unavailable.`;
+          messages = applyReplyEvent(messages, responseId, event, failureMessage);
           if (event.type === 'observer.tool_started')
             activity = `Reading ${(event.tool || 'facts').replaceAll('_', ' ')}`;
           if (event.type === 'observer.model_started')
             activity = 'Local AI · composing an explanation';
           if (event.type === 'observer.text_delta') {
             activity = 'Answering';
-            messages = messages.map((m) =>
-              m.id === responseId ? { ...m, content: m.content + (event.text || '') } : m
-            );
           }
           if (event.type === 'observer.completed') {
-            messages = messages.map((m) =>
-              m.id === responseId
-                ? { ...m, content: event.answer || m.content, sources: event.sources || [] }
-                : m
-            );
             activity =
               event.mode === 'local'
                 ? 'Local Ollama · source-backed explanation'
@@ -312,8 +306,7 @@
             }
           }
           if (event.type === 'observer.failed') {
-            error = event.message || `${assistantName} unavailable.`;
-            messages = messages.map((m) => (m.id === responseId ? { ...m, content: error } : m));
+            error = failureMessage;
           }
           void tick().then(() => {
             if (log) log.scrollTop = log.scrollHeight;
@@ -384,12 +377,6 @@
       error = 'Could not load that conversation.';
     }
   }
-  function uniqueSources(sources: Evidence[]) {
-    return sources.filter(
-      (s, i) => sources.findIndex((x) => x.source === s.source && x.complete === s.complete) === i
-    );
-  }
-
   onMount(() => {
     mounted = true;
     try {

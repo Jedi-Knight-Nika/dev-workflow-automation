@@ -16,7 +16,8 @@
   import RunList from '$lib/components/task-detail/RunList.svelte';
   import TimelineList from '$lib/components/task-detail/TimelineList.svelte';
   import ValidationList from '$lib/components/task-detail/ValidationList.svelte';
-  import { API_BASE_URL, ApiError } from '$lib/api';
+  import { ApiError } from '$lib/api';
+  import { subscribeTaskUpdates } from '$lib/services/task-updates';
   import { createLiveRefresh } from '$lib/live-refresh';
   import { safeExternalUrl } from '$lib/task-links';
   import {
@@ -113,28 +114,16 @@
       }
     });
     live.request();
-    const stream = new EventSource(API_BASE_URL + '/events/stream');
-    stream.onopen = () => {
-      connected = true;
-      live.request();
-    };
-    stream.onerror = () => {
-      connected = false;
-    };
-    stream.addEventListener('update', (event) => {
-      try {
-        if (JSON.parse(event.data).task_id === page.params.id) live.request();
-      } catch {
-        /* Ignore malformed event; the bounded poll reconciles it. */
+    const stopUpdates = subscribeTaskUpdates(() => live.request(), {
+      taskId: () => page.params.id,
+      connected: (value) => {
+        connected = value;
+        if (value) live.request();
       }
     });
-    const timer = setInterval(() => {
-      if (!document.hidden) live.request();
-    }, 10000);
     return () => {
       live.stop();
-      stream.close();
-      clearInterval(timer);
+      stopUpdates();
     };
   });
 

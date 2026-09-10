@@ -2,7 +2,6 @@
 
 import json
 from dataclasses import asdict
-from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 
@@ -14,30 +13,27 @@ from app.agent_runtime.application.harness import WorkspaceUnavailable
 from app.agent_runtime.domain.session_changes import handoff_request
 from app.agent_runtime.domain.token_efficiency_policy import TokenEfficiencyPolicy
 from app.agent_runtime.infrastructure.accounting import SqlDevelopmentStore
-from app.agent_runtime.infrastructure.container import RunnerMounts, validation_container_spec
-from app.agent_runtime.infrastructure.container_job import run_container_job
-from app.agent_runtime.infrastructure.docker_harness import DockerHarness, atomic_json
+from app.agent_runtime.infrastructure.docker_harness import DockerHarness
 from app.agent_runtime.infrastructure.models import (
     DeveloperSession,
     DeveloperTokenPolicy,
-    PricingCatalog,
 )
+from app.agent_runtime.infrastructure.phase_mounts import phase_mounts
+from app.agent_runtime.infrastructure.pricing_catalog import standard_price
 from app.agent_runtime.infrastructure.reservations import development_allowance
 from app.agent_runtime.infrastructure.runner import Manifest
 from app.agent_runtime.infrastructure.token_efficiency import SqlTokenEfficiency
 from app.delivery.infrastructure.git_runner import GitManifest
 from app.delivery.infrastructure.git_transport import github_token, run_git
-from app.delivery.infrastructure.github import GitHubDelivery, github_client
-from app.delivery.infrastructure.workflow import delivery_gate, merge_phase
+from app.delivery.infrastructure.publication import publish_phase
+from app.delivery.infrastructure.workflow import merge_phase
 from app.engineering.application.develop import DevelopmentBlocked, DevelopTask, SessionContext
 from app.engineering.application.jobs import PhaseBlocked, PhaseLease
 from app.engineering.domain.lifecycle import Action, WaitReason
-from app.engineering.domain.publication_title import publication_body, publication_title
 from app.engineering.infrastructure.consultation import consult, save_consultation_feedback
 from app.engineering.infrastructure.enrollment import prepare_directories
-from app.engineering.infrastructure.models import ValidationRun
 from app.engineering.infrastructure.task_models import Task
-from app.engineering.infrastructure.validator_runner import ValidationManifest
+from app.engineering.infrastructure.validation_phase import validate_phase
 from app.platform.configuration.settings import Settings
 from app.platform.integrations.models import Integration
 from app.platform.security.crypto import cipher
@@ -57,36 +53,6 @@ class SqlPhaseExecutor:
                 if task.repository_id
                 else None
             )
-
-    def _mounts(
-        self,
-        lease: PhaseLease,
-        native: DeveloperSession,
-        *,
-        compaction: bool = False,
-        continuity: bool = False,
-    ) -> RunnerMounts:
-        root = self.settings.harness_control_root.resolve()
-        directory = (
-            root
-            / str(lease.task_id)
-            / (str(lease.token) + ("-compact" if compaction else "-ack" if continuity else ""))
-        )
-        directory.mkdir(parents=True, exist_ok=False)
-        lock_path = root / str(lease.task_id) / "workspace.lock"
-        try:
-            lock_path.touch(exist_ok=False)
-        except FileExistsError:
-            pass  # Never replace an inode a surviving runner may still have locked.
-        return RunnerMounts(
-            lease.task_id,
-            Path(native.workspace_path),
-            Path(native.state_path),
-            directory / "task.json",
-            self.settings.workspace_root.resolve() / "tasks",
-            self.settings.harness_state_root.resolve(),
-            root,
-        )
 
     async def execute(
         self,
@@ -151,18 +117,7 @@ class SqlPhaseExecutor:
                 if integration and integration.encrypted_credentials
                 else None
             )
-            price = await session.scalar(
-                select(PricingCatalog)
-                .where(
-                    PricingCatalog.provider == native.provider,
-                    PricingCatalog.model == native.model,
-                    PricingCatalog.context_tier == "standard",
-                    PricingCatalog.service_tier == "standard",
-                    PricingCatalog.effective_at <= datetime.now(UTC),
-                )
-                .order_by(PricingCatalog.effective_at.desc())
-                .limit(1)
-            )
+            price = await standard_price(session, native.provider, native.model)
         async with httpx.AsyncClient(
             transport=httpx.AsyncHTTPTransport(uds=str(self.settings.docker_socket)),
             base_url="http://docker",
@@ -182,7 +137,9 @@ class SqlPhaseExecutor:
             if lease.action == "PUBLISH_PR":
                 if repository is None:
                     raise PhaseBlocked(WaitReason.MISSING_CONFIGURATION, "Repository is missing")
-                return await self._publish(client, lease, task, native, repository)
+                return await publish_phase(
+                    self.sessions, self.settings, client, lease, task, native, repository
+                )
             if lease.action == "DEVELOPER_TURN":
                 from app.agent_runtime.infrastructure.bounded_recovery import (
                     schedule_candidate_validation,
@@ -249,14 +206,6 @@ class SqlPhaseExecutor:
                     decision = await supervise(self.sessions, self.settings, lease, native.id)
                     if decision.action == "WAIT_HUMAN":
                         raise PhaseBlocked(WaitReason.MISSING_REQUIREMENT, decision.assessment)
-                    if native.harness == "patch" and decision.task_class in {
-                        "COMPLEX",
-                        "HIGH_RISK",
-                    }:
-                        raise PhaseBlocked(
-                            WaitReason.MISSING_REQUIREMENT,
-                            "Task exceeds routine patch MVP scope; explicitly select an agentic harness",
-                        )
                     supervisor_guidance = decision.developer_guidance()
                 checkpoint_digest = native.checkpoint.get("rollover_digest")
                 if (
@@ -482,7 +431,9 @@ class SqlPhaseExecutor:
                     if price
                     else None,
                 )
-                mounts = self._mounts(lease, native, compaction=compaction, continuity=continuity)
+                mounts = phase_mounts(
+                    self.settings, lease, native, compaction=compaction, continuity=continuity
+                )
                 environment = {
                     "OPENAI_API_KEY" if native.provider == "openai" else "ANTHROPIC_API_KEY": key,
                     "HTTPS_PROXY": self.settings.developer_egress_proxy,
@@ -575,6 +526,10 @@ class SqlPhaseExecutor:
                             "PATCH_LIMIT": WaitReason.NO_PROGRESS,
                             "PATCH_TOOL_FAILURE": WaitReason.RUNTIME_FAILURE,
                             "PATCH_FAILED": WaitReason.RUNTIME_FAILURE,
+                            "USAGE_INCOMPLETE": WaitReason.RUNTIME_FAILURE,
+                            "RESPONSE_INCOMPLETE": WaitReason.RUNTIME_FAILURE,
+                            "TURN_INPUT_LIMIT": WaitReason.NO_PROGRESS,
+                            "PATCH_ALREADY_ATTEMPTED": WaitReason.NO_PROGRESS,
                         }.get(receipt.failure_code or "", WaitReason.MISSING_REQUIREMENT)
                         raise PhaseBlocked(
                             reason, f"{receipt.failure_code}: {receipt.summary}"[:1000]
@@ -615,7 +570,9 @@ class SqlPhaseExecutor:
                     return Action.NEEDS_PLAN
                 return Action.IMPLEMENTED
             if lease.action == "RUN_VALIDATION":
-                return await self._validate(client, lease, task, native, team)
+                return await validate_phase(
+                    self.sessions, self.settings, client, lease, task, native, team
+                )
         raise PhaseBlocked(
             WaitReason.MISSING_CONFIGURATION,
             f"Unknown fixed-lifecycle action: {lease.action}",
@@ -634,7 +591,7 @@ class SqlPhaseExecutor:
         prepare_directories(
             Path(native.workspace_path), Path(native.state_path), str(task.id), self.settings
         )
-        mounts = self._mounts(lease, native)
+        mounts = phase_mounts(self.settings, lease, native)
         async with self.sessions() as session:
             token = await github_token(session)
         result = await run_git(
@@ -668,211 +625,3 @@ class SqlPhaseExecutor:
                 "base_branch": repository.default_branch,
             }
         return Action.START
-
-    async def _publish(
-        self,
-        client: httpx.AsyncClient,
-        lease: PhaseLease,
-        task: Task,
-        native: DeveloperSession,
-        repository: Repository,
-    ) -> Action:
-        async with self.sessions() as session:
-            _, _, validated = await delivery_gate(session, task, repository)
-            token = await github_token(session)
-        if not validated:
-            raise PhaseBlocked(
-                WaitReason.MISSING_CONFIGURATION,
-                "Publication requires passing validation at the current requirement and SHA",
-            )
-        mounts = self._mounts(lease, native)
-        await run_git(
-            client,
-            self.settings,
-            mounts,
-            GitManifest(
-                operation="publish",
-                owner=repository.owner,
-                repository=repository.name,
-                branch=task.branch_name or "",
-                base_branch=str(native.checkpoint.get("base_branch") or repository.default_branch),
-                expected_sha=validated,
-            ),
-            token,
-            f"publish-{lease.job_id}-{lease.token}",
-        )
-        summary = str(native.checkpoint.get("summary") or "")
-        title = publication_title(task.title, summary)
-        async with github_client(token) as api:
-            pull = await GitHubDelivery(api, repository.owner, repository.name).publish(
-                branch=task.branch_name or "",
-                base=str(native.checkpoint.get("base_branch") or repository.default_branch),
-                title=title,
-                body=publication_body(
-                    task_ref=str(task.external_key or task.id),
-                    title=title,
-                    summary=summary,
-                    sha=validated,
-                    change_context=str(native.checkpoint.get("publication_change_context") or ""),
-                    checks=native.checkpoint.get("publication_checks"),
-                ),
-                owner=repository.owner,
-                expected_sha=validated,
-            )
-        async with self.sessions.begin() as session:
-            current = await session.get(Task, task.id, with_for_update=True)
-            if current is None or current.lifecycle_version != lease.lifecycle_version:
-                raise ValueError("Task changed during publication; inspect the task branch/PR")
-            current.pull_request_number, current.pull_request_url = pull["number"], pull["html_url"]
-        return Action.PUBLISHED
-
-    async def _validate(
-        self,
-        client: httpx.AsyncClient,
-        lease: PhaseLease,
-        task: Task,
-        native: DeveloperSession,
-        team: Team,
-    ) -> Action:
-        candidate = native.checkpoint.get("validation_candidate")
-        if candidate:
-            from app.agent_runtime.infrastructure.checkpoints import workspace_facts
-
-            facts = await workspace_facts(Path(native.workspace_path), Path(native.workspace_path))
-            if facts != candidate:
-                raise PhaseBlocked(
-                    WaitReason.MISSING_REQUIREMENT,
-                    "Candidate changed after token-limit handoff; inspect before validation",
-                )
-        runtime = await self.runtime_profile(task)
-        commands = (
-            runtime.validation_commands
-            if runtime
-            else self.settings.repository_validation_commands.get(str(task.repository_id), [])
-        )
-        if not commands or not task.branch_name:
-            raise PhaseBlocked(
-                WaitReason.MISSING_CONFIGURATION,
-                "Configure deterministic validation commands for this repository",
-            )
-        manifest = ValidationManifest(
-            branch=task.branch_name,
-            title=publication_title(task.title, str(native.checkpoint.get("summary") or "")),
-            author_name=team.name,
-            base_sha=str(native.checkpoint.get("base_sha") or ""),
-            commands=commands,
-            timeout_seconds=self.settings.developer_turn_timeout_seconds,
-        )
-        mounts = self._mounts(lease, native)
-        atomic_json(mounts.manifest, manifest.model_dump(mode="json"))
-        spec = validation_container_spec(
-            mounts,
-            image=runtime.validator_image_ref
-            if runtime
-            else self.settings.developer_container_image,
-        )
-        spec["Labels"]["job_id"] = str(lease.job_id)
-        validation_started = datetime.now(UTC)
-        result = await run_container_job(
-            client,
-            f"validation-{lease.job_id}-{lease.token}",
-            spec,
-            self.settings.developer_turn_timeout_seconds,
-        )
-        async with self.sessions.begin() as session:
-            current = await session.get(Task, task.id, with_for_update=True)
-            state = await session.get(DeveloperSession, native.id, with_for_update=True)
-            if (
-                current is None
-                or state is None
-                or current.lifecycle_version != lease.lifecycle_version
-            ):
-                raise ValueError("Task changed while validating")
-            passed = result.get("passed") is True
-            if passed:
-                state.checkpoint = {
-                    **state.checkpoint,
-                    "publication_change_context": result.get("change_context", ""),
-                    "publication_checks": commands,
-                }
-            if passed and runtime:
-                configured = await session.get(RepositoryRuntimeProfile, runtime.repository_id)
-                if (
-                    configured
-                    and configured.validator_image_ref == runtime.validator_image_ref
-                    and configured.validation_commands == commands
-                ):
-                    configured.last_verified_at = datetime.now(UTC)
-                    configured.image_digest = (
-                        runtime.validator_image_ref.split("@", 1)[1]
-                        if "@sha256:" in runtime.validator_image_ref
-                        else None
-                    )
-            for check in result["checks"]:
-                session.add(
-                    ValidationRun(
-                        task_id=task.id,
-                        head_sha=result["head_sha"],
-                        requirement_version=task.requirement_version,
-                        command=check["command"],
-                        exit_code=check["exit_code"],
-                        status="PASSED"
-                        if check["exit_code"] == 0 and not check["timed_out"]
-                        else "FAILED",
-                        output_tail=check["output_tail"][-8000:],
-                        started_at=datetime.fromisoformat(check["started_at"])
-                        if check.get("started_at")
-                        else validation_started,
-                        finished_at=datetime.fromisoformat(check["finished_at"])
-                        if check.get("finished_at")
-                        else datetime.now(UTC),
-                    )
-                )
-            current.current_revision = result["head_sha"]
-            previous = current.progress_fingerprint or {}
-            fingerprint = result["fingerprint"]
-            current.no_progress_count = (
-                current.no_progress_count + 1
-                if not passed and previous.get("validation") == fingerprint
-                else 0
-            )
-            current.progress_fingerprint = {"validation": fingerprint}
-            if not passed:
-                state.checkpoint = {
-                    **state.checkpoint,
-                    "next_feedback": "Fix these deterministic validation failures. Full logs remain in validation evidence:\n"
-                    + json.dumps(
-                        [
-                            {
-                                "command": c["command"],
-                                "exit_code": c["exit_code"],
-                                "timed_out": c["timed_out"],
-                                "output_tail": c["output_tail"][-1000:],
-                            }
-                            for c in result["checks"]
-                            if c["exit_code"] != 0 or c["timed_out"]
-                        ]
-                    )[:8000],
-                }
-            stop_loop = current.no_progress_count >= 2
-        if stop_loop:
-            raise PhaseBlocked(
-                WaitReason.MISSING_REQUIREMENT,
-                "Repeated validation failure without workspace progress; inspect before another paid turn",
-            )
-        if passed:
-            task.current_revision = result["head_sha"]
-            review = await consult(
-                self.sessions,
-                self.settings,
-                client,
-                lease,
-                task,
-                native,
-                "REVIEWER",
-                change_context=str(result.get("change_context") or ""),
-            )
-            if review and review[0] == "REVIEW_CHANGES":
-                await save_consultation_feedback(self.sessions, lease, native, *review)
-                return Action.VALIDATION_FAILED
-        return Action.VALIDATION_PASSED if passed else Action.VALIDATION_FAILED

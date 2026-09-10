@@ -12,7 +12,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.agent_runtime.domain.usage import Pricing, Usage
-from app.agent_runtime.infrastructure.models import AIRun, PricingCatalog
+from app.agent_runtime.infrastructure.models import AIRun
+from app.agent_runtime.infrastructure.pricing_catalog import standard_price
 from app.agent_runtime.infrastructure.reservations import reserve_budget
 from app.intake.domain.events import Event, Interpretation
 from app.intake.infrastructure.cloud_wire import normalized_usage, request_body, response_text
@@ -100,18 +101,7 @@ class CloudInterpreter:
                 }
             }
         async with self.sessions.begin() as session:
-            price = await session.scalar(
-                select(PricingCatalog)
-                .where(
-                    PricingCatalog.provider == self.provider,
-                    PricingCatalog.model == self.model,
-                    PricingCatalog.context_tier == "standard",
-                    PricingCatalog.service_tier == "standard",
-                    PricingCatalog.effective_at <= datetime.now(UTC),
-                )
-                .order_by(PricingCatalog.effective_at.desc())
-                .limit(1)
-            )
+            price = await standard_price(session, self.provider, self.model)
             integration = await session.scalar(
                 select(Integration).where(Integration.provider_name == self.provider)
             )
