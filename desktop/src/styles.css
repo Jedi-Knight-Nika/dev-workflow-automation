@@ -5,7 +5,7 @@
   font-weight: 400;
 
   color: #0f0f0f;
-  background-color: #f6f6f6;
+  background-color: #f8f7ff;
 
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -17,6 +17,13 @@
 body {
   margin: 0;
   min-width: 320px;
+  background:
+    radial-gradient(
+      circle at 50% 42%,
+      rgba(124, 92, 255, 0.1),
+      transparent 28rem
+    ),
+    #f8f7ff;
 }
 
 .container {
@@ -29,12 +36,30 @@ body {
   align-items: center;
   text-align: center;
   gap: 2rem;
+  overflow: hidden;
 }
 
 .loader {
   position: relative;
   width: 4.5rem;
   height: 4.5rem;
+  isolation: isolate;
+  animation: loader-float 3.6s ease-in-out infinite;
+}
+
+.loader::before {
+  position: absolute;
+  inset: -2rem;
+  z-index: -1;
+  content: "";
+  border-radius: 50%;
+  background: radial-gradient(
+    circle,
+    rgba(124, 92, 255, 0.42),
+    rgba(124, 92, 255, 0) 68%
+  );
+  filter: blur(0.35rem);
+  animation: glow-breathe 1.8s ease-in-out infinite;
 }
 
 .diamond {
@@ -50,6 +75,9 @@ body {
   width: 3.5rem;
   height: 3.5rem;
   background: #7c5cff;
+  box-shadow:
+    0 0 0.8rem rgba(124, 92, 255, 0.65),
+    0 0 1.8rem rgba(124, 92, 255, 0.35);
   animation: diamond-pulse 1.8s ease-in-out infinite;
 }
 
@@ -62,6 +90,7 @@ body {
 
 .loading-copy {
   max-width: 28rem;
+  animation: copy-enter 700ms 120ms both ease-out;
 }
 
 h1,
@@ -100,8 +129,44 @@ h1 {
   }
 }
 
+@keyframes glow-breathe {
+  0%,
+  100% {
+    opacity: 0.45;
+    transform: scale(0.78);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.08);
+  }
+}
+
+@keyframes loader-float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-0.35rem);
+  }
+}
+
+@keyframes copy-enter {
+  from {
+    opacity: 0;
+    transform: translateY(0.5rem);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .diamond {
+  .diamond,
+  .loader,
+  .loader::before,
+  .loading-copy {
     animation: none;
   }
 }
@@ -110,6 +175,16 @@ h1 {
   :root {
     color: #f6f6f6;
     background-color: #2f2f2f;
+  }
+
+  body {
+    background:
+      radial-gradient(
+        circle at 50% 42%,
+        rgba(124, 92, 255, 0.2),
+        transparent 28rem
+      ),
+      #2f2f2f;
   }
 
   .diamond--inner {
