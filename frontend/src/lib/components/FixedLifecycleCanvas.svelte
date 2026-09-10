@@ -313,8 +313,23 @@
   .flow {
     flex: 1;
     min-height: 0;
+    position: relative;
+    border: 1px solid color-mix(in srgb, var(--color-brand-2) 18%, var(--color-line));
     border-radius: 10px;
     overflow: hidden;
+    background:
+      radial-gradient(
+        circle at 12% 8%,
+        color-mix(in srgb, var(--color-brand) 12%, transparent),
+        transparent 42%
+      ),
+      radial-gradient(
+        circle at 88% 92%,
+        color-mix(in srgb, var(--color-brand-2) 10%, transparent),
+        transparent 46%
+      ),
+      var(--color-panel-alt);
+    box-shadow: inset 0 0 28px color-mix(in srgb, var(--color-brand-2) 5%, transparent);
   }
   .canvas:fullscreen .workspace {
     height: calc(100dvh - 240px);
