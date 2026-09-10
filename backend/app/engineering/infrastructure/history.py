@@ -2,6 +2,7 @@ import uuid
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import load_only
 
 from app.agent_runtime.infrastructure.models import AIRun
 from app.engineering.application.ports.job_enqueueing import EnqueuedJob
@@ -78,6 +79,19 @@ class SqlAlchemyTaskHistoryQueries:
     async def live_execution(self, task_id: uuid.UUID) -> LiveExecutionView | None:
         row = await self._session.scalar(
             select(AIRun)
+            .options(
+                load_only(
+                    AIRun.role_kind,
+                    AIRun.provider,
+                    AIRun.model,
+                    AIRun.harness,
+                    AIRun.status,
+                    AIRun.started_at,
+                    AIRun.finished_at,
+                    AIRun.token_efficiency,
+                    raiseload=True,
+                )
+            )
             .where(AIRun.task_id == task_id)
             .order_by((AIRun.status == "RUNNING").desc(), AIRun.started_at.desc())
             .limit(1)
@@ -149,7 +163,24 @@ class SqlAlchemyTaskHistoryQueries:
 
     async def metrics(self, task_id: uuid.UUID) -> TaskMetricsView:
         native_runs = (
-            await self._session.scalars(select(AIRun).where(AIRun.task_id == task_id))
+            await self._session.scalars(
+                select(AIRun)
+                .options(
+                    load_only(
+                        AIRun.role_kind,
+                        AIRun.provider,
+                        AIRun.model,
+                        AIRun.input_tokens,
+                        AIRun.output_tokens,
+                        AIRun.provider_duration_ms,
+                        AIRun.provider_cost_usd,
+                        AIRun.calculated_cost_usd,
+                        AIRun.usage_complete,
+                        raiseload=True,
+                    )
+                )
+                .where(AIRun.task_id == task_id)
+            )
         ).all()
         samples = [
             UsageSample(

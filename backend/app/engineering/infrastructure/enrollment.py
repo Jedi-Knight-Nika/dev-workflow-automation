@@ -62,7 +62,7 @@ async def enroll(session: AsyncSession, task: Task, settings: Settings, *, actor
     )
     if (
         profile is None
-        or profile.harness not in {"codex", "claude"}
+        or profile.harness not in {"codex", "claude", "responses", "patch"}
         or profile.hard_budget_usd is None
     ):
         raise ValueError("Configure an enabled native Developer with an explicit USD limit")

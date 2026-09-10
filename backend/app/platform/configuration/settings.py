@@ -1,3 +1,4 @@
+from decimal import Decimal
 from functools import lru_cache
 from pathlib import Path
 from urllib.parse import urlparse
@@ -42,13 +43,22 @@ class Settings(BaseSettings):
     # Fresh installations use the fixed lifecycle. Enabling paid execution remains an explicit step.
     developer_harness_codex: bool = False
     developer_harness_claude: bool = False
+    developer_harness_responses: bool = False
     local_event_interpreter: bool = False
+    supervisor_enabled: bool = False
+    supervisor_model: str = "gpt-5.6-luna"
+    supervisor_request_limit_usd: Decimal = Field(default=Decimal("0.02"), gt=0, le=1)
     harness_state_root: Path = Path("./harness-state")
     harness_control_root: Path = Path("./harness-control")
     developer_container_image: str = "engineering-developer:local"
     developer_container_network: str = "engineering-provider-internal"
     developer_egress_proxy: str = ""
     developer_turn_timeout_seconds: int = Field(default=1200, ge=1, le=7200)
+    # Do not admit a paid native turn with only a few cents left: one initial
+    # response can legitimately exceed that amount before it can be interrupted.
+    minimum_developer_turn_allowance_usd: Decimal = Field(
+        default=Decimal("0.05"), gt=0, le=5, allow_inf_nan=False
+    )
     # Zero keeps native automatic compaction only. Opt in after the SDK smoke test.
     developer_compact_before_feedback_tokens: int = Field(default=0, ge=0, le=10000000)
     repository_validation_commands: dict[str, list[list[str]]] = Field(default_factory=dict)

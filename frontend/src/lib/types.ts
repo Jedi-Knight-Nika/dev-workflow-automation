@@ -204,11 +204,6 @@ export type TaskMetrics = {
   roles: TaskRoleMetrics[];
 };
 
-export type DashboardActivity = {
-  active_job: Job | null;
-  queued_jobs: Job[];
-};
-
 export type DashboardUsageBucket = {
   key: string;
   input_tokens: number;
@@ -405,18 +400,6 @@ export type LiveExecution = {
   } | null;
 };
 
-export type WorkerNode = {
-  id: string;
-  hostname: string;
-  process_id: number;
-  status: string;
-  online: boolean;
-  capabilities: string[];
-  started_at: string;
-  last_heartbeat: string;
-  stopped_at: string | null;
-};
-
 export type LinearWorkflowState = {
   id: string;
   name: string;
@@ -424,13 +407,6 @@ export type LinearWorkflowState = {
   team_id: string;
   team_name: string;
   team_key: string;
-};
-
-export type LinearMember = {
-  id: string;
-  name: string;
-  email: string;
-  active: boolean;
 };
 
 export type Team = {

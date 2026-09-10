@@ -6,14 +6,86 @@ Core rule: models produce engineering work; deterministic code owns authority, s
 
 ## Product purpose
 
-Autonomous Engineering Worker receives authorized engineering work, runs one primary native coding harness in an isolated checkout, validates source independently, publishes a branch and pull request, waits without model activity, applies authorized feedback through the same logical Developer session, and merges only when the current revision satisfies configured gates.
+### Current MVP execution path
+
+The configured test workflow uses Luna for bounded supervision and Terra LOW through
+the `patch` Developer harness. The patch pipeline localizes existing source, requests
+one complete multi-hunk patch, applies it deterministically, and runs targeted checks.
+It permits at most one model repair: two Developer model calls per pipeline attempt.
+Full offline validation, publication, review, and merge remain separate gated stages.
+
+Localization uses a SHA/content-keyed repository index and bounded source packets.
+Tree-sitter covers Python, JavaScript, TypeScript and Svelte scripts; other supported
+text files use lexical matching. Imports, callers and related tests are candidates,
+not a complete type-resolved dependency graph. Patch scope is limited to up to three
+existing files, with source and patch size ceilings. Creating or deleting files and
+installing dependencies are not supported by this harness. Insufficient localization
+or exhausted repair attempts can still require human attention.
+
+Native Codex, Claude and the frontend-scoped Responses tool loop remain selectable
+alternatives. Selecting Responses does not select the two-call patch pipeline.
+Its compound tools batch deterministic work; it is not hosted programmatic JavaScript
+tool calling. Model, effort and harness selection remain Team/profile configuration,
+not an automatic capability-based fallback ladder.
+
+### Bounded Supervisor
+
+`SUPERVISOR_ENABLED=true` enables one bounded Luna supervision request before each
+Developer job, including repair jobs. The Supervisor receives the current requirement,
+feedback, prior bounded supervision memory and up to eight unverified filename matches.
+It returns advisory annotations (object, operations, preserved behavior, assumptions)
+or an essential clarification request. The verbatim original requirement takes precedence.
+Self-reported confidence is not an authorization or escalation gate.
+
+The request uses existing Team/task spending admission with an additional per-request
+ceiling (`SUPERVISOR_REQUEST_LIMIT_USD`, default $0.02). Configure verified catalog
+pricing for `SUPERVISOR_MODEL` (default `gpt-5.6-luna`). Its receipt appears as SUPERVISOR
+in AI usage and its decision as SUPERVISOR_DECIDED in task events. Job payloads retain
+the attempt ID and decision; native session checkpoints retain bounded semantic memory.
+An attempted request without a valid saved decision is not automatically repurchased.
+Provider usage is retained even when decision parsing fails; unavailable usage stays unknown.
+
+Codex additionally reports selected failed tools or sustained no-progress evidence,
+at most twice per job. Each deduplicated, metered Supervisor decision can continue,
+steer the existing turn, or stop it. Delivery is best-effort if the native turn finishes
+while a decision is pending; a late annotation never starts another paid run.
+Normal tool success does not wake the Supervisor. Additional request headroom is
+deducted from the Developer allowance, not added on top of Team/task budgets.
+The first no-edit checkpoint is triggered at three observed inference cycles or 40k
+input tokens. Its compact response is continue, narrow scope, edit now, infrastructure
+problem or escalate. The STANDARD exploration hard stop defaults to 110k, separately
+from this early intervention; existing persisted Team policies remain operator-controlled.
+The runner's investigation helper indexes Python/JavaScript/TypeScript and Svelte
+script symbols with Tree-sitter, imports, references, routes and entity declarations.
+The cache key includes Git SHA and source hashes so uncommitted edits invalidate it.
+It returns up to five candidates and bounded relevant slices. Caller/test associations
+are syntactic candidates, not type-resolved LSP claims. The installed frontend formatter
+resolves its working directory and plugins independently of the shell working directory.
+Developer profile effort is preserved, capped by Team policy; only an explicit task
+override can raise it. Token/loop/runtime stops have distinct wait reasons.
+
+This MVP preserves the current coding harness, validation and delivery transitions.
+Repair jobs in FIXING create a fresh native context once per job, on the same checkout,
+with original requirements, SHA, diff summary, exact feedback and latest validation.
+Old receipts and costs remain intact. No-progress interruptions do not auto-restart.
+When supervision is enabled, natural-language GitHub review classification also uses
+the task Supervisor's bounded memory and policy. Obvious controls and authoritative
+checks remain deterministic. Automatic model escalation and Claude live supervision
+are not implemented. This is not a general AI-owned lifecycle engine: the fixed
+state machine and authorized action handlers still control transitions.
+Disable the flag to bypass supervision for subsequent jobs. Existing task/Team pause
+controls revoke the job lease, including an in-flight supervision request. No model
+calls occur during review waits. Token savings require measuring new tasks; they are
+not guaranteed by adding the Supervisor.
+
+Autonomous Engineering Worker receives authorized engineering work, runs the configured Developer harness in an isolated checkout, validates source independently, publishes a branch and pull request, waits without model activity, applies authorized feedback through a bounded repair generation, and merges only when the current revision satisfies configured gates.
 
 The product also reports live and historical infrastructure health, task and agent efficiency, AI usage and cost, resource attribution, incidents, and statistical forecasts. Monitoring and analytics cannot authorize work, spend money, mutate lifecycle state, or prevent an otherwise healthy Developer task.
 
 The system has three operational planes:
 
 - Control: FastAPI, PostgreSQL, controller, integrations, authorization, lifecycle, accounting, policy, delivery, and merge.
-- Execution: ephemeral Developer, validator, and publisher containers; native Codex or Claude harness; optional local Interpreter.
+- Execution: ephemeral Developer, validator, and publisher containers; patch, Responses, Codex or Claude harness; optional local Interpreter.
 - Observation: Prometheus, exporters, Alertmanager, typed query adapters, durable summaries, analytics, and Svelte dashboard.
 
 There is one application, one fixed lifecycle, one `/api` product prefix, and one PostgreSQL application database. Prometheus is a private time-series store, not a second business database.
@@ -47,12 +119,12 @@ authorized source event
   -> deterministic intake
   -> bounded interpretation only when needed
   -> engineering task
-  -> native Developer in isolated checkout
+  -> configured Developer in isolated checkout
   -> offline deterministic validation
   -> validated local commit
   -> credentialed branch publication and pull request
   -> review wait with zero AI activity
-  -> code feedback: resume logical Developer
+  -> code feedback: bounded repair on the same checkout
   -> approval: evaluate exact-revision merge gates
   -> revalidate and republish when changed
   -> guarded merge
@@ -72,21 +144,21 @@ All adapters create normalized events. Intake verifies provider signatures, deli
 - Slack: signed Events API callbacks route configured workspace/channel pairs; task commands create work and deterministic thread relationships attach replies.
 - GitHub: issue, pull-request, review, comment, and check events are verified and deduplicated; authoritative remote state is fetched before publication and merge.
 
-Formal checks and approvals are deterministic. Natural-language review may use the bounded Interpreter. Uncertain output waits for an operator rather than guessing.
+Formal checks and approvals are deterministic. Natural-language review uses the bounded Supervisor when enabled, with the Interpreter path retained when supervision is disabled. Uncertain output waits for an operator rather than guessing. A deterministic review reconciliation job checks remote state approximately once a minute; unchanged review waits do not invoke a model.
 
 ## Teams and policy
 
-Each Team has fixed `INTERPRETER`, `DEVELOPER`, `THINKER`, and `REVIEWER` profiles. Interpreter and Developer are core roles; Thinker and Reviewer are optional. Operators configure display identity, provider, model, harness, reasoning effort, fallback, repository scope, concurrency, budgets, and optional-role enablement. They cannot create role kinds or change lifecycle topology.
+Each Team has fixed `INTERPRETER`, `DEVELOPER`, `THINKER`, and `REVIEWER` profile records. Thinker and Reviewer are reserved profiles; optional paid dispatch is not connected. The Supervisor has separate deployment configuration and metered receipts. Operators configure available profile identity, provider, model, harness, effort, repository scope, concurrency and budgets. They cannot create role kinds or change lifecycle topology.
 
 Automation policy is versioned and audited. It controls enrollment, repositories, task and Team spending, reviewer actors, checks, approval semantics, and automatic merge. Stopping a Team revokes active leases and pauses work without erasing usage. Enabling it again does not silently resume paused tasks.
 
-## Native Developer runtime
+## Developer runtime
 
 The harness owns source discovery, reads and edits, tools, model conversation, provider session state, compaction, and usage receipts. The platform owns lifecycle, workspace, cost admission, container policy, validation, Git operations, authorization, and audit.
 
 The provider-neutral adapter exposes supported start, resume, interrupt, compact, inspect, and seal operations through capability flags. Unsupported provider behavior is explicit rather than simulated.
 
-A `DeveloperSession` records task, profile, harness, provider, model, native identifier, workspace/state locations, requirement revision, current revision, checkpoint, and timestamps. Review repairs send only new feedback. Missing native state blocks execution; the system never invents continuity.
+A `DeveloperSession` records task, profile, harness, provider, model, native identifier, workspace/state locations, requirement revision, current revision, checkpoint, and timestamps. Fresh review repairs receive the original objective, current source/diff and exact feedback rather than replaying the implementation transcript. Required missing state blocks execution; the system never invents continuity.
 
 ### Context generations and checkpoints
 
@@ -138,6 +210,10 @@ Validation is model-free in a separate container. Commands are administrator-own
 
 The publisher runs fixed Git operations in a clean repository with hooks disabled. It accepts only the task branch format, does not force-push, verifies expected objects and base/head, looks up an exact pull request before creation, and reconciles ambiguous writes from GitHub state. The model cannot select arbitrary Git authority.
 
+Commit and PR titles use short English Conventional Commit subjects. PR descriptions
+include the implementation summary, changed-file evidence, validation revision/checks
+and review requirements. Updating an existing PR refreshes its title and description.
+
 ### Merge
 
 Merge requires enabled policy, allowed repository, pull-request head equal to validated revision, validation for current requirements, configured checks present and green, authorized current-revision approval, no blocking change request, confirmed mergeability, unpaused task/Team, and an expected-head merge request. Changes trigger revalidation and invalidate stale evidence.
@@ -154,6 +230,7 @@ The Python backend is a modular monolith:
 - `repositories`: inventory and runtime profiles;
 - `observability`: typed metrics, attribution, summaries, availability, and incidents;
 - `analytics`: efficiency, forecasts, and accuracy;
+- `supervisor/infrastructure`: bounded task decisions, provider wire schemas, and durable-memory adapters; recovery uses the shared engineering lease guard rather than depending on the Supervisor service;
 - `platform`: configuration, database composition, integration storage, scheduling, and telemetry;
 - `interfaces/http`: transport validation and errors;
 - `bootstrap`: dependency and scheduler composition.
@@ -360,14 +437,23 @@ Focused checks cover capacity/missing-data behavior, read-only routing, input/sc
 
 Production acceptance remains separate: complete the engineering and monitoring gates, benchmark at least fifty representative local-model questions, measure shared-host interference and animation performance, and tune notification noise during dogfood. Broader statistical anomaly families, richer natural-language synthesis, automatic daily briefings and voice are not claimed as accepted by these initial checks. There is no voice/microphone access, model fine-tuning, new agent role or mandatory external animation runtime.
 
-## Backend maintenance review
+## Backend maintenance history
 
 The backend review covers domain/application boundaries, leased execution and cancellation, spending admission/receipts, context-governor and checkpoint contracts, delivery gates, integration adapters, monitoring, analytics and migrations. Safe corrections remove writes/row locks from assistant preference reads, use the matching resource threshold when deciding whether an incident recovered, reject empty or non-finite-timestamp monitoring series, and exclude future-dated receipts from current-window cost charts. No Developer prompt, harness policy, token threshold, reservation or merge rule is changed by this cleanup. Companion domain/application imports now have an explicit architecture guard as well.
 
-Validation: the seven-revision chain upgrades an empty disposable PostgreSQL database and Alembic detects no schema/model drift. The Linux backend suite passes 445 tests with 22 opt-in Docker/native-SDK tests skipped; local lint and typing cover all 279 source files. The frontend suite passes 39 tests plus lint/type checks. Disposable test databases are removed afterward; application records are not reset. These checks are regression evidence, not a new paid-task or real-SDK benchmark.
+Historical migration and local regression checks are not evidence that the currently running containers include subsequent source edits. Rebuild affected backend/controller and runner images before evaluating changes; starting existing images alone does not deploy new code. Database, Docker and live-provider checks have separate prerequisites.
 
 Two existing deployment/upgrade cautions remain outside automatic cleanup: the local PostgreSQL `template1` database reports collation 2.36 against runtime 2.41 (the application database itself reports matching 2.41); and the historical canonical-identifiers migration rewrites stored version-prefixed task branch names without renaming external Git refs. Existing migration history and live Git branches are not rewritten during this review. Older deployments crossing that historical migration must reconcile published branch identities with GitHub before resuming delivery; template maintenance requires a deliberate database administration step, not an application reset.
 
 ## Final operating rule
+
+This MVP has no product-edition naming scheme. Dependency pins, provider API paths,
+signed webhook formats, database revisions, prompt/cache identities and optimistic
+concurrency counters remain technical compatibility and audit mechanisms.
+
+Patch localization, application and exhausted repair failures can still require human
+attention. Explicit resume can recover a saved rejected patch only under its source-hash
+and attempt guards, without another paid request. Lower spending on a failed task is
+not successful automation; measure token usage and delivery success together.
 
 The checkout remembers code. PostgreSQL remembers authoritative state, policy, accounting, evidence, and continuity. A bounded checkpoint remembers unresolved intent. Native context carries only the current slice. Models implement and reason; deterministic code retains authorization, spending, validation, publication, and merge authority.

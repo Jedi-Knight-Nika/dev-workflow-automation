@@ -38,7 +38,7 @@ def normalized_usage(provider: str, raw: dict[str, Any]) -> Usage:
         raw.get("input_tokens"),
         raw.get("output_tokens"),
         (raw.get("input_tokens_details") or {}).get("cached_tokens"),
-        0,
+        (raw.get("input_tokens_details") or {}).get("cache_write_tokens", 0),
         (raw.get("output_tokens_details") or {}).get("reasoning_tokens"),
     )
 

@@ -7,7 +7,7 @@ from typing import Any
 import httpx
 
 from app.delivery.domain.merge import Approval, MergeEvidence, MergePolicy
-from app.delivery.domain.review import ReviewedMessage, ReviewMessage
+from app.delivery.domain.review import ReviewedMessage, ReviewMessage, resolved_duplicate
 from app.delivery.infrastructure.review_messages import human_message
 
 
@@ -62,6 +62,12 @@ class GitHubDelivery:
             pull = response.json()
         if pull["head"]["sha"] != expected_sha:
             raise ValueError("PR head differs from the validated/pushed revision")
+        if found:
+            response = await self.client.patch(
+                self.root + f"/pulls/{pull['number']}",
+                json={"title": title[:250], "body": body[:16000]},
+            )
+            response.raise_for_status()
         return dict(pull)
 
     async def evidence(
@@ -128,6 +134,12 @@ class GitHubDelivery:
                     ("review_comment", await self.pages(f"/pulls/{number}/comments")),
                     ("review", [r for r in reviews if r.get("state") == "COMMENTED"]),
                 )
+                live_messages = tuple(
+                    message
+                    for source, values in sources
+                    for value in values
+                    if (message := human_message(source, value, sha, validated_at)) is not None
+                )
                 for source, values in sources:
                     for value in values:
                         message = human_message(source, value, sha, validated_at)
@@ -146,7 +158,10 @@ class GitHubDelivery:
                             "IGNORED",
                             "COMMAND_APPLIED",
                         }:
-                            pending = True
+                            if not resolved_duplicate(
+                                message, saved, live_messages, reviewed_messages
+                            ):
+                                pending = True
                         elif (
                             saved.decision == "APPROVAL_INTERPRETED"
                             and approval is None

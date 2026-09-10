@@ -3,6 +3,7 @@
 import json
 from dataclasses import asdict
 from datetime import UTC, datetime
+from decimal import Decimal
 from pathlib import Path
 
 import httpx
@@ -31,7 +32,7 @@ from app.delivery.infrastructure.workflow import delivery_gate, merge_phase
 from app.engineering.application.develop import DevelopmentBlocked, DevelopTask, SessionContext
 from app.engineering.application.jobs import PhaseBlocked, PhaseLease
 from app.engineering.domain.lifecycle import Action, WaitReason
-from app.engineering.domain.publication_title import publication_title
+from app.engineering.domain.publication_title import publication_body, publication_title
 from app.engineering.infrastructure.consultation import consult, save_consultation_feedback
 from app.engineering.infrastructure.enrollment import prepare_directories
 from app.engineering.infrastructure.models import ValidationRun
@@ -128,6 +129,11 @@ class SqlPhaseExecutor:
                     WaitReason.MISSING_CONFIGURATION,
                     "Enroll a prepared workspace and fixed Developer profile before execution",
                 )
+            if native.harness in {"responses", "patch"} and (compaction or continuity):
+                raise PhaseBlocked(
+                    WaitReason.MISSING_CONFIGURATION,
+                    "Responses supports fresh/resumed development, not compaction or rollover",
+                )
             if (
                 profile.harness != native.harness
                 or profile.model != native.model
@@ -178,6 +184,74 @@ class SqlPhaseExecutor:
                     raise PhaseBlocked(WaitReason.MISSING_CONFIGURATION, "Repository is missing")
                 return await self._publish(client, lease, task, native, repository)
             if lease.action == "DEVELOPER_TURN":
+                from app.agent_runtime.infrastructure.bounded_recovery import (
+                    schedule_candidate_validation,
+                )
+
+                if await schedule_candidate_validation(self.sessions, lease, native.id):
+                    return Action.VALIDATE_CANDIDATE
+                from app.agent_runtime.infrastructure.bounded_recovery import (
+                    schedule_bounded_repair,
+                )
+
+                if task.stage == "DEVELOPING" and await schedule_bounded_repair(
+                    self.sessions, lease, native.id
+                ):
+                    return Action.BOUNDED_REPAIR
+                if (
+                    task.stage == "FIXING"
+                    and native.checkpoint.get("next_feedback")
+                    and not compaction
+                    and not continuity
+                ):
+                    from app.agent_runtime.infrastructure.repair_generation import prepare_repair
+
+                    native = await prepare_repair(self.sessions, lease, native)
+                bounded_repair = native.checkpoint.get("bounded_repair_job_id") == str(lease.job_id)
+                if bounded_repair:
+                    token_policy = TokenEfficiencyPolicy.parse(
+                        {
+                            **asdict(token_policy),
+                            "mode": "ENFORCE",
+                            "reasoning_effort": "low",
+                            "first_edit_warning_tokens": 20000,
+                            "exploration_hard_tokens": 50000,
+                            "no_progress_tokens": 20000,
+                            "max_turn_input_tokens": 80000,
+                            "automatic_rollover": False,
+                        }
+                    )
+                supervisor_guidance = ""
+                from app.agent_runtime.infrastructure.patch_recovery import can_resume_patch
+
+                async with self.sessions() as session:
+                    patch_resume_allowed = (
+                        not compaction
+                        and not continuity
+                        and not native.checkpoint.get("next_feedback")
+                        and await can_resume_patch(session, native, task.requirement_version)
+                    )
+                if (
+                    self.settings.supervisor_enabled
+                    and not patch_resume_allowed
+                    and not compaction
+                    and not continuity
+                    and not (native.harness == "patch" and task.stage == "FIXING")
+                ):
+                    from app.supervisor.infrastructure.service import supervise
+
+                    decision = await supervise(self.sessions, self.settings, lease, native.id)
+                    if decision.action == "WAIT_HUMAN":
+                        raise PhaseBlocked(WaitReason.MISSING_REQUIREMENT, decision.assessment)
+                    if native.harness == "patch" and decision.task_class in {
+                        "COMPLEX",
+                        "HIGH_RISK",
+                    }:
+                        raise PhaseBlocked(
+                            WaitReason.MISSING_REQUIREMENT,
+                            "Task exceeds routine patch MVP scope; explicitly select an agentic harness",
+                        )
+                    supervisor_guidance = decision.developer_guidance()
                 checkpoint_digest = native.checkpoint.get("rollover_digest")
                 if (
                     checkpoint_digest
@@ -201,6 +275,7 @@ class SqlPhaseExecutor:
                     and native.native_session_id
                     and native.checkpoint.get("next_feedback")
                     and token_policy.automatic_rollover
+                    and native.harness not in {"responses", "patch"}
                     and token_policy.mode == "ENFORCE"
                     and active_context is not None
                     and active_context >= token_policy.active_context_soft_tokens
@@ -227,6 +302,7 @@ class SqlPhaseExecutor:
                     not compaction
                     and not compacted
                     and threshold
+                    and native.harness not in {"responses", "patch"}
                     and native.native_session_id
                     and active_context is not None
                     and active_context >= threshold
@@ -246,6 +322,10 @@ class SqlPhaseExecutor:
                 if not (
                     (native.harness == "codex" and self.settings.developer_harness_codex)
                     or (native.harness == "claude" and self.settings.developer_harness_claude)
+                    or (
+                        native.harness in {"responses", "patch"}
+                        and self.settings.developer_harness_responses
+                    )
                 ):
                     raise PhaseBlocked(
                         WaitReason.MISSING_CONFIGURATION, "Selected native harness is disabled"
@@ -276,12 +356,33 @@ class SqlPhaseExecutor:
                 try:
                     async with self.sessions() as session:
                         remaining = await development_allowance(
-                            session, task, profile.hard_budget_usd
+                            session,
+                            task,
+                            profile.hard_budget_usd,
+                            self.settings.minimum_developer_turn_allowance_usd,
                         )
                 except DevelopmentBlocked as exc:
                     raise PhaseBlocked(WaitReason.BUDGET_EXHAUSTED, str(exc)) from exc
+                if self.settings.supervisor_enabled and not compaction and not continuity:
+                    remaining -= self.settings.supervisor_request_limit_usd * 2
+                    if remaining < self.settings.minimum_developer_turn_allowance_usd:
+                        raise PhaseBlocked(
+                            WaitReason.BUDGET_EXHAUSTED,
+                            "Insufficient budget for coding plus bounded supervision",
+                        )
+                if bounded_repair:
+                    remaining = min(remaining, Decimal("0.15"))
                 store.reservation_usd = remaining
-                request = f"{task.title}\n\n{task.description}".strip()
+                request = (
+                    "ORIGINAL REQUIREMENT (authoritative):\n"
+                    + f"{task.title}\n\n{task.description}".strip()
+                )
+                if native.checkpoint.get("repair_packet") and not native.native_session_id:
+                    request += (
+                        "\nCURRENT REPAIR EVIDENCE (not a replacement requirement):\n"
+                        + json.dumps(native.checkpoint["repair_packet"], ensure_ascii=False)
+                        + "\nFix only the current delta. Do not reconstruct the previous conversation."
+                    )
                 rollover = (
                     native.checkpoint.get("rollover_checkpoint")
                     if not native.native_session_id
@@ -321,7 +422,7 @@ class SqlPhaseExecutor:
                         + json.dumps(rollover, ensure_ascii=True)
                     )
                     feedback = None
-                elif rollover and native.native_session_id:
+                elif (rollover or patch_resume_allowed) and native.native_session_id:
                     feedback = request
                 if native.native_session_id and not feedback:
                     raise PhaseBlocked(
@@ -329,7 +430,17 @@ class SqlPhaseExecutor:
                         "A resumed session needs new feedback; do not replay the old task",
                     )
                 prompt = feedback if feedback is not None else request
+                if supervisor_guidance:
+                    if feedback is not None:
+                        feedback += supervisor_guidance
+                    else:
+                        request += supervisor_guidance
+                    prompt = feedback if feedback is not None else request
                 manifest = Manifest(
+                    supervision_enabled=self.settings.supervisor_enabled
+                    and native.harness != "patch"
+                    and not compaction
+                    and not continuity,
                     operation="compaction"
                     if compaction
                     else "continuity"
@@ -337,9 +448,16 @@ class SqlPhaseExecutor:
                     else "development",
                     harness=native.harness,
                     model=native.model,
-                    effort=token_policy.reasoning_effort
-                    if token_policy_row or native.checkpoint.get("token_policy_override")
-                    else profile.effort,
+                    effort="low"
+                    if bounded_repair
+                    else TokenEfficiencyPolicy.parse(
+                        token_policy_row.values if token_policy_row else None
+                    ).developer_effort(
+                        profile.effort,
+                        (native.checkpoint.get("token_policy_override") or {}).get(
+                            "reasoning_effort"
+                        ),
+                    ),
                     token_policy=asdict(token_policy),
                     progress_baseline=native.checkpoint.get("token_efficiency") or {},
                     rollover_checkpoint=rollover,
@@ -365,6 +483,22 @@ class SqlPhaseExecutor:
                     "HTTP_PROXY": self.settings.developer_egress_proxy,
                 }
                 runtime = await self.runtime_profile(task)
+
+                async def handle_supervision(anomaly: dict[str, object]) -> dict[str, object]:
+                    from app.supervisor.infrastructure.service import supervise
+
+                    try:
+                        result = await supervise(
+                            self.sessions, self.settings, lease, native.id, anomaly=anomaly
+                        )
+                        action = result.action if result.action in {"CONTINUE", "NUDGE"} else "STOP"
+                        return {"action": action, "message": result.execution_brief[:3000]}
+                    except (ValueError, RuntimeError, httpx.HTTPError, TimeoutError):
+                        return {
+                            "action": "STOP",
+                            "message": "Supervisor unavailable; preserve session for inspection",
+                        }
+
                 harness = DockerHarness(
                     client,
                     mounts=mounts,
@@ -377,6 +511,7 @@ class SqlPhaseExecutor:
                     job_id=lease.job_id,
                     lease_token=lease.token,
                     on_progress=store.progress,
+                    on_supervision=handle_supervision if manifest.supervision_enabled else None,
                 )
                 try:
                     receipt = await DevelopTask(harness, store, profile.hard_budget_usd).execute(
@@ -391,6 +526,53 @@ class SqlPhaseExecutor:
                 except WorkspaceUnavailable as exc:
                     raise PhaseBlocked(WaitReason.MISSING_CONFIGURATION, str(exc)) from exc
                 if receipt.status != "completed":
+                    if (
+                        receipt.failure_code == "TURN_INPUT_LIMIT"
+                        and await schedule_candidate_validation(self.sessions, lease, native.id)
+                    ):
+                        return Action.VALIDATE_CANDIDATE
+                    if receipt.failure_code == "TURN_INPUT_LIMIT" and await schedule_bounded_repair(
+                        self.sessions, lease, native.id
+                    ):
+                        return Action.BOUNDED_REPAIR
+                    if receipt.failure_code in {
+                        "TURN_INPUT_LIMIT",
+                        "CONTEXT_HARD_LIMIT",
+                        "EXPLORATION_LIMIT",
+                    }:
+                        raise PhaseBlocked(
+                            WaitReason.TOKEN_LIMIT,
+                            f"Developer interrupted: {receipt.failure_code}; worktree and session retained",
+                        )
+                    if receipt.failure_code == "SUPERVISOR_STOP":
+                        raise PhaseBlocked(
+                            WaitReason.RUNTIME_FAILURE,
+                            "Supervisor stopped this attempt; inspect SUPERVISOR_DECIDED evidence",
+                        )
+                    if receipt.failure_code in {
+                        "NO_PROGRESS",
+                        "REPEATED_TOOL_LOOP",
+                        "REPEATED_READ_LOOP",
+                    }:
+                        raise PhaseBlocked(
+                            WaitReason.NO_PROGRESS,
+                            f"Developer interrupted: {receipt.failure_code}; evidence retained",
+                        )
+                    if receipt.failure_code == "TURN_BUDGET_EXHAUSTED":
+                        raise PhaseBlocked(
+                            WaitReason.BUDGET_EXHAUSTED,
+                            "Developer reached its reserved USD allowance",
+                        )
+                    if native.harness == "patch":
+                        reason = {
+                            "BUDGET_LIMIT": WaitReason.BUDGET_EXHAUSTED,
+                            "PATCH_LIMIT": WaitReason.NO_PROGRESS,
+                            "PATCH_TOOL_FAILURE": WaitReason.RUNTIME_FAILURE,
+                            "PATCH_FAILED": WaitReason.RUNTIME_FAILURE,
+                        }.get(receipt.failure_code or "", WaitReason.MISSING_REQUIREMENT)
+                        raise PhaseBlocked(
+                            reason, f"{receipt.failure_code}: {receipt.summary}"[:1000]
+                        )
                     if receipt.failure_code == "PROVIDER_AUTHENTICATION_FAILED":
                         raise PhaseBlocked(
                             WaitReason.MISSING_CONFIGURATION,
@@ -513,12 +695,21 @@ class SqlPhaseExecutor:
             token,
             f"publish-{lease.job_id}-{lease.token}",
         )
+        summary = str(native.checkpoint.get("summary") or "")
+        title = publication_title(task.title, summary)
         async with github_client(token) as api:
             pull = await GitHubDelivery(api, repository.owner, repository.name).publish(
                 branch=task.branch_name or "",
                 base=str(native.checkpoint.get("base_branch") or repository.default_branch),
-                title=publication_title(task.title),
-                body=f"Task: {task.external_key or task.id}\n\n{str(native.checkpoint.get('summary') or '')[-8000:]}\n\nDeterministic validation passed at `{validated}`. Review and current-SHA approval are required before merge.",
+                title=title,
+                body=publication_body(
+                    task_ref=str(task.external_key or task.id),
+                    title=title,
+                    summary=summary,
+                    sha=validated,
+                    change_context=str(native.checkpoint.get("publication_change_context") or ""),
+                    checks=native.checkpoint.get("publication_checks"),
+                ),
                 owner=repository.owner,
                 expected_sha=validated,
             )
@@ -537,6 +728,16 @@ class SqlPhaseExecutor:
         native: DeveloperSession,
         team: Team,
     ) -> Action:
+        candidate = native.checkpoint.get("validation_candidate")
+        if candidate:
+            from app.agent_runtime.infrastructure.checkpoints import workspace_facts
+
+            facts = await workspace_facts(Path(native.workspace_path), Path(native.workspace_path))
+            if facts != candidate:
+                raise PhaseBlocked(
+                    WaitReason.MISSING_REQUIREMENT,
+                    "Candidate changed after token-limit handoff; inspect before validation",
+                )
         runtime = await self.runtime_profile(task)
         commands = (
             runtime.validation_commands
@@ -550,7 +751,7 @@ class SqlPhaseExecutor:
             )
         manifest = ValidationManifest(
             branch=task.branch_name,
-            title=publication_title(task.title),
+            title=publication_title(task.title, str(native.checkpoint.get("summary") or "")),
             author_name=team.name,
             base_sha=str(native.checkpoint.get("base_sha") or ""),
             commands=commands,
@@ -582,6 +783,12 @@ class SqlPhaseExecutor:
             ):
                 raise ValueError("Task changed while validating")
             passed = result.get("passed") is True
+            if passed:
+                state.checkpoint = {
+                    **state.checkpoint,
+                    "publication_change_context": result.get("change_context", ""),
+                    "publication_checks": commands,
+                }
             if passed and runtime:
                 configured = await session.get(RepositoryRuntimeProfile, runtime.repository_id)
                 if (
@@ -627,8 +834,19 @@ class SqlPhaseExecutor:
             if not passed:
                 state.checkpoint = {
                     **state.checkpoint,
-                    "next_feedback": "Fix these deterministic validation failures in this same session:\n"
-                    + json.dumps(result["checks"])[-16000:],
+                    "next_feedback": "Fix these deterministic validation failures. Full logs remain in validation evidence:\n"
+                    + json.dumps(
+                        [
+                            {
+                                "command": c["command"],
+                                "exit_code": c["exit_code"],
+                                "timed_out": c["timed_out"],
+                                "output_tail": c["output_tail"][-1000:],
+                            }
+                            for c in result["checks"]
+                            if c["exit_code"] != 0 or c["timed_out"]
+                        ]
+                    )[:8000],
                 }
             stop_loop = current.no_progress_count >= 2
         if stop_loop:

@@ -1,7 +1,7 @@
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 from app.analytics.application.dashboard import BuildDashboard
 from app.analytics.domain.efficiency import RunFact, TaskFact, quantile, run_totals, task_metrics
@@ -114,3 +114,32 @@ async def test_dashboard_periods_consistently_exclude_future_dated_receipts():
     assert value["month_totals"]["known_cost_usd"] == "1"
     assert value["agents"][0]["known_cost_usd"] == "1"
     assert len(value["daily"]) == 1
+
+
+async def test_dashboard_reuses_task_metrics_without_changing_agent_participation(monkeypatch):
+    now = datetime.now(UTC)
+    facts = AsyncMock()
+    facts.tasks.return_value = [
+        task(
+            completed_at=now - timedelta(minutes=1),
+            runs=[
+                run(
+                    profile_id=profile,
+                    started_at=now - timedelta(minutes=2),
+                    finished_at=now - timedelta(minutes=1),
+                )
+                for profile in ("first", "second")
+            ],
+        )
+    ]
+    measured = Mock(wraps=task_metrics)
+    monkeypatch.setattr("app.analytics.application.dashboard.task_metrics", measured)
+    dashboard = BuildDashboard(facts, forecasts_enabled=False, minimum=5)
+    result = await dashboard.dashboard(30)
+    measured.assert_called_once()
+    assert result["merged_tasks"] == 1
+    assert len(result["agents"]) == 2
+    assert all(agent["tasks_merged"] == 1 for agent in result["agents"])
+    assert all(agent["median_cost_usd"] == 2 for agent in result["agents"])
+    await dashboard.dashboard(30)
+    assert measured.call_count == 2  # Recomputed for each fresh request.

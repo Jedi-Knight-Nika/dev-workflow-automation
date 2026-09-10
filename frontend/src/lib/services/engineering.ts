@@ -97,8 +97,6 @@ export const saveAutomation = (id: string, policy: AutomationPolicy) =>
     method: 'PUT',
     body: JSON.stringify(policy)
   });
-export const enrollTask = (id: string) =>
-  api<{ status: string }>(`/tasks/${id}/enroll`, { method: 'POST' });
 
 export type SessionChangeMode = 'keep_native' | 'handoff';
 export type DeveloperSessionView = {

@@ -34,6 +34,8 @@ publication and approval. Preserve unrelated changes. Report missing requirement
 explicitly. Never claim tests passed unless you ran them.
 If architectural help is required, begin the final report with NEEDS_PLAN on its
 own line and describe the decision needed. Otherwise begin with IMPLEMENTED.
+After IMPLEMENTED, write a simple English Conventional Commit title (at most 72
+characters), then 2–4 English bullets describing actual changes and preserved behavior.
 Search before broad reads. Read relevant ranges, not entire large files.
 Use targeted checks while editing; full offline validation runs separately.
 Do not repeat an unchanged failing command without a new diagnostic reason.
@@ -42,6 +44,23 @@ decisions, unresolved issues and the next action. Do not restate tool history.
 Run noisy checks/builds through /app/.venv/bin/python -m
 app.agent_runtime.infrastructure.bounded_command -- EXECUTABLE ARGUMENTS.
 It preserves full logs and returns bounded diagnostics; inspect log ranges only as needed.
+For initial localization use /app/.venv/bin/python -m
+app.agent_runtime.infrastructure.repository_tools investigate "relevant identifiers or UI labels".
+This returns a cached structural map, likely symbols, callers, tests and bounded slices.
+Original task text is authoritative; Supervisor annotations cannot change its object or scope.
+For routine work: locate once, inspect exact code once, make a coherent edit by cycle 2/3
+when evidence is sufficient, then a targeted check and correction. Once target, helper
+and tests are known, do not keep surveying unrelated infrastructure. Report a specific
+missing fact instead. Treat these as progress targets, never fabricate an edit or test.
+After a coherent frontend edit, run ONE combined check:
+/app/.venv/bin/python -m app.agent_runtime.infrastructure.repository_tools check frontend/src/PATH.svelte
+(list all changed frontend files). It formats those files, runs project typecheck and
+file-scoped ESLint, and returns one bounded result with full log references.
+Fix the named errors together, then repeat that combined check once if needed.
+For lint alone use repository_tools lint, NOT npm run lint -- FILE: that still lints
+the entire frontend via eslint . . Full repository validation runs separately.
+The helper resolves formatter/plugins and check CWD from frontend.
+Never use npm --prefix exec or install packages to work around formatter resolution.
 """
 
 HELPER_CONTRACTS = {
@@ -52,7 +71,7 @@ HELPER_CONTRACTS = {
 
 class Manifest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    harness: Literal["codex", "claude"]
+    harness: Literal["codex", "claude", "responses", "patch"]
     model: str = Field(min_length=1, max_length=255)
     effort: Literal["none", "low", "medium", "high"] = "medium"
     prompt: str = Field(min_length=1, max_length=24000)
@@ -64,6 +83,7 @@ class Manifest(BaseModel):
     pricing: dict[str, Decimal | None] | None = None
     operation: Literal["development", "compaction", "continuity"] = "development"
     role_kind: Literal["DEVELOPER", "THINKER", "REVIEWER"] = "DEVELOPER"
+    supervision_enabled: bool = False
     token_policy: dict[str, object] = Field(default_factory=dict)
     progress_baseline: dict[str, Any] = Field(default_factory=dict)
     rollover_checkpoint: dict[str, Any] | None = None
@@ -92,7 +112,38 @@ def emit(event: str, **payload: object) -> None:
     print(json.dumps({"event": event, **payload}, default=str), flush=True)
 
 
+async def request_supervision(anomaly: dict[str, Any]) -> dict[str, Any]:
+    sequence = anomaly["sequence"]
+    if type(sequence) is not int or sequence not in {1, 2}:
+        raise ValueError("Invalid supervision sequence")
+    emit("supervision_requested", anomaly=anomaly)
+    path = Path("/run/control") / f"supervision-{sequence}.json"
+    try:
+        async with asyncio.timeout(55):
+            while not path.exists():
+                await asyncio.sleep(0.1)
+            if path.stat().st_size > 8000:
+                raise ValueError("Oversized supervision response")
+            response = json.loads(path.read_bytes())
+            if not isinstance(response, dict) or response.get("action") not in {
+                "CONTINUE",
+                "NUDGE",
+                "STOP",
+            }:
+                raise ValueError("Invalid supervision response")
+            return response
+    except TimeoutError:
+        return {
+            "action": "STOP",
+            "message": "Supervisor response timed out; retain current session",
+        }
+
+
 async def execute(manifest: Manifest) -> None:
+    if manifest.harness in {"responses", "patch"} and (
+        manifest.role_kind != "DEVELOPER" or manifest.operation != "development"
+    ):
+        raise ValueError("Responses supports Developer generations only")
     if os.getuid() != 10001 or Path.cwd() != Path("/workspace"):
         raise RuntimeError("Developer runner must execute in its dedicated non-root container")
     if any(
@@ -129,6 +180,7 @@ async def execute(manifest: Manifest) -> None:
         token_policy=TokenEfficiencyPolicy.parse(manifest.token_policy),
         progress_baseline=manifest.progress_baseline,
         progress_callback=lambda snapshot: emit("developer_progress", snapshot=snapshot),
+        supervision_callback=request_supervision if manifest.supervision_enabled else None,
     )
     await check_workspace(settings.workspace, read_only=settings.read_only)
     if manifest.rollover_checkpoint:
@@ -143,6 +195,21 @@ async def execute(manifest: Manifest) -> None:
         from app.agent_runtime.infrastructure.codex import CodexHarness
 
         harness = CodexHarness(settings, previous_usage=manifest.previous_usage)
+    elif manifest.harness == "patch":
+        from app.agent_runtime.infrastructure.patch_pipeline import PatchPipelineHarness
+
+        harness = PatchPipelineHarness(settings)
+    elif manifest.harness == "responses":
+        from dataclasses import replace
+
+        from app.agent_runtime.infrastructure.responses import CONTRACT, ResponsesHarness
+
+        harness = ResponsesHarness(
+            replace(
+                settings,
+                instructions=CONTRACT + "\nTeam guidance:\n" + manifest.supplemental_instructions,
+            )
+        )
     else:
         from app.agent_runtime.infrastructure.claude import ClaudeHarness
 

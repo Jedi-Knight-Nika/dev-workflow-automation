@@ -7,7 +7,7 @@ from uuid import UUID
 
 from app.analytics.application.ports import AnalyticsFacts
 from app.analytics.domain.accuracy import evaluate
-from app.analytics.domain.efficiency import RunFact, quantile, run_totals, task_metrics
+from app.analytics.domain.efficiency import RunFact, TaskFact, quantile, run_totals, task_metrics
 from app.analytics.domain.forecast import VERSION, forecast
 
 
@@ -23,6 +23,15 @@ class BuildDashboard:
         since = now - timedelta(days=days)
         month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
         tasks = await self.facts.tasks(min(since, now - timedelta(days=30), month_start), team_id)
+        metrics_by_task: dict[str, dict[str, Any]] = {}
+
+        def metrics(task: TaskFact) -> dict[str, Any]:
+            # Request-local only: different dashboard requests must see fresh facts.
+            if task.id not in metrics_by_task:
+                metrics_by_task[task.id] = task_metrics(task)
+            return metrics_by_task[task.id]
+
+        period_cutoffs = {window: now - timedelta(days=window) for window in (1, 7, 30)}
         all_runs = [r for t in tasks for r in t.runs if r.started_at <= now]
         runs = [r for r in all_runs if r.started_at >= since]
         groups: dict[str, dict[str, list[RunFact]]] = {
@@ -39,7 +48,7 @@ class BuildDashboard:
                 groups["run_kinds"][run.run_kind].append(run)
                 groups["repositories"][task.repository_id or "unattributed"].append(run)
         merged = [
-            task_metrics(t)
+            metrics(t)
             for t in tasks
             if t.status == "MERGED" and t.completed_at and since <= t.completed_at <= now
         ]
@@ -51,7 +60,7 @@ class BuildDashboard:
             cohort_ids = {r.task_id for r in selected if r.role == "DEVELOPER"}
             cohort = [t for t in tasks if t.id in cohort_ids]
             terminal = [t for t in cohort if t.status in {"MERGED", "FAILED", "CANCELLED"}]
-            successes = [task_metrics(t) for t in terminal if t.status == "MERGED"]
+            successes = [metrics(t) for t in terminal if t.status == "MERGED"]
             costs = [float(t["cost_usd"]) for t in successes if t["cost_complete"]]
             durations = [
                 t["developer_active_seconds"]
@@ -117,10 +126,8 @@ class BuildDashboard:
             ],
             "agents": agents,
             "period_costs": {
-                str(window): run_totals(
-                    [r for r in all_runs if r.started_at >= now - timedelta(days=window)]
-                )
-                for window in (1, 7, 30)
+                str(window): run_totals([r for r in all_runs if r.started_at >= cutoff])
+                for window, cutoff in period_cutoffs.items()
             },
             "repository_names": {
                 t.repository_id: t.repository_name for t in tasks if t.repository_id

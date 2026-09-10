@@ -3,7 +3,6 @@ import type {
   GitHubInstallationAccount,
   Integration,
   LinearWorkflowState,
-  LinearMember,
   TrelloBoard,
   TrelloList,
   WebhookHealth
@@ -46,20 +45,12 @@ export function getGithubAppInstallUrl(): Promise<{ url: string }> {
   return api<{ url: string }>('/github/app/install-url');
 }
 
-export function getGithubAppManageUrl(): Promise<{ url: string }> {
-  return api<{ url: string }>('/github/app/manage-url');
-}
-
 export function getGithubInstallationAccount(): Promise<GitHubInstallationAccount> {
   return api<GitHubInstallationAccount>('/github/app/account');
 }
 
 export function listLinearWorkflowStates(): Promise<LinearWorkflowState[]> {
   return api<LinearWorkflowState[]>('/linear/workflow-states');
-}
-
-export function listLinearMembers(): Promise<LinearMember[]> {
-  return api<LinearMember[]>('/linear/members');
 }
 
 export function listTrelloBoards(): Promise<TrelloBoard[]> {

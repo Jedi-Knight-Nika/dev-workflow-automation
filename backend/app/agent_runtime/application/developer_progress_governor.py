@@ -106,32 +106,44 @@ class DeveloperProgressGovernor:
         stop = None
         if self.first_edit is None and self.total >= self.policy.first_edit_warning_tokens:
             conditions.append("EXPLORATION_WARNING")
-            if self.total >= self.policy.exploration_hard_tokens:
+            # A token threshold alone is not proof of waste. Require completed
+            # tool evidence and an unchanged worktree before stopping discovery.
+            if (
+                self.total >= self.policy.exploration_hard_tokens
+                and self.tool_calls >= 4
+                and self.diff_changes == 0
+            ):
                 stop = "EXPLORATION_LIMIT"
         if self.total - self.last_progress >= self.policy.no_progress_tokens:
             conditions.append("NO_PROGRESS_WARNING")
-            if self.total - self.last_progress >= self.policy.no_progress_tokens * 2:
-                stop = "NO_PROGRESS"
+            # Post-edit token growth can be legitimate debugging or validation.
+            # Hard stops below require deterministic repeated-loop evidence.
         repeated = max(self.repeats.values(), default=0)
-        if repeated >= self.policy.repeated_command_threshold:
+        if repeated >= self.policy.repeated_command_threshold - 1:
             conditions.append("REPEATED_COMMAND_WARNING")
-            if repeated > self.policy.repeated_command_threshold:
+            if repeated >= self.policy.repeated_command_threshold:
                 stop = "REPEATED_TOOL_LOOP"
         if active_context is not None and active_context >= self.policy.active_context_soft_tokens:
             conditions.append("CONTEXT_WARNING")
             if active_context >= self.policy.active_context_hard_tokens:
                 stop = "CONTEXT_HARD_LIMIT"
-        if self.repeated_read_count >= 3 and self.source_read_bytes >= 40000:
+        repeated_reads = max(self.reads.values(), default=0)
+        if repeated_reads >= 3 and self.source_read_bytes >= 40000:
             conditions.append("REPEATED_READ_WARNING")
+            if self.diff_changes == 0:
+                stop = "REPEATED_READ_LOOP"
         failures = max(self.failed_checks.values(), default=0)
         if failures >= self.policy.repeated_failure_threshold:
             conditions.append("UNCHANGED_VALIDATION_WARNING")
-            if failures > self.policy.repeated_failure_threshold:
+            if failures >= self.policy.repeated_failure_threshold:
                 stop = "REPEATED_TOOL_LOOP"
         if self.compaction_count > self.policy.max_compactions:
             conditions.append("REPEATED_COMPACTION_WARNING")
             if self.total - self.last_progress >= self.policy.no_progress_tokens:
                 stop = "REPEATED_COMPACTION"
+        if self.total >= self.policy.max_turn_input_tokens:
+            conditions.append("TURN_INPUT_LIMIT_WARNING")
+            stop = "TURN_INPUT_LIMIT"
         fresh = sorted(set(conditions) - self.warnings)
         self.warnings.update(conditions)
         if self.policy.mode == "ENFORCE" and stop:

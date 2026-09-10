@@ -2,8 +2,9 @@ import builtins
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import load_only
 
 from app.engineering.domain.lifecycle import TaskStatus
 from app.engineering.infrastructure.task_models import Task
@@ -120,17 +121,14 @@ class SqlAlchemyRepositoryManagementWorkflow:
         keys = {(command.provider, command.external_repo_id) for command in commands}
         if len(keys) != len(commands):
             raise ManagedRepositoryConflict("Repository selection contains duplicates")
-        existing = list(
-            (
-                await self._session.scalars(
-                    select(Repository).where(
-                        Repository.provider.in_({item[0] for item in keys}),
-                        Repository.external_repo_id.in_({item[1] for item in keys}),
-                    )
-                )
-            ).all()
+        existing = await self._session.scalar(
+            select(
+                select(Repository.id)
+                .where(tuple_(Repository.provider, Repository.external_repo_id).in_(keys))
+                .exists()
+            )
         )
-        if any((item.provider, item.external_repo_id) in keys for item in existing):
+        if existing:
             raise ManagedRepositoryConflict("One or more repositories are already imported")
         items = [
             Repository(
@@ -170,12 +168,21 @@ class SqlAlchemyRepositoryManagementWorkflow:
 
     async def dependencies(self, repository_id: uuid.UUID) -> RepositoryDependencies:
         item = await self._locked(repository_id)
+        return await self._dependencies(item)
+
+    async def _dependencies(self, item: Repository) -> RepositoryDependencies:
         task_context, teams = await self._context([item.id])
         active_tasks, active_workspaces, _ = task_context.get(item.id, (0, 0, None))
         team_names = tuple(
             team.name for team in teams if str(item.id) in (team.repository_ids or [])
         )
-        integrations = list((await self._session.scalars(select(Integration))).all())
+        integrations = (
+            await self._session.scalars(
+                select(Integration).options(
+                    load_only(Integration.provider_name, Integration.configuration, raiseload=True)
+                )
+            )
+        ).all()
         task_sources = tuple(
             integration.provider_name
             for integration in integrations
@@ -185,7 +192,7 @@ class SqlAlchemyRepositoryManagementWorkflow:
 
     async def delete(self, repository_id: uuid.UUID) -> None:
         item = await self._locked(repository_id)
-        dependencies = await self.dependencies(repository_id)
+        dependencies = await self._dependencies(item)
         if (
             dependencies.teams
             or dependencies.active_tasks

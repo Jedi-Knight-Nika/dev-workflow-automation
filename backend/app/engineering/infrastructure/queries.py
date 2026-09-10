@@ -5,6 +5,7 @@ from typing import Any
 
 from sqlalchemy import Select, String, exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import load_only
 
 from app.engineering.application.ports.task_queries import (
     ExternalTaskView,
@@ -160,7 +161,9 @@ class SqlAlchemyTaskQueries:
                 repository.id: repository
                 for repository in (
                     await self._session.scalars(
-                        select(Repository).where(Repository.id.in_(repository_ids))
+                        select(Repository)
+                        .options(load_only(Repository.owner, Repository.name, raiseload=True))
+                        .where(Repository.id.in_(repository_ids))
                     )
                 ).all()
             }
@@ -170,6 +173,7 @@ class SqlAlchemyTaskQueries:
         scope_rows = (
             await self._session.execute(
                 select(TaskRepositoryScope, Repository)
+                .options(load_only(Repository.owner, Repository.name, raiseload=True))
                 .join(Repository, Repository.id == TaskRepositoryScope.repository_id)
                 .where(TaskRepositoryScope.task_id.in_(task_ids))
                 .order_by(TaskRepositoryScope.is_primary.desc(), TaskRepositoryScope.created_at)
@@ -197,7 +201,11 @@ class SqlAlchemyTaskQueries:
             {
                 team.id: team
                 for team in (
-                    await self._session.scalars(select(Team).where(Team.id.in_(team_ids)))
+                    await self._session.scalars(
+                        select(Team)
+                        .options(load_only(Team.name, raiseload=True))
+                        .where(Team.id.in_(team_ids))
+                    )
                 ).all()
             }
             if team_ids

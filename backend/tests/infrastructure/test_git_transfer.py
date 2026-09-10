@@ -90,3 +90,37 @@ async def test_capture_bounds_output_and_does_not_leak_stderr(tmp_path: Path) ->
 async def test_capture_stops_on_timeout() -> None:
     with pytest.raises(TimeoutError):
         await capture((sys.executable, "-c", "import time; time.sleep(30)"), timeout=1)
+
+
+@pytest.mark.asyncio
+async def test_capture_drains_noisy_stderr_without_blocking_success():
+    result = await capture(
+        (sys.executable, "-c", "import sys; sys.stderr.write('x'*1000000); print('ok')"),
+        output_limit=100,
+        include_stderr=True,
+        timeout=3,
+    )
+    assert result == b"ok\n"
+
+
+@pytest.mark.asyncio
+async def test_capture_keeps_bounded_failure_diagnostic():
+    with pytest.raises(RuntimeError) as error:
+        await capture(
+            (sys.executable, "-c", "import sys; sys.stderr.write('x'*1000000); sys.exit(1)"),
+            output_limit=100,
+            include_stderr=True,
+            timeout=3,
+        )
+    assert str(error.value) == "Operation failed: " + "x" * 100
+
+
+@pytest.mark.asyncio
+async def test_output_overflow_cleanup_does_not_compete_with_stderr_reader():
+    with pytest.raises(RuntimeError, match="output bound"):
+        await capture(
+            (sys.executable, "-c", "import sys,time; print('x'*1000, flush=True); time.sleep(30)"),
+            output_limit=100,
+            include_stderr=True,
+            timeout=3,
+        )

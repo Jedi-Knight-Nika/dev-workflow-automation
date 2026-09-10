@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.agent_runtime.application.harness import TurnReceipt
 from app.agent_runtime.infrastructure.models import AIRun, PricingCatalog
 from app.agent_runtime.infrastructure.receipts import apply_receipt, known_no_inference
-from app.agent_runtime.infrastructure.reservations import reserve_budget
+from app.agent_runtime.infrastructure.reservations import consumed_cost, reserve_budget
 from app.engineering.application.jobs import PhaseLease
 from app.engineering.infrastructure.task_models import Job, Task
 from app.platform.scheduling.states import JobState
@@ -62,18 +62,7 @@ class SqlHelperStore:
 
     async def consumed_cost(self, task_id: UUID) -> Decimal | None:
         async with self.sessions() as session:
-            rows = await session.scalars(select(AIRun).where(AIRun.task_id == task_id))
-            total = Decimal(0)
-            for row in rows:
-                cost = (
-                    row.provider_cost_usd
-                    if row.provider_cost_usd is not None
-                    else row.calculated_cost_usd
-                )
-                if cost is None or row.status == "RUNNING":
-                    return None
-                total += cost
-            return total
+            return await consumed_cost(session, task_id)
 
     async def begin_run(self, task_id: UUID, requirement_version: int) -> UUID:
         async with self.sessions.begin() as session:

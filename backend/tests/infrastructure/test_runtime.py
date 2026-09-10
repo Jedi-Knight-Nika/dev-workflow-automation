@@ -168,6 +168,7 @@ async def test_validation_is_real_subprocess_and_output_is_bounded(tmp_path: Pat
 @pytest.mark.asyncio
 async def test_codex_uses_pinned_sdk_resume_and_native_sandbox(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("OPENAI_API_KEY", "acceptance-fake-key")
+    monkeypatch.setenv("HOME", str(tmp_path))
     sdk = pytest.importorskip("openai_codex")
     from app.agent_runtime.infrastructure.codex import CodexHarness
 

@@ -1,6 +1,8 @@
 import asyncio
 import hashlib
+import json
 import os
+import re
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
@@ -41,10 +43,169 @@ class CodexHarness:
         self.progress_offset = self.governor.total
         self.logs = ToolLogs(Path.home() / ".aew" / "tool-logs")
         self.compacting = False
+        self.supervision_count = 0
+        self.supervised_kinds: set[str] = set()
+        self.supervision_task: asyncio.Task[None] | None = None
+        self.native_finished = False
+        self.already_inspected: list[str] = []
+        self.already_checked: list[dict[str, Any]] = []
+        self.frontend_checks: dict[str, Any] | None = None
+
+    def _schedule_supervision(self, kind: str, detail: str) -> None:
+        if self.supervision_task and not self.supervision_task.done():
+            return
+        self.supervision_task = asyncio.create_task(self._supervise_anomaly(kind, detail))
+
+    def _early_checkpoint_due(self) -> bool:
+        return (
+            self.governor.first_edit is None
+            and (self.governor.inference_cycles >= 3 or self.governor.total >= 40000)
+            and "NO_PROGRESS" not in self.supervised_kinds
+        )
+
+    async def _supervise_anomaly(self, kind: str, detail: str) -> None:
+        callback = self.settings.supervision_callback
+        if (
+            not callback
+            or self.native_finished
+            or self.compacting
+            or self.settings.read_only
+            or self.supervision_count >= 2
+            or kind in self.supervised_kinds
+            or self.governor.stop_reason
+        ):
+            return
+        self.supervised_kinds.add(kind)
+        self.supervision_count += 1
+        answer = await callback(
+            {
+                "sequence": self.supervision_count,
+                "kind": kind,
+                "detail": detail[:1600],
+                "input_tokens": self.governor.total,
+                "tokens_since_progress": self.governor.total - self.governor.last_progress,
+                "diff_changes": self.governor.diff_changes,
+                "tool_calls": self.governor.tool_calls,
+                "inference_cycles": self.governor.inference_cycles,
+                **self._history(),
+            }
+        )
+        if self._supervision_obsolete():
+            return  # A late decision never restarts or relabels completed work.
+        if answer.get("action") == "STOP":
+            self.governor.stop_reason = "SUPERVISOR_STOP"
+            await self.turn.interrupt()
+        elif answer.get("action") == "NUDGE":
+            try:
+                await self.turn.steer(
+                    "Supervisor advisory (original task remains authoritative): "
+                    + str(answer.get("message", ""))[:3000]
+                )
+            except RuntimeError:
+                # The native turn may finish while the bounded Supervisor call runs.
+                # Never restart paid work merely to deliver a late annotation.
+                return
+
+    def _supervision_obsolete(self) -> bool:
+        # Re-read state after awaiting the callback; the stream runs concurrently.
+        return self.native_finished or self.governor.stop_reason is not None
 
     def _emit_progress(self) -> None:
         if self.settings.progress_callback:
-            self.settings.progress_callback(self.governor.snapshot())
+            self.settings.progress_callback(self._snapshot())
+
+    def _snapshot(self) -> dict[str, Any]:
+        return {
+            **self.governor.snapshot(),
+            **self._history(),
+            "frontend_checks": self.frontend_checks,
+        }
+
+    def _history(self) -> dict[str, Any]:
+        history: dict[str, list[Any]] = {
+            "already_inspected": list(self.already_inspected[-5:]),
+            "already_checked": list(self.already_checked[-3:]),
+        }
+        while len(json.dumps(history)) > 1800:
+            rows = history["already_inspected"] or history["already_checked"]
+            rows.pop(0)
+        return history
+
+    def _remember_check(self, command: str, output: str, exit_code: int | None) -> None:
+        # This is advisory history, not validation or merge authorization.
+        if not re.search(
+            r"repository_tools (?:check|lint|format)\b|\brun (?:typecheck|lint|format|test|check|build)\b|(?:^|[ /])(?:eslint|prettier|pytest|ruff|mypy|tsc)\b",
+            command,
+        ):
+            return
+        self.already_checked = [
+            *self.already_checked[-2:],
+            {
+                "command": command[:220],
+                "exit_code": exit_code,
+                "result": "passed" if exit_code == 0 else output[-350:],
+            },
+        ]
+        if "repository_tools check " not in command:
+            return
+        for line in output.splitlines():
+            try:
+                result = json.loads(line)
+            except ValueError:
+                continue
+            if not isinstance(result, dict) or result.get("kind") != "frontend_checks":
+                continue
+            checks = result.get("checks")
+            if not isinstance(checks, list) or not all(isinstance(c, dict) for c in checks):
+                continue
+            compact = {
+                "diff_fingerprint": self.governor.diff_fingerprint,
+                "paths": result.get("paths"),
+                "checks": [
+                    {
+                        k: v
+                        for k, v in c.items()
+                        if k in {"name", "exit_code", "errors", "error_count", "runtime_error"}
+                    }
+                    for c in checks
+                ],
+            }
+            if len(json.dumps(compact)) <= 3200:
+                self.frontend_checks = compact
+                self.already_checked = [
+                    {
+                        "command": str(c.get("name")),
+                        "exit_code": c.get("exit_code"),
+                        "result": "passed"
+                        if c.get("exit_code") == 0
+                        else str(c.get("errors") or c.get("stdout_tail", ""))[:350],
+                    }
+                    for c in checks[:3]
+                ]
+
+    def _record_reads(self, actions: list[Any], command_fingerprint: str, output_size: int) -> None:
+        # A batched shell command can read several DIFFERENT files. Never assign
+        # its identity and full byte count to every individual read.
+        reads = {
+            json.dumps(action.root.model_dump(mode="json"), sort_keys=True)
+            for action in actions
+            if action.root.type == "read"
+        }
+        if not reads:
+            return
+        share, remainder = divmod(output_size, len(reads))
+        for index, read in enumerate(sorted(reads)):
+            fields = json.loads(read)
+            description = str(
+                fields.get("path")
+                or fields.get("name")
+                or fields.get("command")
+                or "unknown source"
+            )[:200]
+            if description not in self.already_inspected:
+                self.already_inspected = [*self.already_inspected[-4:], description]
+            key = hashlib.sha256((command_fingerprint + "\0" + read).encode()).hexdigest()
+            self.governor.read(key, share + (index < remainder))
 
     async def _diff_progress(self) -> None:
         try:
@@ -70,6 +231,7 @@ class CodexHarness:
             "config": {
                 "features.multi_agent": False,
                 "sandbox_workspace_write.network_access": False,
+                "sandbox_workspace_write.writable_roots": [str(self.logs.root)],
                 "shell_environment_policy.inherit": "none",
                 "tool_output_token_limit": self.settings.token_policy.max_model_visible_tool_result_tokens,
             },
@@ -84,6 +246,7 @@ class CodexHarness:
         await self.client.login_api_key(key)
 
     async def start(self) -> str:
+        self.logs.root.mkdir(parents=True, exist_ok=True, mode=0o700)
         await self._authenticate()
         self.thread = await self.client.thread_start(**self._options(), ephemeral=False)
         self.previous_usage = dict.fromkeys(
@@ -99,6 +262,7 @@ class CodexHarness:
         return str(self.thread.id)
 
     async def resume(self, native_session_id: str) -> None:
+        self.logs.root.mkdir(parents=True, exist_ok=True, mode=0o700)
         if not native_session_id:
             raise ValueError("An explicit native thread ID is required")
         await self._authenticate()
@@ -134,6 +298,8 @@ class CodexHarness:
         summary = ""
         completed: Any = None
         interrupted_for_budget = False
+        pending_governor_stop = False
+        observed_cache = 0
         try:
             async with asyncio.timeout(self.settings.timeout_seconds):
                 async for event in self.turn.stream():
@@ -148,11 +314,20 @@ class CodexHarness:
                         warnings, stop = self.governor.observe(
                             self.progress_offset + (usage.input_tokens or 0),
                             payload.token_usage.last.input_tokens,
-                            usage.cache_read_input_tokens,
+                            max(0, (usage.cache_read_input_tokens or 0) - observed_cache),
                         )
+                        observed_cache = usage.cache_read_input_tokens or observed_cache
                         self._emit_progress()
                         if stop and not interrupted_for_budget:
-                            await self.turn.interrupt()
+                            # Do not interrupt while a native item may still be
+                            # executing. ItemCompleted is the safe boundary.
+                            pending_governor_stop = True
+                        elif self._early_checkpoint_due() and self.settings.supervision_callback:
+                            self._schedule_supervision(
+                                "NO_PROGRESS",
+                                "Early no-edit checkpoint. Prefer a concrete edit using known target, "
+                                "helper and tests; narrow remaining inspection to one missing fact.",
+                            )
                         elif warnings and not self.compacting:
                             await self.turn.steer(
                                 "Developer policy: "
@@ -224,17 +399,54 @@ class CodexHarness:
                                     "passed" if item.exit_code == 0 else fingerprint,
                                 )
                             self.governor.shell_output_bytes += output_size
-                            for action in item.command_actions:
-                                if action.root.type == "read":
-                                    self.governor.read(fingerprint, output_size)
+                            self._record_reads(item.command_actions, fingerprint, output_size)
                             await self._diff_progress()
+                            output = item.aggregated_output or ""
+                            self._remember_check(item.command, output, item.exit_code)
+                            if (
+                                item.exit_code not in {None, 0}
+                                and any(
+                                    marker in output.lower()
+                                    for marker in (
+                                        "read-only file system",
+                                        "permission denied",
+                                        "cannot find package",
+                                        "cannot find module",
+                                        "no files matching",
+                                        "failed",
+                                        "error",
+                                    )
+                                )
+                                and not pending_governor_stop
+                                and not interrupted_for_budget
+                            ):
+                                self._schedule_supervision("TOOL_FAILURE", output[-1600:])
+                            elif (
+                                self._early_checkpoint_due()
+                                and not pending_governor_stop
+                                and not interrupted_for_budget
+                            ):
+                                self._schedule_supervision(
+                                    "NO_PROGRESS",
+                                    "No observed diff/check improvement across the configured window.",
+                                )
+                        if pending_governor_stop and not interrupted_for_budget:
+                            pending_governor_stop = False
+                            await self.turn.interrupt()
                     elif isinstance(payload, TurnDiffUpdatedNotification) and payload.diff:
                         await self._diff_progress()
                     elif isinstance(payload, TurnCompletedNotification):
                         completed = payload.turn
+                        self.native_finished = True
         except (TimeoutError, asyncio.CancelledError):
             await self.interrupt()
             raise
+        finally:
+            if not self.native_finished and self.supervision_task:
+                self.supervision_task.cancel()
+                await asyncio.gather(self.supervision_task, return_exceptions=True)
+        if self.supervision_task:
+            await self.supervision_task
         if completed is None:
             raise RuntimeError("Native turn ended without completion evidence")
         usage = codex_usage(total, self.previous_usage)
@@ -251,8 +463,12 @@ class CodexHarness:
             raw_usage=total,
             cumulative_usage=total or None,
             provider_duration_ms=completed.duration_ms,
-            failure_code=self.governor.stop_reason or failure_code,
-            token_efficiency=self.governor.snapshot(),
+            failure_code=(
+                "TURN_BUDGET_EXHAUSTED"
+                if interrupted_for_budget
+                else self.governor.stop_reason or failure_code
+            ),
+            token_efficiency=self._snapshot(),
         )
 
     async def compact(self) -> TurnReceipt:
@@ -291,6 +507,9 @@ class CodexHarness:
         }
 
     async def close(self) -> None:
+        if self.supervision_task and not self.supervision_task.done():
+            self.supervision_task.cancel()
+            await asyncio.gather(self.supervision_task, return_exceptions=True)
         await self.client.close()
 
 

@@ -4,13 +4,13 @@ from decimal import Decimal
 from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.agent_runtime.infrastructure.models import AIRun
+from app.agent_runtime.infrastructure.models import AIRun, DeveloperSession
 from app.engineering.domain.lifecycle import Action, WaitReason
 from app.engineering.infrastructure.controls import control_task
 from app.engineering.infrastructure.lifecycle import record_transition
 from app.engineering.infrastructure.message_models import TaskMessage
 from app.engineering.infrastructure.models import ReviewCycle
-from app.engineering.infrastructure.task_models import Task
+from app.engineering.infrastructure.task_models import Task, TaskEvent
 from app.intake.application.interpret import InterpretEvent, TextInterpreter
 from app.intake.domain.events import Event, Intent, classify
 from app.intake.infrastructure.authorization import actor_allowed
@@ -19,6 +19,7 @@ from app.intake.infrastructure.metered import CloudInterpreter, MeteredLocalInte
 from app.intake.infrastructure.ollama import OllamaInterpreter
 from app.platform.configuration.settings import Settings
 from app.repositories.infrastructure.models import Repository
+from app.supervisor.infrastructure.review import review_supervisor
 from app.teams.infrastructure.automation import read_policy
 from app.teams.infrastructure.models import TeamAgentProfile
 
@@ -61,7 +62,7 @@ async def process_review_text(
                 select(AIRun)
                 .where(
                     AIRun.task_id == task.id,
-                    AIRun.role_kind == "INTERPRETER",
+                    AIRun.role_kind.in_(["INTERPRETER", "SUPERVISOR"]),
                     AIRun.job_id.is_(None),
                     AIRun.status == "RUNNING",
                     AIRun.started_at < datetime.now(UTC) - timedelta(minutes=5),
@@ -90,6 +91,13 @@ async def process_review_text(
             cycle.decision = "OBSOLETE"
             return True
         cycle_id, task_id = cycle.id, task.id
+        native = await session.scalar(
+            select(DeveloperSession)
+            .where(DeveloperSession.task_id == task_id)
+            .order_by(DeveloperSession.generation.desc())
+            .limit(1)
+        )
+        patch_review = settings.supervisor_enabled and native is not None
         profile = await session.scalar(
             select(TeamAgentProfile).where(
                 TeamAgentProfile.team_id == task.team_id,
@@ -148,9 +156,14 @@ async def process_review_text(
             "CLASSIFYING",
             {**cycle.feedback, "claimed_at": datetime.now(UTC).isoformat()},
         )
+        supervisor = (
+            await review_supervisor(sessions, session, settings, task, event)
+            if patch_review
+            else None
+        )
     # There is deliberately no Task/Team lock held while a local/cloud model runs.
     chain: list[TextInterpreter] = []
-    if settings.local_event_interpreter:
+    if settings.local_event_interpreter and not patch_review:
         chain.append(
             MeteredLocalInterpreter(
                 sessions,
@@ -162,14 +175,28 @@ async def process_review_text(
                 ),
             )
         )
+    if patch_review:
+        assert supervisor is not None
+        chain.append(supervisor)
+        models = []
+        role_budget = (
+            None  # Existing task/team admission still applies; no separate Interpreter budget.
+        )
     chain.extend(
         CloudInterpreter(
             sessions,
             task_id,
             model,
-            Decimal(str(settings.interpreter_cloud_request_limit_usd)),
+            Decimal(
+                str(
+                    settings.supervisor_request_limit_usd
+                    if patch_review
+                    else settings.interpreter_cloud_request_limit_usd
+                )
+            ),
             settings.interpreter_timeout_seconds,
             role_budget=role_budget,
+            role_kind="SUPERVISOR" if patch_review else "INTERPRETER",
         )
         for model in models
     )
@@ -197,6 +224,21 @@ async def process_review_text(
                 "reason": result.reason,
             },
         }
+        if patch_review:
+            session.add(
+                TaskEvent(
+                    task_id=task.id,
+                    source="supervisor",
+                    event_type="SUPERVISOR_REVIEW_DECIDED",
+                    payload={
+                        "trigger": "REVIEW_RECEIVED",
+                        "intent": result.intent.value,
+                        "reason": result.reason,
+                        "head_sha": cycle.head_sha,
+                        "review_cycle_id": str(cycle.id),
+                    },
+                )
+            )
         if (
             result.intent == Intent.APPROVAL
             and not (await read_policy(session, task.team_id)).require_formal_approval

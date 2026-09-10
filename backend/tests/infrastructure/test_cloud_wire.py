@@ -35,3 +35,15 @@ def test_classifier_does_not_silently_truncate_large_new_requirements() -> None:
 
 def test_empty_provider_content_cannot_be_a_successful_classification() -> None:
     assert response_text("deepseek", {"choices": [{"message": {"content": None}}]}) == ""
+
+
+def test_openai_cache_writes_are_not_discarded() -> None:
+    usage = normalized_usage(
+        "openai",
+        {
+            "input_tokens": 100,
+            "output_tokens": 10,
+            "input_tokens_details": {"cached_tokens": 20, "cache_write_tokens": 80},
+        },
+    )
+    assert usage.cache_write_input_tokens == 80 and usage.cache_read_input_tokens == 20

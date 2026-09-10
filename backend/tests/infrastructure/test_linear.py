@@ -8,7 +8,6 @@ import pytest
 
 from app.intake.domain.linear import (
     configured_repository_id,
-    issue_labels,
     linear_comment,
     linear_priority,
 )
@@ -27,8 +26,6 @@ def test_linear_signature_and_timestamp_are_verified() -> None:
 
 
 def test_linear_payload_helpers_handle_supported_shapes() -> None:
-    assert issue_labels({"labels": {"nodes": [{"name": "AI Ready"}]}}) == {"AI Ready"}
-    assert issue_labels({"labels": [{"name": "Backend"}]}) == {"Backend"}
     assert linear_priority(1) == 1
     assert linear_priority(4) == 4
     assert linear_priority("urgent") == 3

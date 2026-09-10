@@ -155,7 +155,12 @@ class SqlPhaseJobs:
             # Validate which step is allowed to advance; a model cannot return MERGED.
             allowed = {
                 "INTERPRET_EVENT": {Action.START},
-                "DEVELOPER_TURN": {Action.IMPLEMENTED, Action.NEEDS_PLAN},
+                "DEVELOPER_TURN": {
+                    Action.IMPLEMENTED,
+                    Action.NEEDS_PLAN,
+                    Action.BOUNDED_REPAIR,
+                    Action.VALIDATE_CANDIDATE,
+                },
                 "THINKER_TURN": {Action.PLAN_READY},
                 "RUN_VALIDATION": {Action.VALIDATION_PASSED, Action.VALIDATION_FAILED},
                 "PUBLISH_PR": {Action.PUBLISHED},

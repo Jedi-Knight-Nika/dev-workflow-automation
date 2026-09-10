@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import load_only
 
 from app.engineering.infrastructure.task_models import Job, Task
 from app.platform.scheduling.states import JobState
@@ -116,14 +117,7 @@ class SqlAlchemyTeamManagementWorkflow:
             raise TeamNotFound("Active team not found")
         if task is None:
             raise TeamNotFound("Task not found")
-        active_jobs = await self._session.scalar(
-            select(func.count())
-            .select_from(Job)
-            .where(
-                Job.task_id == task.id,
-                Job.state.in_([JobState.CLAIMED, JobState.RUNNING]),
-            )
-        )
+        active_jobs = await self._has_active_task_jobs(task.id)
         if task.workspace_path:
             raise TeamConflict("An enrolled task keeps its owning Team and native session")
         if active_jobs:
@@ -175,14 +169,7 @@ class SqlAlchemyTeamManagementWorkflow:
         task = await self._session.get(Task, task_id, with_for_update=True)
         if task is None:
             raise TeamNotFound("Task not found")
-        active_jobs = await self._session.scalar(
-            select(func.count())
-            .select_from(Job)
-            .where(
-                Job.task_id == task.id,
-                Job.state.in_([JobState.CLAIMED, JobState.RUNNING]),
-            )
-        )
+        active_jobs = await self._has_active_task_jobs(task.id)
         if task.workspace_path:
             raise TeamConflict("An enrolled task keeps its owning Team and native session")
         if active_jobs:
@@ -203,6 +190,20 @@ class SqlAlchemyTeamManagementWorkflow:
         task.team_id = None
         await self._session.commit()
 
+    async def _has_active_task_jobs(self, task_id: uuid.UUID) -> bool:
+        return bool(
+            await self._session.scalar(
+                select(
+                    select(Job.id)
+                    .where(
+                        Job.task_id == task_id,
+                        Job.state.in_([JobState.CLAIMED, JobState.RUNNING]),
+                    )
+                    .exists()
+                )
+            )
+        )
+
     async def assignments(self, team_id: uuid.UUID) -> builtins.list[TaskAssignmentView]:
         records = list(
             (
@@ -214,12 +215,19 @@ class SqlAlchemyTeamManagementWorkflow:
                 )
             ).all()
         )
-        tasks = {
-            task.id: task
-            for task in await self._session.scalars(
-                select(Task).where(Task.id.in_([item.task_id for item in records]))
-            )
-        }
+        task_ids = {item.task_id for item in records if item.status in {"QUEUED", "RUNNING"}}
+        tasks = (
+            {
+                task.id: task
+                for task in await self._session.scalars(
+                    select(Task)
+                    .options(load_only(Task.team_id, Task.status, Task.started_at, raiseload=True))
+                    .where(Task.id.in_(task_ids))
+                )
+            }
+            if task_ids
+            else {}
+        )
         views = []
         for item in records:
             view = self._assignment_view(item)

@@ -37,10 +37,15 @@ class AgentProfile:
         if self.role_kind == RoleKind.INTERPRETER:
             if self.harness is not None or self.provider not in {"ollama", "deepseek", "openai"}:
                 raise ValueError("Interpreter must use a supported classification provider")
+        elif self.harness in {"responses", "patch"}:
+            if self.role_kind != RoleKind.DEVELOPER or self.provider != "openai":
+                raise ValueError(
+                    "Responses is available only for OpenAI Developer profiles"
+                )
         elif (self.harness, self.provider) not in {("codex", "openai"), ("claude", "anthropic")}:
             raise ValueError("Coding profiles require a matching supported harness/provider")
         if self.effort not in {"none", "low", "medium", "high"}:
-            raise ValueError("Unsupported effort; exceptional modes require a separate rollout")
+            raise ValueError("Unsupported reasoning effort")
         for budget in (self.soft_budget_usd, self.hard_budget_usd):
             if budget is not None and (not budget.is_finite() or budget <= 0):
                 raise ValueError("Budgets must be positive finite USD amounts")

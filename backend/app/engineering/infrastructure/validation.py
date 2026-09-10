@@ -57,7 +57,9 @@ async def run_check(
             os.killpg(process.pid, signal.SIGKILL)
         except ProcessLookupError:
             pass
-        await process.wait()
+        # Buffered stdout can keep asyncio's process wait pending after SIGKILL.
+        # Drain it with the same bounded tail before waiting for transport closure.
+        await drain()
         if isinstance(exc, asyncio.CancelledError):
             raise
         timed_out = True

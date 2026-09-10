@@ -7,6 +7,16 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 
+async def _drain_diagnostic(stream: asyncio.StreamReader, limit: int) -> bytes:
+    """Keep a bounded prefix while draining the pipe so writers cannot block."""
+    output = bytearray()
+    while block := await stream.read(8192):
+        remaining = limit - len(output)
+        if remaining > 0:
+            output.extend(block[:remaining])
+    return bytes(output)
+
+
 async def capture(
     argv: Sequence[str],
     *,
@@ -28,7 +38,7 @@ async def capture(
     )
     output = bytearray()
     stderr_task = (
-        asyncio.create_task(process.stderr.read(output_limit))
+        asyncio.create_task(_drain_diagnostic(process.stderr, output_limit))
         if include_stderr and process.stderr
         else None
     )
@@ -40,9 +50,10 @@ async def capture(
                     raise RuntimeError("Operation exceeded its output bound")
                 output.extend(block)
             await process.wait()
+            diagnostic = await stderr_task if stderr_task else b""
         if process.returncode:
             if stderr_task:
-                detail = (await stderr_task).decode("utf-8", "replace")
+                detail = diagnostic.decode("utf-8", "replace")
                 detail = " ".join(detail.split())[:1000]
                 raise RuntimeError(f"Operation failed: {detail or 'no diagnostic output'}")
             raise RuntimeError("Operation failed; raw stderr withheld")
@@ -55,8 +66,9 @@ async def capture(
             pass
         # Drain the already-buffered pipe after killing all writers. wait()
         # alone can deadlock when asyncio paused reading a full stdout buffer.
-        await process.communicate()
         if stderr_task:
             stderr_task.cancel()
+            await asyncio.gather(stderr_task, return_exceptions=True)
+        await process.communicate()
         raise
     return bytes(output)

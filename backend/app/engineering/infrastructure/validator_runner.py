@@ -13,6 +13,27 @@ from app.agent_runtime.infrastructure.process import capture
 from app.agent_runtime.infrastructure.workspace_lock import workspace_lock
 from app.engineering.infrastructure.validation import run_check
 
+_GIT_COMMAND = (
+    "git",
+    "-c",
+    "safe.directory=/workspace",
+    "-c",
+    "core.hooksPath=/dev/null",
+    "-c",
+    "core.fsmonitor=false",
+)
+
+
+class ValidatorGitError(RuntimeError):
+    """Safe Git plumbing failure without repository or subprocess output."""
+
+
+def validation_argv(command: list[str]) -> tuple[str, ...]:
+    """Apply the same mount trust to configured Git checks as Git plumbing."""
+    if command[0] == "git":
+        return (*_GIT_COMMAND, *command[1:])
+    return tuple(command)
+
 
 class ValidationManifest(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -25,10 +46,15 @@ class ValidationManifest(BaseModel):
 
 
 async def git(*args: str) -> str:
-    stdout = await capture(
-        ("git", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", *args),
-        output_limit=2 * 1024**2,
-    )
+    try:
+        stdout = await capture(
+            (*_GIT_COMMAND, *args),
+            output_limit=2 * 1024**2,
+        )
+    except RuntimeError as exc:
+        raise ValidatorGitError(
+            "Validator Git operation failed; inspect workspace ownership and Git state"
+        ) from exc
     return stdout.decode() if "-z" in args else stdout.decode().strip()
 
 
@@ -74,7 +100,7 @@ async def validate(manifest: ValidationManifest) -> dict[str, object]:
             raise ValueError("Invalid validation command")
         checks.append(
             await run_check(
-                tuple(command),
+                validation_argv(command),
                 workspace=Path("/workspace"),
                 timeout=manifest.timeout_seconds,
                 output_limit=8000,
@@ -121,7 +147,10 @@ def main() -> None:
             )
         print(json.dumps(result), flush=True)
     except Exception as exc:  # noqa: BLE001 - no raw subprocess errors cross the container boundary
-        print(json.dumps({"failure_code": type(exc).__name__}), flush=True)
+        failure = {"failure_code": type(exc).__name__}
+        if isinstance(exc, ValidatorGitError):
+            failure["detail"] = str(exc)
+        print(json.dumps(failure), flush=True)
         raise SystemExit(1) from None
 
 

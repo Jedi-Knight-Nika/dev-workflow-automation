@@ -1,5 +1,6 @@
 <script lang="ts">
   import { page } from '$app/state';
+  import { resolve } from '$app/paths';
   import { SvelteMap } from 'svelte/reactivity';
   import { onMount } from 'svelte';
   import PageHeader from '$lib/components/PageHeader.svelte';
@@ -15,7 +16,7 @@
   import RunList from '$lib/components/task-detail/RunList.svelte';
   import TimelineList from '$lib/components/task-detail/TimelineList.svelte';
   import ValidationList from '$lib/components/task-detail/ValidationList.svelte';
-  import { API_BASE_URL } from '$lib/api';
+  import { API_BASE_URL, ApiError } from '$lib/api';
   import { createLiveRefresh } from '$lib/live-refresh';
   import { safeExternalUrl } from '$lib/task-links';
   import {
@@ -54,19 +55,36 @@
   let error = $state('');
   let connected = $state(false);
   let activeTaskId = '';
+  let missingTaskId = $state('');
 
   async function refresh() {
     const id = page.params.id ?? '';
-    const [next, nextJobs, nextEvents, nextValidations, nextMetrics, notes, nextRuns] =
-      await Promise.all([
-        getTask(id),
+    if (missingTaskId === id) return;
+    let next: Task;
+    try {
+      next = await getTask(id);
+    } catch (cause) {
+      if (page.params.id !== id) return;
+      if (cause instanceof ApiError && cause.status === 404) {
+        task = null;
+        missingTaskId = id;
+        error = '';
+        return;
+      }
+      throw cause;
+    }
+    if (page.params.id !== id) return;
+    missingTaskId = '';
+    const [nextJobs, nextEvents, nextValidations, nextMetrics, notes, nextRuns] = await Promise.all(
+      [
         listTaskJobs(id),
         listTaskEvents(id),
         listTaskValidations(id),
         getTaskMetrics(id),
         listTaskMessages(id),
         listTaskRuns(id)
-      ]);
+      ]
+    );
     if (page.params.id !== id) return;
     task = next;
     jobs = nextJobs;
@@ -167,7 +185,9 @@
 <svelte:head><title>{task?.title || 'Task'} · Engineering Worker</title></svelte:head>
 <PageHeader
   eyebrow="Engineering task"
-  title={task?.title || 'Loading task'}
+  title={missingTaskId === page.params.id
+    ? 'Task not found'
+    : task?.title || (error ? 'Task unavailable' : 'Loading task')}
   description="One coding session, deterministic validation and delivery, auditable controls."
 />
 <main class="grid min-w-0 grid-cols-1 gap-5 p-4 sm:p-6 md:p-10 xl:grid-cols-2">
@@ -221,7 +241,12 @@
     <JobList {jobs} />
     <RunList {runs} taskId={task.id} />
     <div class="min-w-0 xl:col-span-2"><TimelineList {events} /></div>
-  {:else}
+  {:else if missingTaskId === page.params.id}
+    <section class="p-5 xl:col-span-2">
+      <p class="text-muted">This task was deleted or no longer exists.</p>
+      <a class="mt-3 inline-block text-brand underline" href={resolve('/tasks')}>Back to Tasks</a>
+    </section>
+  {:else if !error}
     <p class="p-5 text-muted">Loading task and execution evidence…</p>
   {/if}
   {#if task}{#key task.id}<TaskResourceBreakdown taskId={task.id} />{/key}{/if}

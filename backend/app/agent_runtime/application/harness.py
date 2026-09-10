@@ -1,4 +1,4 @@
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from decimal import Decimal
 from pathlib import Path
@@ -26,6 +26,7 @@ class HarnessSettings:
     token_policy: TokenEfficiencyPolicy = field(default_factory=TokenEfficiencyPolicy)
     progress_callback: Callable[[dict[str, Any]], None] | None = None
     progress_baseline: dict[str, Any] = field(default_factory=dict)
+    supervision_callback: Callable[[dict[str, Any]], Awaitable[dict[str, Any]]] | None = None
 
     def __post_init__(self) -> None:
         if not self.workspace.is_absolute() or not self.model.strip():

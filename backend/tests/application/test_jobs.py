@@ -106,3 +106,34 @@ async def test_unexpected_error_does_not_persist_secrets() -> None:
     executor.execute.side_effect = ValueError("api_key=secret")
     await RunEngineeringJob(jobs, executor).execute(lease)
     assert "secret" not in str(jobs.block.await_args)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "error",
+    [
+        ValueError("api_key=hidden-value"),
+        ValueError("Authorization: Bearer hidden-value"),
+        ValueError('password: "hidden-value"'),
+        RuntimeError("provider response contains hidden-value"),
+    ],
+)
+async def test_unexpected_errors_use_same_sanitized_log_and_task_message(error):
+    from structlog.testing import capture_logs
+
+    lease, jobs, executor = setup()
+    executor.execute.side_effect = error
+    with capture_logs() as logs:
+        await RunEngineeringJob(jobs, executor).execute(lease)
+    assert "hidden-value" not in str(logs)
+    assert "hidden-value" not in str(jobs.block.await_args)
+    assert logs[0]["detail"] == jobs.block.await_args.args[2]
+    jobs.complete.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_safe_configuration_error_keeps_actionable_detail():
+    lease, jobs, executor = setup()
+    executor.execute.side_effect = ValueError("Runtime image is not configured")
+    await RunEngineeringJob(jobs, executor).execute(lease)
+    assert jobs.block.await_args.args[2] == "Execution failed: Runtime image is not configured"

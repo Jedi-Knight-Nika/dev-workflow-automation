@@ -29,8 +29,6 @@ export const NAV_ITEMS = [
   }
 ] as const;
 
-export type NavItem = (typeof NAV_ITEMS)[number];
-
 export function isActiveNavItem(pathname: string, href: string): boolean {
   return pathname === href || (href !== '/' && pathname.startsWith(`${href}/`));
 }

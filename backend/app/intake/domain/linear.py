@@ -9,13 +9,6 @@ def linear_priority(value: object) -> int:
     return {1: 1, 2: 3, 3: 3, 4: 4}.get(value, 3)
 
 
-def issue_labels(data: dict[str, Any]) -> set[str]:
-    labels = data.get("labels") or []
-    if isinstance(labels, dict):
-        labels = labels.get("nodes") or []
-    return {str(item.get("name")) for item in labels if isinstance(item, dict) and item.get("name")}
-
-
 def configured_repository_id(configuration: dict[str, Any]) -> uuid.UUID | None:
     value = configuration.get("repository_id")
     if not value:

@@ -5,6 +5,7 @@ from uuid import UUID
 from sqlalchemy import or_, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.orm import load_only
 
 from app.agent_runtime.infrastructure.models import AIRun
 from app.engineering.infrastructure.task_models import Task
@@ -20,6 +21,36 @@ from app.teams.infrastructure.models import TeamAgentProfile
 
 def columns(row: Any) -> dict[str, Any]:
     return {column.name: getattr(row, column.name) for column in row.__table__.columns}
+
+
+def receipt_totals(receipts: list[AIRun], now: datetime) -> dict[str, Any]:
+    """Task-wide display totals; missing measurements retain their existing semantics."""
+    costs = [
+        r.provider_cost_usd if r.provider_cost_usd is not None else r.calculated_cost_usd
+        for r in receipts
+    ]
+    return {
+        "known_cost_usd": str(sum(c for c in costs if c is not None)),
+        "unknown_cost_runs": sum(c is None for c in costs),
+        "input_tokens": sum(r.input_tokens for r in receipts if r.input_tokens is not None)
+        if all(r.input_tokens is not None for r in receipts)
+        else None,
+        "output_tokens": sum(r.output_tokens for r in receipts if r.output_tokens is not None)
+        if all(r.output_tokens is not None for r in receipts)
+        else None,
+        "developer_active_seconds": sum(
+            ((r.finished_at or now) - r.started_at).total_seconds()
+            for r in receipts
+            if r.role_kind == "DEVELOPER"
+        ),
+        "ai_active_seconds": sum(
+            r.provider_duration_ms for r in receipts if r.provider_duration_ms is not None
+        )
+        / 1000
+        if receipts and all(r.provider_duration_ms is not None for r in receipts)
+        else None,
+        "usage_basis": "Task receipts to date; resource values belong to this container",
+    }
 
 
 class SqlObservabilityStore:
@@ -59,14 +90,30 @@ class SqlObservabilityStore:
                     )
                 ).all()
             ]
+            if not result:
+                return []
             task_ids = {r["task_id"] for r in result if r["task_id"]}
             tasks = {
-                t.id: t for t in await session.scalars(select(Task).where(Task.id.in_(task_ids)))
+                t.id: t
+                for t in await session.scalars(
+                    select(Task)
+                    .options(load_only(Task.title, Task.external_key, raiseload=True))
+                    .where(Task.id.in_(task_ids))
+                )
             }
             profiles = {
                 p.id: p
                 for p in await session.scalars(
-                    select(TeamAgentProfile).where(
+                    select(TeamAgentProfile)
+                    .options(
+                        load_only(
+                            TeamAgentProfile.display_name,
+                            TeamAgentProfile.harness,
+                            TeamAgentProfile.model,
+                            raiseload=True,
+                        )
+                    )
+                    .where(
                         TeamAgentProfile.id.in_(
                             [r["agent_profile_id"] for r in result if r["agent_profile_id"]]
                         )
@@ -74,48 +121,38 @@ class SqlObservabilityStore:
                 )
             }
             runs: dict[UUID, list[AIRun]] = {}
-            for run in await session.scalars(select(AIRun).where(AIRun.task_id.in_(task_ids))):
+            for run in await session.scalars(
+                select(AIRun)
+                .options(
+                    load_only(
+                        AIRun.task_id,
+                        AIRun.provider_cost_usd,
+                        AIRun.calculated_cost_usd,
+                        AIRun.input_tokens,
+                        AIRun.output_tokens,
+                        AIRun.started_at,
+                        AIRun.finished_at,
+                        AIRun.role_kind,
+                        AIRun.provider_duration_ms,
+                        raiseload=True,
+                    )
+                )
+                .where(AIRun.task_id.in_(task_ids))
+            ):
                 runs.setdefault(run.task_id, []).append(run)
+            now = datetime.now(UTC)
+            usage = {task_id: receipt_totals(receipts, now) for task_id, receipts in runs.items()}
+            empty_usage = receipt_totals([], now)
             for row in result:
                 task = tasks.get(row["task_id"])
                 profile = profiles.get(row["agent_profile_id"])
-                receipts = runs.get(row["task_id"], [])
-                costs = [
-                    r.provider_cost_usd
-                    if r.provider_cost_usd is not None
-                    else r.calculated_cost_usd
-                    for r in receipts
-                ]
                 row.update(
                     task_title=task.title if task else None,
                     task_key=task.external_key if task else None,
                     profile_name=profile.display_name if profile else None,
                     harness=profile.harness if profile else None,
                     model=profile.model if profile else None,
-                    known_cost_usd=str(sum(c for c in costs if c is not None)),
-                    unknown_cost_runs=sum(c is None for c in costs),
-                    input_tokens=sum(r.input_tokens for r in receipts if r.input_tokens is not None)
-                    if all(r.input_tokens is not None for r in receipts)
-                    else None,
-                    output_tokens=sum(
-                        r.output_tokens for r in receipts if r.output_tokens is not None
-                    )
-                    if all(r.output_tokens is not None for r in receipts)
-                    else None,
-                    developer_active_seconds=sum(
-                        ((r.finished_at or datetime.now(UTC)) - r.started_at).total_seconds()
-                        for r in receipts
-                        if r.role_kind == "DEVELOPER"
-                    ),
-                    ai_active_seconds=sum(
-                        r.provider_duration_ms
-                        for r in receipts
-                        if r.provider_duration_ms is not None
-                    )
-                    / 1000
-                    if receipts and all(r.provider_duration_ms is not None for r in receipts)
-                    else None,
-                    usage_basis="Task receipts to date; resource values belong to this container",
+                    **usage.get(row["task_id"], empty_usage),
                 )
             return result
 

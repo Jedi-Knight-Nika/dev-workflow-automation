@@ -84,20 +84,10 @@ class RunEngineeringJob:
         except Exception as exc:  # noqa: BLE001 - sanitize the job boundary; never restart an unknown turn
             operation.cancel()
             await asyncio.gather(operation, return_exceptions=True)
-            # Keep the durable record sanitized, but leave a bounded diagnostic in
-            # controller logs so isolated runner failures are actionable.
+            # Logs and durable task state must use the same sanitized diagnostic.
             import structlog
 
             detail = " ".join(str(exc).split())[:500]
-            for secret in ("GITHUB_TOKEN=", "Authorization:", "Bearer "):
-                if secret in detail:
-                    detail = detail.split(secret, 1)[0] + secret + "<redacted>"
-            structlog.get_logger().warning(
-                "phase_execution_failed",
-                action=lease.action,
-                error_type=type(exc).__name__,
-                detail=detail,
-            )
             # Domain/configuration errors are intentionally bounded and safe to persist;
             # this is what lets an operator fix a blocked publication instead of seeing
             # only the unhelpful exception class. Unknown SDK/transport errors remain
@@ -105,10 +95,25 @@ class RunEngineeringJob:
             safe_reason = f"Execution failed: {type(exc).__name__}"
             suspicious = any(
                 marker in detail.lower()
-                for marker in ("api_key=", "password=", "secret", "token=", "prompt")
+                for marker in (
+                    "api_key",
+                    "password",
+                    "secret",
+                    "token=",
+                    "prompt",
+                    "authorization",
+                    "bearer ",
+                    "private key",
+                )
             )
             if isinstance(exc, ValueError) and detail and not suspicious:
                 safe_reason = f"Execution failed: {detail}"
+            structlog.get_logger().warning(
+                "phase_execution_failed",
+                action=lease.action,
+                error_type=type(exc).__name__,
+                detail=safe_reason,
+            )
             await self.jobs.block(lease, WaitReason.MISSING_CONFIGURATION, safe_reason)
         finally:
             operation.cancel()

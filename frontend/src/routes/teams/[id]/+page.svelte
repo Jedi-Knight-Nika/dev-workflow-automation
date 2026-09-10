@@ -145,7 +145,7 @@
         >
           <h3>{profile.role_kind}</h3>
           {#if profile.role_kind === 'THINKER' || profile.role_kind === 'REVIEWER'}
-            <p>Reserved profile. Optional paid dispatch is not connected in this rollout.</p>
+            <p>Reserved profile. Optional paid dispatch is not connected.</p>
           {/if}
           <label
             >Display name<input bind:value={profile.display_name} maxlength="120" required /></label
@@ -166,6 +166,15 @@
             }}
           />
           <AiModelSelect provider={profile.provider} bind:value={profile.model} />
+          {#if profile.role_kind === 'DEVELOPER' && profile.provider === 'openai'}
+            <label
+              >Developer harness<select bind:value={profile.harness}>
+                <option value="codex">Native Codex (baseline)</option>
+                <option value="responses">Responses tool loop (frontend only)</option>
+                <option value="patch">Bounded patch MVP (repository, max 2 calls)</option>
+              </select></label
+            >
+          {/if}
           <label
             >Soft budget (USD)<input
               inputmode="decimal"

@@ -4,6 +4,7 @@ from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import load_only
 
 from app.engineering.infrastructure.models import TaskPhaseRun
 from app.engineering.infrastructure.task_models import Task
@@ -52,6 +53,9 @@ class SqlTeamProfiles:
 
     async def list_profiles(self, team_id: UUID) -> list[ProfileView]:
         await self._team(team_id)
+        return await self._profile_views(team_id)
+
+    async def _profile_views(self, team_id: UUID) -> list[ProfileView]:
         rows = await self.session.scalars(
             select(TeamAgentProfile).where(TeamAgentProfile.team_id == team_id)
         )
@@ -63,7 +67,7 @@ class SqlTeamProfiles:
     ) -> list[ProfileView]:
         await self._team(team_id, lock=True)
         await initialize_profiles(self.session, team_id, profiles)
-        result = await self.list_profiles(team_id)
+        result = await self._profile_views(team_id)
         await self.session.commit()
         return result
 
@@ -96,6 +100,18 @@ class SqlTeamProfiles:
         rows = list(
             await self.session.scalars(
                 select(Task)
+                .options(
+                    load_only(
+                        Task.title,
+                        Task.priority,
+                        Task.status,
+                        Task.stage,
+                        Task.wait_reason,
+                        Task.requirement_version,
+                        Task.pull_request_url,
+                        raiseload=True,
+                    )
+                )
                 .where(
                     Task.team_id == team_id,
                     Task.archived_at.is_(None),

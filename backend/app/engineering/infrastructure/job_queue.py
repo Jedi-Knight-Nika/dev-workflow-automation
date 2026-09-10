@@ -101,7 +101,10 @@ async def claim_next_job(
             Team.enabled.is_(True),
             Team.execution_paused.is_(False),
             Team.archived_at.is_(None),
-            occupied < Team.max_concurrent_tasks,
+            or_(
+                Job.action.not_in(CONCURRENCY_SLOT_ACTIONS),
+                occupied < Team.max_concurrent_tasks,
+            ),
             ~already_running,
         )
         .order_by(Job.priority, Job.created_at)
@@ -135,7 +138,7 @@ async def claim_next_job(
         or not team.enabled
         or team.execution_paused
         or team.archived_at
-        or (active or 0) >= team.max_concurrent_tasks
+        or (job.action in CONCURRENCY_SLOT_ACTIONS and (active or 0) >= team.max_concurrent_tasks)
     ):
         await session.rollback()
         return None

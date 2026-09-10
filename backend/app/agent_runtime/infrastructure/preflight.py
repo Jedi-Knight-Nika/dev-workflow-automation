@@ -19,6 +19,8 @@ async def check_workspace(workspace: Path, *, read_only: bool = False) -> None:
             (
                 "git",
                 "-c",
+                "safe.directory=" + str(workspace.resolve()),
+                "-c",
                 "core.hooksPath=/dev/null",
                 "-c",
                 "core.fsmonitor=false",

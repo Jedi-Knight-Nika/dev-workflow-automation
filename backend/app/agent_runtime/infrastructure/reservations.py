@@ -1,7 +1,7 @@
 from decimal import Decimal
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import and_, case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent_runtime.infrastructure.models import AIRun
@@ -11,36 +11,59 @@ from app.teams.infrastructure.automation import read_policy
 from app.teams.infrastructure.team_models import Team
 
 
+async def consumed_cost(session: AsyncSession, task_id: UUID) -> Decimal | None:
+    """Return settled task cost; running or unpriced receipts remain unknown."""
+    cost = func.coalesce(AIRun.provider_cost_usd, AIRun.calculated_cost_usd)
+    total, unsettled = (
+        await session.execute(
+            select(
+                func.sum(cost),
+                func.max(case((or_(AIRun.status == "RUNNING", cost.is_(None)), 1), else_=0)),
+            ).where(AIRun.task_id == task_id)
+        )
+    ).one()
+    if unsettled:
+        return None
+    return total if total is not None else Decimal(0)
+
+
 async def budget_usage(
     session: AsyncSession, task: Task, role_kind: str | None = None
 ) -> tuple[Decimal, Decimal, Decimal]:
-    rows = await session.scalars(
-        select(AIRun).join(Task, Task.id == AIRun.task_id).where(Task.team_id == task.team_id)
+    cost = case(
+        (AIRun.status == "RUNNING", AIRun.reserved_cost_usd),
+        else_=func.coalesce(AIRun.provider_cost_usd, AIRun.calculated_cost_usd),
     )
-    team_total = task_total = role_total = Decimal(0)
-    for prior in rows:
-        cost = (
-            prior.reserved_cost_usd
-            if prior.status == "RUNNING"
-            else (
-                prior.provider_cost_usd
-                if prior.provider_cost_usd is not None
-                else prior.calculated_cost_usd
+    is_task = AIRun.task_id == task.id
+    team_total, task_total, role_total, has_unknown_cost = (
+        await session.execute(
+            select(
+                func.sum(cost),
+                func.sum(case((is_task, cost), else_=0)),
+                func.sum(case((and_(is_task, AIRun.role_kind == role_kind), cost), else_=0)),
+                func.max(case((cost.is_(None), 1), else_=0)),
             )
+            .join(Task, Task.id == AIRun.task_id)
+            .where(Task.team_id == task.team_id)
         )
-        if cost is None:
-            raise DevelopmentBlocked(
-                "Unknown native cost must be reconciled before further Team spending"
-            )
-        team_total += cost
-        if prior.task_id == task.id:
-            task_total += cost
-            if prior.role_kind == role_kind:
-                role_total += cost
-    return team_total, task_total, role_total
+    ).one()
+    if has_unknown_cost:
+        raise DevelopmentBlocked(
+            "Unknown native cost must be reconciled before further Team spending"
+        )
+    return (
+        team_total if team_total is not None else Decimal(0),
+        task_total if task_total is not None else Decimal(0),
+        role_total if role_total is not None else Decimal(0),
+    )
 
 
-async def development_allowance(session: AsyncSession, task: Task, hard_limit: Decimal) -> Decimal:
+async def development_allowance(
+    session: AsyncSession,
+    task: Task,
+    hard_limit: Decimal,
+    minimum_turn_allowance: Decimal = Decimal("0.05"),
+) -> Decimal:
     """Plan a turn within remaining Team funds; begin_run still admits it atomically."""
     if task.team_id is None:
         raise DevelopmentBlocked("A Team is required")
@@ -53,6 +76,10 @@ async def development_allowance(session: AsyncSession, task: Task, hard_limit: D
     )
     if remaining <= 0:
         raise DevelopmentBlocked("Team/task spending reservation is exhausted")
+    if remaining < minimum_turn_allowance:
+        raise DevelopmentBlocked(
+            "Remaining Team/task budget is below the minimum safe Developer turn allowance"
+        )
     return remaining
 
 

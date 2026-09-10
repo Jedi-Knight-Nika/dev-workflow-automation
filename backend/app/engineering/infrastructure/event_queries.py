@@ -1,5 +1,6 @@
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.orm import load_only
 
 from app.engineering.application.ports.event_queries import EventView
 from app.engineering.infrastructure.task_models import TaskEvent
@@ -18,6 +19,7 @@ class SqlAlchemyEventQueries:
             events = (
                 await session.scalars(
                     select(TaskEvent)
+                    .options(load_only(TaskEvent.task_id, TaskEvent.event_type, raiseload=True))
                     .where(TaskEvent.id > event_id)
                     .order_by(TaskEvent.id)
                     .limit(limit)

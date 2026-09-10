@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.agent_runtime.infrastructure.models import AIRun, DeveloperSession
@@ -39,25 +39,22 @@ class SqlAnalyticsFacts:
             if team_id:
                 query = query.where(Task.team_id == team_id)
             tasks = list(await session.scalars(query.order_by(Task.created_at.desc()).limit(5001)))
+            if len(tasks) > 5000:
+                raise ValueError("Analytics cohort exceeds 5000 tasks; select a smaller window")
+            if not tasks:
+                return []
+            ids = [t.id for t in tasks]
+            team_ids = {t.team_id for t in tasks if t.team_id}
+            repository_ids = {t.repository_id for t in tasks if t.repository_id}
             teams = {
-                t.id: t
-                for t in await session.scalars(
-                    select(Team).where(Team.id.in_([t.team_id for t in tasks if t.team_id]))
-                )
+                t.id: t for t in await session.scalars(select(Team).where(Team.id.in_(team_ids)))
             }
             repos = {
                 r.id: r
                 for r in await session.scalars(
-                    select(Repository).where(
-                        Repository.id.in_([t.repository_id for t in tasks if t.repository_id])
-                    )
+                    select(Repository).where(Repository.id.in_(repository_ids))
                 )
             }
-            if len(tasks) > 5000:
-                raise ValueError("Analytics cohort exceeds 5000 tasks; select a smaller window")
-            ids = [t.id for t in tasks]
-            if not ids:
-                return []
             rows = (
                 await session.execute(
                     select(AIRun, DeveloperSession.profile_id, TeamAgentProfile.display_name)
@@ -133,19 +130,29 @@ class SqlAnalyticsFacts:
                         else None,
                     }
                 )
-            reviews: dict[UUID, int] = {}
-            for review in await session.scalars(
-                select(ReviewCycle).where(ReviewCycle.task_id.in_(ids))
-            ):
-                if review.decision in {"CODE_CHANGE", "ARCHITECTURE_CHANGE"}:
-                    reviews[review.task_id] = reviews.get(review.task_id, 0) + 1
-            failures: dict[UUID, int] = {}
-            for validation in await session.scalars(
-                select(ValidationRun).where(
-                    ValidationRun.task_id.in_(ids), ValidationRun.status != "PASSED"
-                )
-            ):
-                failures[validation.task_id] = failures.get(validation.task_id, 0) + 1
+            reviews = {
+                task_id: count
+                for task_id, count in (
+                    await session.execute(
+                        select(ReviewCycle.task_id, func.count())
+                        .where(
+                            ReviewCycle.task_id.in_(ids),
+                            ReviewCycle.decision.in_(["CODE_CHANGE", "ARCHITECTURE_CHANGE"]),
+                        )
+                        .group_by(ReviewCycle.task_id)
+                    )
+                ).all()
+            }
+            failures = {
+                task_id: count
+                for task_id, count in (
+                    await session.execute(
+                        select(ValidationRun.task_id, func.count())
+                        .where(ValidationRun.task_id.in_(ids), ValidationRun.status != "PASSED")
+                        .group_by(ValidationRun.task_id)
+                    )
+                ).all()
+            }
             peaks: dict[UUID, float] = {}
             for binding, summary in (
                 await session.execute(
@@ -167,7 +174,7 @@ class SqlAnalyticsFacts:
                 p.team_id: p
                 for p in await session.scalars(
                     select(TeamAgentProfile).where(
-                        TeamAgentProfile.team_id.in_([t.team_id for t in tasks if t.team_id]),
+                        TeamAgentProfile.team_id.in_(team_ids),
                         TeamAgentProfile.role_kind == "DEVELOPER",
                     )
                 )

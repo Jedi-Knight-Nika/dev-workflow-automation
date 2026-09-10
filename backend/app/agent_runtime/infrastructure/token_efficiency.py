@@ -8,6 +8,7 @@ from uuid import UUID
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import load_only
 
 from app.agent_runtime.domain.token_efficiency_policy import TokenEfficiencyPolicy
 from app.agent_runtime.infrastructure.checkpoints import checkpoint_bytes, workspace_facts
@@ -300,7 +301,23 @@ class SqlTokenEfficiency:
             raise LookupError("Task not found")
         runs = list(
             await self.session.scalars(
-                select(AIRun).where(AIRun.task_id == task_id).order_by(AIRun.started_at)
+                select(AIRun)
+                .options(
+                    load_only(
+                        AIRun.token_efficiency,
+                        AIRun.cache_read_tokens,
+                        AIRun.input_tokens,
+                        AIRun.output_tokens,
+                        AIRun.prompt_version,
+                        AIRun.raw_usage,
+                        AIRun.failure_code,
+                        AIRun.context_generation_id,
+                        AIRun.status,
+                        raiseload=True,
+                    )
+                )
+                .where(AIRun.task_id == task_id)
+                .order_by(AIRun.started_at)
             )
         )
         samples = [r.token_efficiency for r in runs if r.token_efficiency]
@@ -376,6 +393,19 @@ class SqlTokenEfficiency:
             raise LookupError("Task not found")
         rows = await self.session.scalars(
             select(DeveloperContextGeneration)
+            .options(
+                load_only(
+                    DeveloperContextGeneration.sequence,
+                    DeveloperContextGeneration.status,
+                    DeveloperContextGeneration.model,
+                    DeveloperContextGeneration.harness,
+                    DeveloperContextGeneration.native_thread_id,
+                    DeveloperContextGeneration.started_at,
+                    DeveloperContextGeneration.ended_at,
+                    DeveloperContextGeneration.end_reason,
+                    raiseload=True,
+                )
+            )
             .join(DeveloperSession)
             .where(DeveloperSession.task_id == task_id)
             .order_by(DeveloperContextGeneration.started_at)

@@ -49,9 +49,9 @@
       attributes: true,
       attributeFilter: ['class', 'data-theme']
     });
-    void import('echarts')
-      .then((library) => {
-        if (!disposed) chart = library.init(element);
+    void import('./chart-runtime')
+      .then(({ init }) => {
+        if (!disposed) chart = init(element) as unknown as ECharts;
       })
       .catch(() => {
         if (!disposed) error = 'Chart unavailable';

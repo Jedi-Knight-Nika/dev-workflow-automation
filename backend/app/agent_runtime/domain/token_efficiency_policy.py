@@ -10,16 +10,22 @@ class TokenEfficiencyPolicy:
     mode: str = "INSTRUMENT"
     reasoning_effort: str = "medium"
     first_edit_warning_tokens: int = 40000
-    exploration_hard_tokens: int = 70000
+    exploration_hard_tokens: int = 110000
     no_progress_tokens: int = 35000
     active_context_soft_tokens: int = 120000
     active_context_hard_tokens: int = 170000
+    max_turn_input_tokens: int = 250000
     repeated_command_threshold: int = 3
     repeated_failure_threshold: int = 3
     max_rollovers: int = 3
     max_compactions: int = 2
     max_model_visible_tool_result_tokens: int = 4000
     automatic_rollover: bool = False
+
+    def developer_effort(self, profile_effort: str, override: str | None = None) -> str:
+        """Team policy is a ceiling; only an explicit task override raises effort."""
+        order = ["none", "low", "medium", "high"]
+        return min(override or profile_effort, self.reasoning_effort, key=order.index)
 
     def __post_init__(self) -> None:
         if self.execution_profile not in {"FAST", "STANDARD", "LARGE", "CUSTOM"}:
@@ -33,6 +39,8 @@ class TokenEfficiencyPolicy:
                 raise ValueError("Token limits must be integers between 1,000 and 1,000,000")
         if not self.first_edit_warning_tokens < self.exploration_hard_tokens:
             raise ValueError("Exploration stop must follow its warning")
+        if self.max_turn_input_tokens < self.exploration_hard_tokens:
+            raise ValueError("Turn input limit must not precede the exploration stop")
         if not self.active_context_soft_tokens < self.active_context_hard_tokens <= 250000:
             raise ValueError("Context ceilings must be ordered and at most 250,000")
         if self.max_model_visible_tool_result_tokens > 10000:
@@ -58,6 +66,7 @@ class TokenEfficiencyPolicy:
                 "no_progress_tokens": 20000,
                 "active_context_soft_tokens": 70000,
                 "active_context_hard_tokens": 100000,
+                "max_turn_input_tokens": 120000,
                 "repeated_failure_threshold": 2,
                 "max_rollovers": 1,
             }
@@ -68,6 +77,7 @@ class TokenEfficiencyPolicy:
                 "no_progress_tokens": 50000,
                 "active_context_soft_tokens": 160000,
                 "active_context_hard_tokens": 220000,
+                "max_turn_input_tokens": 500000,
                 "repeated_command_threshold": 4,
                 "max_rollovers": 6,
             }

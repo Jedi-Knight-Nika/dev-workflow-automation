@@ -16,12 +16,18 @@ class CachedAnalyticsQueries:
 
     async def _read(self, method: str, *args: Any) -> Any:
         key = (method, *args)
+        # No await between lookup and return: fresh entries need not wait for a
+        # different key's database query. Misses still share the bounded fill lock.
+        cached = self.cache.get(key)
+        if cached and monotonic() - cached[0] < 20:
+            return cached[1]
         async with asyncio.timeout(12), self.lock:
+            # Another reader may have filled this key while we waited.
             cached = self.cache.get(key)
             if cached and monotonic() - cached[0] < 20:
                 return cached[1]
             result = await getattr(self.inner, method)(*args)
-            if len(self.cache) >= 128:
+            if key not in self.cache and len(self.cache) >= 128:
                 self.cache.pop(next(iter(self.cache)))
             self.cache[key] = monotonic(), result
             return result

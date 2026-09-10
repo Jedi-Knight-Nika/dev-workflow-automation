@@ -1,4 +1,4 @@
-"""Explicit rollout and merge authority, independent of model instructions."""
+"""Explicit automation and merge authority, independent of model instructions."""
 
 from dataclasses import dataclass
 from decimal import Decimal

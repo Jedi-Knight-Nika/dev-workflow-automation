@@ -73,16 +73,32 @@ class CloudInterpreter:
         timeout: int = 30,
         *,
         role_budget: Decimal | None = None,
+        role_kind: str = "INTERPRETER",
+        messages: list[dict[str, str]] | None = None,
     ) -> None:
         provider, separator, name = model.partition("/")
         self.provider, self.model = (provider, name) if separator else ("openai", model)
         self.sessions, self.task_id = sessions, task_id
         self.request_limit, self.timeout = request_limit, timeout
         self.role_budget = role_budget
+        if role_kind not in {"INTERPRETER", "SUPERVISOR"}:
+            raise ValueError("Unsupported classification role")
+        self.role_kind = role_kind
+        self.messages = messages
 
     async def interpret(self, event: Event) -> Interpretation:
-        messages = classification_messages(event)
+        messages = self.messages or classification_messages(event)
         url, payload = request_body(self.provider, self.model, messages)
+        if self.role_kind == "SUPERVISOR" and self.provider == "openai":
+            payload["reasoning"] = {"effort": "low"}
+            payload["text"] = {
+                "format": {
+                    "type": "json_schema",
+                    "name": "task_event_decision",
+                    "strict": True,
+                    "schema": Classification.model_json_schema(),
+                }
+            }
         async with self.sessions.begin() as session:
             price = await session.scalar(
                 select(PricingCatalog)
@@ -118,16 +134,18 @@ class CloudInterpreter:
                 session,
                 self.task_id,
                 reserve,
-                role_kind="INTERPRETER",
+                role_kind=self.role_kind,
                 role_budget=self.role_budget,
             )
             key = cipher.decrypt(integration.encrypted_credentials)
             run = AIRun(
                 task_id=self.task_id,
-                role_kind="INTERPRETER",
+                role_kind=self.role_kind,
                 provider=self.provider,
                 model=self.model,
-                prompt_version="interpreter.classification",
+                prompt_version="supervisor.review"
+                if self.role_kind == "SUPERVISOR"
+                else "interpreter.classification",
                 status="RUNNING",
                 reserved_cost_usd=reserve,
                 pricing_id=price.id,
@@ -164,7 +182,10 @@ class CloudInterpreter:
                 assert row
                 row.raw_usage, row.usage_complete = raw, usage.complete
                 row.input_tokens, row.output_tokens = usage.input_tokens, usage.output_tokens
-                row.cache_read_tokens, row.cache_write_tokens = usage.cache_read_input_tokens, 0
+                row.cache_read_tokens, row.cache_write_tokens = (
+                    usage.cache_read_input_tokens,
+                    usage.cache_write_input_tokens,
+                )
                 row.reasoning_tokens = usage.reasoning_tokens
                 row.calculated_cost_usd = pricing.calculate(usage)
                 row.finished_at, row.status = datetime.now(UTC), "COMPLETED"

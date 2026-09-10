@@ -26,7 +26,7 @@ async def delivery_gate(
     policy = await read_policy(session, task.team_id)
     checks = list(
         await session.scalars(
-            select(ValidationRun).where(
+            select(ValidationRun.status).where(
                 ValidationRun.task_id == task.id,
                 ValidationRun.head_sha == task.current_revision,
                 ValidationRun.requirement_version == task.requirement_version,
@@ -34,7 +34,7 @@ async def delivery_gate(
         )
     )
     validated = (
-        task.current_revision if checks and all(row.status == "PASSED" for row in checks) else None
+        task.current_revision if checks and all(status == "PASSED" for status in checks) else None
     )
     return (
         MergePolicy(

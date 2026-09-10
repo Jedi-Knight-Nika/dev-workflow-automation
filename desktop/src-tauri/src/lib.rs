@@ -23,7 +23,13 @@ fn repo_root() -> PathBuf {
         }
     }
 
-    PathBuf::from("/Users/nika/Documents/business/dev-workflow-automation")
+    // Release build with AEW_REPO_ROOT unset: fall back to the executable's
+    // directory. It won't contain compose.yaml, so the check below surfaces
+    // a clear "set AEW_REPO_ROOT" error instead of guessing a checkout path.
+    std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(PathBuf::from))
+        .unwrap_or_default()
 }
 
 fn port_open(port: u16) -> bool {

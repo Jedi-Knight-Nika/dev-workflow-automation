@@ -20,6 +20,10 @@ from app.observability.infrastructure.configuration import preferences
 async def snapshot_forecasts(sessions: async_sessionmaker[AsyncSession], minimum: int) -> None:
     facts = await SqlAnalyticsFacts(sessions).tasks(datetime.now(UTC) - timedelta(days=365))
     for task in facts:
+        can_create = not task.runs and task.status in {"NEW", "ACTIVE"}
+        can_finalize = task.status in {"MERGED", "FAILED", "CANCELLED"}
+        if not can_create and not can_finalize:
+            continue
         identifier = UUID(task.id)
         async with sessions.begin() as session:
             saved = await session.scalar(
@@ -27,7 +31,7 @@ async def snapshot_forecasts(sessions: async_sessionmaker[AsyncSession], minimum
                     TaskForecast.task_id == identifier, TaskForecast.forecast_version == VERSION
                 )
             )
-            if saved is None and not task.runs and task.status in {"NEW", "ACTIVE"}:
+            if saved is None and can_create:
                 result = forecast(task, facts, minimum)
                 # Recheck current receipts immediately before storing; predictions
                 # use only outcomes before the target's creation regardless.
@@ -44,11 +48,7 @@ async def snapshot_forecasts(sessions: async_sessionmaker[AsyncSession], minimum
                         )
                         .on_conflict_do_nothing()
                     )
-            elif (
-                saved
-                and saved.finalized_at is None
-                and task.status in {"MERGED", "FAILED", "CANCELLED"}
-            ):
+            elif saved and saved.finalized_at is None and can_finalize:
                 actuals = task_metrics(task)
                 if actuals["cost_complete"]:
                     saved.actuals = {

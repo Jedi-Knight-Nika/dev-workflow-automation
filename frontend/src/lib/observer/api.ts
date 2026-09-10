@@ -116,7 +116,7 @@ async function consumeStream<T>(response: Response, receive: (event: T) => void)
     const error = await response.json().catch(() => null);
     throw new Error(error?.detail || 'Assistant request unavailable.');
   }
-  if (!response.ok || !response.body) throw new Error('Assistant stream unavailable.');
+  if (!response.body) throw new Error('Assistant stream unavailable.');
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';

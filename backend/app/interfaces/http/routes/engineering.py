@@ -342,6 +342,7 @@ async def capabilities() -> dict[str, Any]:
         "lifecycle": "fixed",
         "codex_enabled": settings.developer_harness_codex,
         "claude_enabled": settings.developer_harness_claude,
+        "responses_experiment_enabled": settings.developer_harness_responses,
         "local_interpreter_enabled": settings.local_event_interpreter,
         "execution_requirements": [
             "enabled Team",

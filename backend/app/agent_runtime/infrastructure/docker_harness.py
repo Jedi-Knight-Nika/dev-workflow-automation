@@ -79,12 +79,15 @@ class DockerHarness:
         job_id: UUID,
         lease_token: UUID,
         on_progress: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
+        on_supervision: Callable[[dict[str, Any]], Awaitable[dict[str, Any]]] | None = None,
     ) -> None:
         self.client, self.mounts, self.manifest = client, mounts, manifest
         self.image, self.network, self.environment = image, network, environment
         self.name = f"developer-{job_id}-{lease_token}"
         self.job_id = job_id
         self.on_progress = on_progress
+        self.on_supervision = on_supervision
+        self.supervision_sequence = 0
         self.last_progress_at = 0.0
         self.container_id: str | None = None
         self.create_requested = False
@@ -161,6 +164,23 @@ class DockerHarness:
                             if self.on_progress and monotonic() - self.last_progress_at >= 5:
                                 await self.on_progress(snapshot)
                                 self.last_progress_at = monotonic()
+                        elif event.get("event") == "supervision_requested":
+                            anomaly = event.get("anomaly")
+                            if (
+                                not self.on_supervision
+                                or not isinstance(anomaly, dict)
+                                or len(json.dumps(anomaly)) > 5000
+                                or anomaly.get("sequence") != self.supervision_sequence + 1
+                                or self.supervision_sequence >= 2
+                            ):
+                                raise RunnerProtocolError("Invalid supervision request")
+                            self.supervision_sequence += 1
+                            answer = await self.on_supervision(anomaly)
+                            atomic_json(
+                                self.mounts.manifest.parent
+                                / f"supervision-{self.supervision_sequence}.json",
+                                answer,
+                            )
                         elif event.get("event") == "turn_completed":
                             if not self.started.done() or self.completed.done():
                                 raise RunnerProtocolError("Receipt received out of order")

@@ -95,12 +95,31 @@ async def test_docker_transport_streams_native_id_before_authorizing_turn(
     )
     receipt = TurnReceipt("native-1", "turn-1", "Done", "completed", Usage(20, 4, 5, 0))
     requests = []
+    supervision_requests = []
+
+    async def supervise(anomaly):
+        supervision_requests.append(anomaly)
+        return {"action": "NUDGE", "message": "Use existing formatter"}
 
     class NativeLogs(httpx.AsyncByteStream):
         async def __aiter__(self):
             yield frame(b'{"event":"session_started","native_session_id":"native-1"}\n')
             # A sub-16KB frame must reach the controller immediately, not be buffered.
             await await_controller("native-1", control)
+            yield frame(
+                json.dumps(
+                    {
+                        "event": "supervision_requested",
+                        "anomaly": {
+                            "sequence": 1,
+                            "kind": "TOOL_FAILURE",
+                            "detail": "formatter error",
+                        },
+                    }
+                ).encode()
+                + b"\n"
+            )
+            assert json.loads((control / "supervision-1.json").read_text())["action"] == "NUDGE"
             yield frame(
                 json.dumps({"event": "turn_completed", "receipt": asdict(receipt)}).encode() + b"\n"
             )
@@ -135,6 +154,7 @@ async def test_docker_transport_streams_native_id_before_authorizing_turn(
             environment={"HTTPS_PROXY": "http://proxy:3128"},
             job_id=uuid4(),
             lease_token=uuid4(),
+            on_supervision=supervise,
         )
         try:
             if resume:
@@ -149,3 +169,4 @@ async def test_docker_transport_streams_native_id_before_authorizing_turn(
             await harness.close()
     assert requests[-2].url.path == "/containers/container-1/stop"
     assert requests[-1].method == "DELETE"
+    assert len(supervision_requests) == 1

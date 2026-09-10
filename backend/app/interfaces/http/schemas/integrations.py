@@ -127,18 +127,3 @@ class WebhookHealthRead(BaseModel):
     last_delivery_at: datetime | None
     last_processed_at: datetime | None
     last_error: str | None
-
-
-class PullRequestRead(BaseModel):
-    number: int
-    url: str
-    state: str
-    head_sha: str
-    merged: bool = False
-    merge_commit_sha: str | None = None
-
-
-class MergeResult(BaseModel):
-    merged: bool
-    sha: str | None = None
-    message: str

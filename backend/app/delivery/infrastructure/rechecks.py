@@ -12,7 +12,7 @@ from app.teams.infrastructure.team_models import Team
 async def recheck_review(sessions: async_sessionmaker[AsyncSession]) -> bool:
     """Recover missed CI/review webhooks without calling an AI model.
 
-    At most one due task per scheduler pass, once per five minutes per task.
+    At most one due task per scheduler pass, once per minute per task (testing).
     Paused/disabled Teams are excluded; API failures retain a bounded audit entry.
     """
     now = datetime.now(UTC)
@@ -25,7 +25,7 @@ async def recheck_review(sessions: async_sessionmaker[AsyncSession]) -> bool:
                 Task.stage == "REVIEWING",
                 Task.manual_takeover.is_(False),
                 Task.archived_at.is_(None),
-                Task.updated_at < now - timedelta(minutes=5),
+                Task.updated_at < now - timedelta(minutes=1),
                 Team.enabled.is_(True),
                 Team.archived_at.is_(None),
             )

@@ -16,6 +16,7 @@ async def test_login_precedes_session_and_uses_process_only_credentials(
     from app.agent_runtime.infrastructure.codex import CodexHarness
 
     monkeypatch.setenv("OPENAI_API_KEY", "fixture-key")
+    monkeypatch.setenv("HOME", str(tmp_path))
     client = AsyncMock()
     with patch.object(sdk, "AsyncCodex", return_value=client) as factory:
         harness = CodexHarness(HarnessSettings("model", tmp_path, "contract"))
@@ -36,6 +37,7 @@ async def test_missing_key_stops_before_native_operations(tmp_path: Path, monkey
     from app.agent_runtime.infrastructure.codex import CodexHarness
 
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setenv("HOME", str(tmp_path))
     client = AsyncMock()
     with patch.object(sdk, "AsyncCodex", return_value=client):
         harness = CodexHarness(HarnessSettings("model", tmp_path, "contract"))
