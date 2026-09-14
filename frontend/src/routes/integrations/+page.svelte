@@ -17,6 +17,7 @@
   import { integrationsResource, webhookHealthResource } from '$lib/stores/integrations.svelte';
   import { repositoriesResource } from '$lib/stores/repositories.svelte';
   import LinearWorkflowFields from '$lib/components/integrations/LinearWorkflowFields.svelte';
+  import TrelloWorkflowFields from '$lib/components/integrations/TrelloWorkflowFields.svelte';
   import TextField from '$lib/components/TextField.svelte';
   import Skeleton from '$lib/components/Skeleton.svelte';
   import ResourceModal from '$lib/components/resources/ResourceModal.svelte';
@@ -155,6 +156,26 @@
       verifying = false;
     }
   }
+  function trelloConfiguration() {
+    return {
+      board_id: trelloBoardId || null,
+      list_ids: trelloListIds,
+      todo_list_id: trelloTodoListId || null,
+      in_progress_list_id: trelloInProgressListId || null,
+      in_review_list_id: trelloInReviewListId || null,
+      blocked_list_id: trelloBlockedListId || null,
+      ready_for_testing_list_id: trelloReadyForTestingListId || null,
+      done_list_id: trelloDoneListId || null,
+      repository_id: repositoryId || null,
+      sync_enabled: Boolean(trelloBoardId),
+      poll_interval_seconds: 60
+    };
+  }
+  function trelloCredential() {
+    return trelloApiKey.trim() && trelloToken.trim()
+      ? JSON.stringify({ api_key: trelloApiKey.trim(), token: trelloToken.trim() })
+      : null;
+  }
   async function save(provider: (typeof providers)[number]) {
     formError = '';
     formNotice = '';
@@ -185,26 +206,9 @@
                 done_state_id: doneStateId || null
               }
             : provider.name === 'trello'
-              ? {
-                  board_id: trelloBoardId || null,
-                  list_ids: trelloListIds,
-                  todo_list_id: trelloTodoListId || null,
-                  in_progress_list_id: trelloInProgressListId || null,
-                  in_review_list_id: trelloInReviewListId || null,
-                  blocked_list_id: trelloBlockedListId || null,
-                  ready_for_testing_list_id: trelloReadyForTestingListId || null,
-                  done_list_id: trelloDoneListId || null,
-                  repository_id: repositoryId || null,
-                  sync_enabled: Boolean(trelloBoardId),
-                  poll_interval_seconds: 60
-                }
+              ? trelloConfiguration()
               : {},
-        credential:
-          provider.name === 'trello'
-            ? trelloApiKey && trelloToken
-              ? JSON.stringify({ api_key: trelloApiKey.trim(), token: trelloToken.trim() })
-              : null
-            : credential || null
+        credential: provider.name === 'trello' ? trelloCredential() : credential || null
       });
       if (!(await verifyConnection(provider.name, provider.label))) return;
       credential = '';
@@ -283,20 +287,8 @@
         await saveIntegration('trello', {
           provider_type: 'task_management',
           status: 'CONFIGURED',
-          configuration: {
-            board_id: trelloBoardId || null,
-            list_ids: trelloListIds,
-            todo_list_id: trelloTodoListId || null,
-            in_progress_list_id: trelloInProgressListId || null,
-            in_review_list_id: trelloInReviewListId || null,
-            blocked_list_id: trelloBlockedListId || null,
-            ready_for_testing_list_id: trelloReadyForTestingListId || null,
-            done_list_id: trelloDoneListId || null,
-            repository_id: repositoryId || null,
-            sync_enabled: Boolean(trelloBoardId),
-            poll_interval_seconds: 60
-          },
-          credential: JSON.stringify({ api_key: trelloApiKey.trim(), token: trelloToken.trim() })
+          configuration: trelloConfiguration(),
+          credential: trelloCredential()!
         });
       if (!(await verifyConnection('trello', 'Trello'))) return;
       trelloApiKey = '';
@@ -329,11 +321,6 @@
     } finally {
       loadingTrello = false;
     }
-  }
-  function toggleTrelloList(id: string, checked: boolean) {
-    trelloListIds = checked
-      ? Array.from(new Set([...trelloListIds, id]))
-      : trelloListIds.filter((value) => value !== id);
   }
   async function refreshStatuses() {
     refreshingStatuses = true;
@@ -526,191 +513,30 @@
                       />
                     {/if}
                     {#if provider.name === 'trello'}
-                      <div class="space-y-3">
-                        <div class="border-brand/30 bg-brand/5 rounded-lg border p-3 text-xs">
-                          <p class="font-semibold">Trello requires two credentials</p>
-                          <p class="text-muted mt-1 leading-relaxed">
-                            Use the API key generated for a Trello app, then generate its Trello
-                            user token. An Atlassian account API token is different and will not
-                            work here.
-                          </p>
-                          <a
-                            class="mt-2 inline-block font-medium text-brand hover:underline"
-                            href="https://trello.com/apps/admin"
-                            target="_blank"
-                            rel="noreferrer">Open Trello App Admin →</a
-                          >
-                        </div>
-                        <TextField
-                          id="trello-api-key"
-                          label={`${t('integrations.trelloApiKey')} ${integration('trello')?.has_credentials ? t('integrations.keepExisting') : ''}`}
-                          type="password"
-                          bind:value={trelloApiKey}
-                          autocomplete="off"
-                          required={!integration('trello')?.has_credentials}
-                        />
-                        <TextField
-                          id="trello-token"
-                          label={t('integrations.trelloToken')}
-                          type="password"
-                          bind:value={trelloToken}
-                          autocomplete="off"
-                          required={!integration('trello')?.has_credentials}
-                        />
-                        <Button
-                          type="button"
-                          size="sm"
-                          onclick={discoverTrelloBoards}
-                          disabled={saving ||
-                            loadingTrello ||
-                            status('trello') !== 'CONNECTED' ||
-                            !!trelloApiKey ||
-                            !!trelloToken}
-                        >
-                          {loadingTrello
-                            ? t('common.loading')
-                            : t('integrations.trelloDiscoverBoards')}
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="primary"
-                          onclick={continueTrelloSetup}
-                          disabled={saving ||
-                            loadingTrello ||
-                            (!integration('trello')?.has_credentials &&
-                              (!trelloApiKey || !trelloToken))}
-                          >{verifying
-                            ? t('integrations.verifyingCredentials')
-                            : t('integrations.verifyAndContinue')}</Button
-                        >
-                        <label class="text-muted block text-xs" for="trello-board"
-                          >{t('integrations.trelloBoard')}</label
-                        >
-                        <select
-                          id="trello-board"
-                          class="border-line bg-panel-alt w-full rounded-lg border p-2 text-sm"
-                          bind:value={trelloBoardId}
-                          onchange={discoverTrelloLists}
-                        >
-                          <option value="">{t('integrations.trelloSelectBoard')}</option>
-                          {#each trelloBoards as board (board.id)}<option value={board.id}
-                              >{board.name}</option
-                            >{/each}
-                        </select>
-                        {#if trelloLists.length}
-                          <fieldset class="space-y-2">
-                            <legend class="text-muted text-xs">
-                              {t('integrations.trelloSourceLists')}
-                            </legend>
-                            {#each trelloLists as list (list.id)}
-                              <label class="flex items-center gap-2 text-sm">
-                                <input
-                                  type="checkbox"
-                                  checked={trelloListIds.includes(list.id)}
-                                  onchange={(event) =>
-                                    toggleTrelloList(list.id, event.currentTarget.checked)}
-                                />
-                                {list.name}
-                              </label>
-                            {/each}
-                          </fieldset>
-                          <fieldset class="grid gap-3 sm:grid-cols-2">
-                            <legend class="text-muted col-span-full text-xs">
-                              Workflow destination lists
-                            </legend>
-                            <label class="text-muted text-xs">
-                              New / Todo
-                              <select
-                                class="border-line bg-panel-alt mt-1 w-full rounded-lg border p-2 text-sm"
-                                bind:value={trelloTodoListId}
-                              >
-                                <option value="">Do not move</option>
-                                {#each trelloLists as list (list.id)}<option value={list.id}
-                                    >{list.name}</option
-                                  >{/each}
-                              </select>
-                            </label>
-                            <label class="text-muted text-xs">
-                              In progress
-                              <select
-                                class="border-line bg-panel-alt mt-1 w-full rounded-lg border p-2 text-sm"
-                                bind:value={trelloInProgressListId}
-                              >
-                                <option value="">Do not move</option>
-                                {#each trelloLists as list (list.id)}<option value={list.id}
-                                    >{list.name}</option
-                                  >{/each}
-                              </select>
-                            </label>
-                            <label class="text-muted text-xs">
-                              In review
-                              <select
-                                class="border-line bg-panel-alt mt-1 w-full rounded-lg border p-2 text-sm"
-                                bind:value={trelloInReviewListId}
-                              >
-                                <option value="">Do not move</option>
-                                {#each trelloLists as list (list.id)}<option value={list.id}
-                                    >{list.name}</option
-                                  >{/each}
-                              </select>
-                            </label>
-                            <label class="text-muted text-xs">
-                              Blocked / needs attention
-                              <select
-                                class="border-line bg-panel-alt mt-1 w-full rounded-lg border p-2 text-sm"
-                                bind:value={trelloBlockedListId}
-                              >
-                                <option value="">Do not move</option>
-                                {#each trelloLists as list (list.id)}<option value={list.id}
-                                    >{list.name}</option
-                                  >{/each}
-                              </select>
-                            </label>
-                            <label class="text-muted text-xs">
-                              Ready for testing
-                              <select
-                                class="border-line bg-panel-alt mt-1 w-full rounded-lg border p-2 text-sm"
-                                bind:value={trelloReadyForTestingListId}
-                              >
-                                <option value="">Do not move</option>
-                                {#each trelloLists as list (list.id)}<option value={list.id}
-                                    >{list.name}</option
-                                  >{/each}
-                              </select>
-                            </label>
-                            <label class="text-muted text-xs">
-                              Done / cancelled
-                              <select
-                                class="border-line bg-panel-alt mt-1 w-full rounded-lg border p-2 text-sm"
-                                bind:value={trelloDoneListId}
-                              >
-                                <option value="">Do not move</option>
-                                {#each trelloLists as list (list.id)}<option value={list.id}
-                                    >{list.name}</option
-                                  >{/each}
-                              </select>
-                            </label>
-                          </fieldset>
-                        {/if}
-                        <label class="text-muted block text-xs" for="trello-repository"
-                          >{t('integrations.repositoryForNewTasks')}</label
-                        >
-                        <select
-                          id="trello-repository"
-                          class="border-line bg-panel-alt w-full rounded-lg border p-2 text-sm"
-                          bind:value={repositoryId}
-                        >
-                          <option value="">{t('integrations.noAutomaticRepository')}</option>
-                          {#each repositoriesResource.data as repository (repository.id)}<option
-                              value={repository.id}>{repository.owner}/{repository.name}</option
-                            >{/each}
-                        </select>
-                        {#if !integration('trello')?.has_credentials}<p
-                            class="text-muted text-[10px]"
-                          >
-                            {t('integrations.trelloSaveThenDiscover')}
-                          </p>{/if}
-                      </div>
+                      <TrelloWorkflowFields
+                        bind:apiKey={trelloApiKey}
+                        bind:token={trelloToken}
+                        bind:boardId={trelloBoardId}
+                        bind:listIds={trelloListIds}
+                        bind:todoListId={trelloTodoListId}
+                        bind:inProgressListId={trelloInProgressListId}
+                        bind:inReviewListId={trelloInReviewListId}
+                        bind:blockedListId={trelloBlockedListId}
+                        bind:readyForTestingListId={trelloReadyForTestingListId}
+                        bind:doneListId={trelloDoneListId}
+                        bind:repositoryId
+                        repositories={repositoriesResource.data}
+                        boards={trelloBoards}
+                        lists={trelloLists}
+                        loading={loadingTrello}
+                        {saving}
+                        {verifying}
+                        hasCredentials={!!integration('trello')?.has_credentials}
+                        connected={status('trello') === 'CONNECTED'}
+                        onDiscoverBoards={discoverTrelloBoards}
+                        onDiscoverLists={discoverTrelloLists}
+                        onContinueSetup={continueTrelloSetup}
+                      />
                     {/if}
                     {#if provider.name === 'linear'}
                       <LinearWorkflowFields
