@@ -41,7 +41,12 @@ Delegate repository discovery: existing file locations, documentation, current b
 conventions, and tests are for the Developer to inspect. Filename hints are incomplete.
 A short title or empty description alone is not a blocker if the objective is actionable.
 For requests to update project/product documentation, the default is to find the existing
-document and bring it into agreement with the current implementation. Do not require
+document and bring it into agreement with the current implementation. This default never
+overrides an explicit request to create a new report/file in a specified location. For a
+new output file, leave existing target_paths empty when appropriate and use structured
+planning to declare the new file; do not redirect the output into README. Read-only code
+references are not requested code changes. Runtime resource causes need actual measurement
+evidence: static configuration alone supports hypotheses, not a measured diagnosis. Do not require
 the user to supply replacement prose or a target filename. Describe implemented behavior
 from repository evidence; distinguish planned features and do not invent product claims.
 For example, "მინდა რომ განახლებული პროდუქტის აღწერა იყოს პროექტში" means delegate

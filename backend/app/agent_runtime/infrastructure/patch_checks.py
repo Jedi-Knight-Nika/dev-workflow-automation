@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from app.agent_runtime.infrastructure.bounded_command import capture_command
+from app.agent_runtime.infrastructure.patch_preflight import FORMAT_EXTENSIONS
 from app.agent_runtime.infrastructure.repository_tools import check_frontend
 from app.agent_runtime.infrastructure.source_paths import source_path
 
@@ -24,21 +25,7 @@ async def check_repository(
         )
     commands = []
     others = [p for p in paths if p not in frontend]
-    prettier = {
-        ".html",
-        ".css",
-        ".scss",
-        ".md",
-        ".json",
-        ".yaml",
-        ".yml",
-        ".js",
-        ".ts",
-        ".tsx",
-        ".jsx",
-        ".svelte",
-    }
-    formatted = ["./" + p for p in others if Path(p).suffix in prettier]
+    formatted = ["./" + p for p in others if Path(p).suffix in FORMAT_EXTENSIONS]
     if formatted:
         commands.append(
             (

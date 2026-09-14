@@ -15,7 +15,8 @@ class WorkUnit(BaseModel):
     model_config = ConfigDict(extra="forbid")
     id: str = Field(min_length=1, max_length=60, pattern=r"^[a-z0-9_-]+$")
     objective: str = Field(min_length=1, max_length=1200)
-    candidate_files: list[str] = Field(min_length=1, max_length=3)
+    candidate_files: list[str] = Field(default_factory=list, max_length=3)
+    reference_files: list[str] = Field(default_factory=list, max_length=3)
     new_files: list[str] = Field(default_factory=list, max_length=2)
     depends_on: list[str] = Field(max_length=5)
     acceptance_checks: list[str] = Field(max_length=6)
@@ -24,8 +25,12 @@ class WorkUnit(BaseModel):
     @model_validator(mode="after")
     def bounded_files(self) -> "WorkUnit":
         paths = self.candidate_files + self.new_files
-        if len(set(paths)) != len(paths) or len(paths) > 3:
+        if not paths or len(set(paths)) != len(paths) or len(paths) > 3:
             raise ValueError("A work unit must contain at most three distinct existing/new files")
+        if len(set(self.reference_files)) != len(self.reference_files) or set(paths) & set(
+            self.reference_files
+        ):
+            raise ValueError("Reference files must be distinct and separate from edit targets")
         return self
 
 

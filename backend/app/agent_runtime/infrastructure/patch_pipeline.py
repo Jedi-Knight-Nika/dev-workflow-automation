@@ -13,8 +13,13 @@ from app.agent_runtime.application.harness import TurnReceipt
 from app.agent_runtime.domain.usage import Usage
 from app.agent_runtime.infrastructure.adaptive_patch import AdaptivePatchExecution, execution_mode
 from app.agent_runtime.infrastructure.checkpoints import workspace_facts
-from app.agent_runtime.infrastructure.patch_contract import CONTRACT, FORMAT
-from app.agent_runtime.infrastructure.patch_evidence import compact_failure
+from app.agent_runtime.infrastructure.patch_contract import CONTRACT, FORMAT, edit_arguments
+from app.agent_runtime.infrastructure.patch_evidence import classify_failure, compact_failure
+from app.agent_runtime.infrastructure.patch_preflight import (
+    PatchRuntimeUnavailable,
+    require_patch_runtime,
+)
+from app.agent_runtime.infrastructure.prompt_cache import bounded_request_context
 from app.agent_runtime.infrastructure.responses import ResponsesHarness, measured_usage
 from app.agent_runtime.infrastructure.work_plan import ExecutionMode
 
@@ -102,10 +107,7 @@ class PatchPipelineHarness(ResponsesHarness):
                 await asyncio.to_thread(self._start_sandbox)
                 applied = await self.operation(
                     "apply",
-                    {
-                        "patch": proposed["patch"],
-                        "hashes": {s["path"]: s["sha256"] for s in packet["sources"]},
-                    },
+                    edit_arguments(proposed, {s["path"]: s["sha256"] for s in packet["sources"]}),
                 )
                 if applied.get("error"):
                     summary = str(applied["error"])[:1000]
@@ -190,12 +192,10 @@ class PatchPipelineHarness(ResponsesHarness):
                             **packet,
                             "previous_failure": errors,
                         }
+                        require_patch_runtime(packet)
                         payload = {
+                            **bounded_request_context(self.settings.model, CONTRACT, current),
                             "model": self.settings.model,
-                            "instructions": CONTRACT,
-                            "input": [
-                                {"role": "user", "content": json.dumps(current, ensure_ascii=False)}
-                            ],
                             "store": False,
                             "reasoning": {"effort": "low"},
                             "text": {"verbosity": "low", "format": FORMAT},
@@ -238,7 +238,12 @@ class PatchPipelineHarness(ResponsesHarness):
                             )
                             break
                         self.history.append(
-                            {"type": "patch_request", "attempt": attempt + 1, "packet": current}
+                            {
+                                "type": "patch_request",
+                                "attempt": attempt + 1,
+                                "packet": current,
+                                "prompt_cache_key": payload["prompt_cache_key"],
+                            }
                         )
                         self._save()  # Persist before admission: crashes cannot silently repeat a request.
                         uncertain = True
@@ -302,10 +307,8 @@ class PatchPipelineHarness(ResponsesHarness):
                             ).run(prompt)
                         hashes = {source["path"]: source["sha256"] for source in packet["sources"]}
                         applied = (
-                            await self.operation(
-                                "apply", {"patch": proposed["patch"], "hashes": hashes}
-                            )
-                            if proposed["patch"]
+                            await self.operation("apply", edit_arguments(proposed, hashes))
+                            if proposed.get("edits") or proposed.get("patch")
                             else {"changed_files": []}
                         )
                         errors = applied if applied.get("error") else None
@@ -343,9 +346,7 @@ class PatchPipelineHarness(ResponsesHarness):
                                 self.emit_progress()
                                 break
                             errors = compact_failure(checks)
-                            if checks.get("error") or any(
-                                c.get("runtime_error") for c in checks.get("checks", [])
-                            ):
+                            if classify_failure(checks)["action"] == "STOP_RUNTIME":
                                 failure, summary = (
                                     "PATCH_TOOL_FAILURE",
                                     "Runtime checks unavailable; do not spend repair tokens debugging infrastructure",
@@ -356,6 +357,9 @@ class PatchPipelineHarness(ResponsesHarness):
                         )
                         self.emit_progress()
                         self._save()
+        except PatchRuntimeUnavailable as exc:
+            failure, summary = "PATCH_TOOL_FAILURE", str(exc)
+            self.history.append({"type": "runtime_preflight_failed", "summary": summary})
         except (
             httpx.HTTPError,
             TimeoutError,

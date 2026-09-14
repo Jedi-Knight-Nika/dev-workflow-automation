@@ -8,6 +8,7 @@ from typing import Any
 import httpx
 
 from app.agent_runtime.domain.usage import Usage
+from app.agent_runtime.infrastructure.prompt_cache import bounded_request_context
 from app.agent_runtime.infrastructure.responses import ResponsesHarness, measured_usage
 
 
@@ -50,9 +51,8 @@ class BoundedInference:
     ) -> dict[str, Any]:
         settings = self.harness.settings
         payload = {
+            **bounded_request_context(settings.model, instructions, packet),
             "model": settings.model,
-            "instructions": instructions,
-            "input": [{"role": "user", "content": json.dumps(packet, ensure_ascii=False)}],
             "store": False,
             "reasoning": {"effort": settings.token_policy.developer_effort(effort)},
             "text": {"verbosity": "low", "format": schema},
@@ -92,7 +92,14 @@ class BoundedInference:
         if spent is None or bound is None or spent + bound > settings.max_cost_usd:
             raise BoundedStop("BUDGET_LIMIT", "Next bounded request exceeds shared cost headroom")
         self.calls[kind] = self.calls.get(kind, 0) + 1
-        self.harness.history.append({"type": "patch_request", "kind": kind, "packet": packet})
+        self.harness.history.append(
+            {
+                "type": "patch_request",
+                "kind": kind,
+                "packet": packet,
+                "prompt_cache_key": payload["prompt_cache_key"],
+            }
+        )
         self.harness._save()  # Admission persisted before network I/O; never replay after a crash.
         self.uncertain = True
         started = monotonic()

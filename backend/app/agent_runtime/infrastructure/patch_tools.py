@@ -1,6 +1,7 @@
 """Deterministic localization and atomic unified-patch application in the runner sandbox."""
 
 import asyncio
+import difflib
 import hashlib
 import json
 import os
@@ -11,7 +12,9 @@ from pathlib import Path
 from typing import Any
 
 from app.agent_runtime.infrastructure.patch_context import compile_source, supervisor_annotations
+from app.agent_runtime.infrastructure.patch_preflight import patch_preflight
 from app.agent_runtime.infrastructure.repo_index import EXTENSIONS, investigate
+from app.agent_runtime.infrastructure.repository_context import repository_context
 from app.agent_runtime.infrastructure.source_paths import source_path
 
 
@@ -73,9 +76,9 @@ def prepare(
     for name in selected:
         path = source_path(workspace, name)
         if name in new_files:
-            if path.exists() or not path.parent.is_dir() or path.suffix not in EXTENSIONS:
+            if path.exists() or path.suffix not in EXTENSIONS:
                 raise ValueError(
-                    "New text files must be absent and use an existing source directory"
+                    "New text files must be absent and use a supported source extension"
                 )
             sources.append({"path": name, "sha256": "MISSING", "text": "", "new_file": True})
             continue
@@ -100,7 +103,13 @@ def prepare(
             break
     if source_bytes > 36000:
         raise ValueError("Localized source exceeds patch packet budget; split the work unit")
-    return {"repo_map": mapped["repo_map"], "sources": sources, "sha": mapped["sha"]}
+    return {
+        "repository_context": repository_context(workspace),
+        "repo_map": mapped["repo_map"],
+        "sources": sources,
+        "sha": mapped["sha"],
+        "preflight": patch_preflight(workspace, [source["path"] for source in sources]),
+    }
 
 
 def normalize_file_boundaries(patch: str) -> str:
@@ -221,7 +230,7 @@ def apply(workspace: Path, patch: str, hashes: dict[str, str]) -> list[str]:
         name = fields[2]
         path = source_path(workspace, name)
         if hashes[name] == "MISSING":
-            if path.exists() or not path.parent.is_dir():
+            if path.exists():
                 raise ValueError("New-file precondition failed; patch not applied")
         elif hashlib.sha256(path.read_bytes()).hexdigest() != hashes[name]:
             raise ValueError("Source changed since localization; patch not applied")
@@ -235,11 +244,61 @@ def apply(workspace: Path, patch: str, hashes: dict[str, str]) -> list[str]:
     return sorted(set(changed))
 
 
+def apply_edits(workspace: Path, edits: list[dict], hashes: dict[str, str]) -> list[str]:
+    """Validate all replacements in memory, then reuse atomic, hash-checked Git application."""
+    if not isinstance(edits, list) or len(edits) > 64:
+        raise ValueError("Patch rejected: expected at most 64 exact edits")
+    originals: dict[str, str] = {}
+    contents: dict[str, str] = {}
+    for edit in edits:
+        name, old, new = edit["path"], edit["old_text"], edit["new_text"]
+        if name not in hashes or not isinstance(old, str) or not isinstance(new, str):
+            raise ValueError("Patch rejected: invalid or out-of-scope edit")
+        path = source_path(workspace, name)
+        if name not in originals:
+            if hashes[name] == "MISSING":
+                if path.exists():
+                    raise ValueError("Patch rejected: new file already exists")
+                originals[name] = ""
+            else:
+                raw = path.read_bytes()
+                if hashlib.sha256(raw).hexdigest() != hashes[name]:
+                    raise ValueError("Patch rejected: source changed since localization")
+                originals[name] = raw.decode("utf-8")
+            contents[name] = originals[name]
+        if hashes[name] == "MISSING":
+            if old or contents[name] or not new:
+                raise ValueError("Patch rejected: new file requires one nonempty creation edit")
+            contents[name] = new
+        else:
+            matches = contents[name].count(old) if old else 0
+            if matches != 1:
+                raise ValueError(
+                    f"Patch rejected: {name}: old_text matched {matches} times; "
+                    "copy exact current source with unique surrounding lines"
+                )
+            contents[name] = contents[name].replace(old, new, 1)
+    patch = ""
+    for name, original in originals.items():
+        # Git's unified format needs explicit markers for unterminated lines.
+        for line in difflib.unified_diff(
+            original.splitlines(keepends=True),
+            contents[name].splitlines(keepends=True),
+            fromfile="/dev/null" if hashes[name] == "MISSING" else "a/" + name,
+            tofile="b/" + name,
+        ):
+            patch += line if line.endswith("\n") else line + "\n\\ No newline at end of file\n"
+    return apply(workspace, patch, hashes) if patch else []
+
+
 async def execute(workspace: Path, name: str, arguments: dict[str, Any]) -> Any:
     if name == "survey":
         from app.agent_runtime.infrastructure.repo_index import survey
 
-        return survey(workspace, arguments["objective"])
+        return {
+            **survey(workspace, arguments["objective"]),
+            "repository_context": repository_context(workspace),
+        }
     if name == "inspect":
         paths = arguments["paths"]
         if not isinstance(paths, list) or not 1 <= len(paths) <= 3:
@@ -256,6 +315,10 @@ async def execute(workspace: Path, name: str, arguments: dict[str, Any]) -> Any:
             arguments.get("work_objective", ""),
         )
     if name == "apply":
+        if "edits" in arguments:
+            return {
+                "changed_files": apply_edits(workspace, arguments["edits"], arguments["hashes"])
+            }
         return {"changed_files": apply(workspace, arguments["patch"], arguments["hashes"])}
     if name == "check":
         from app.agent_runtime.infrastructure.patch_checks import check_repository

@@ -15,7 +15,64 @@ from app.agent_runtime.infrastructure.adaptive_patch import execution_mode
 from app.agent_runtime.infrastructure.patch_context import compile_source
 from app.agent_runtime.infrastructure.patch_evidence import integration_repair_paths
 from app.agent_runtime.infrastructure.patch_tools import apply
-from app.agent_runtime.infrastructure.work_plan import ExecutionMode, WorkGraph
+from app.agent_runtime.infrastructure.work_plan import ExecutionMode, WorkGraph, WorkUnit
+
+
+@pytest.mark.asyncio
+async def test_document_unit_keeps_python_references_read_only(tmp_path, monkeypatch):
+    h = patch_pipeline.PatchPipelineHarness(
+        HarnessSettings(model="gpt-5.6-terra", workspace=tmp_path, instructions="report")
+    )
+    h.root, h.logs = tmp_path / "state", tmp_path / "logs"
+    await h.start()
+    execution = adaptive_patch.AdaptivePatchExecution(h, ExecutionMode.STRUCTURED_MULTI_PATCH)
+    unit = WorkUnit(
+        id="report",
+        objective="Write docs/report.md",
+        new_files=["docs/report.md"],
+        reference_files=["backend/app/main.py"],
+        depends_on=[],
+        acceptance_checks=[],
+        exported_contracts=[],
+    )
+    graph = WorkGraph(objective="Report", integration_invariants=[], units=[unit])
+    monkeypatch.setattr(
+        execution,
+        "facts",
+        AsyncMock(
+            return_value={
+                "workspace_head": "head",
+                "diff_fingerprint": "changed",
+                "changed_files": ["docs/report.md"],
+            }
+        ),
+    )
+
+    async def operation(name, args):
+        if name == "prepare":
+            assert args["paths"] == ["docs/report.md"]
+            return {
+                "sources": [{"path": "docs/report.md", "sha256": "MISSING", "text": ""}],
+                "preflight": {"ready": True, "missing_tools": []},
+            }
+        if name == "inspect":
+            assert args["paths"] == ["backend/app/main.py"]
+            return {"sources": [{"path": "backend/app/main.py", "text": "reference only"}]}
+        if name == "apply":
+            assert args["hashes"] == {"docs/report.md": "MISSING"}
+            return {"changed_files": ["docs/report.md"]}
+        assert name == "check" and args["paths"] == ["docs/report.md"]
+        return {"exit_code": 0, "checks": []}
+
+    monkeypatch.setattr(h, "operation", operation)
+    generation = AsyncMock(return_value={"outcome": "PATCH", "patch": "patch", "summary": "Report"})
+    monkeypatch.setattr(execution.inference, "generate", generation)
+    async with httpx.AsyncClient() as client:
+        result = await execution.unit(client, "Report", graph, unit)
+    assert result["status"] == "READY"
+    assert "read_only_references" in generation.call_args.kwargs["packet"]
+    with pytest.raises(ValidationError):
+        WorkUnit.model_validate({**unit.model_dump(), "reference_files": ["docs/report.md"]})
 
 
 def plan():
@@ -135,6 +192,12 @@ def test_new_file_requires_absence_and_source_scope(tmp_path):
         apply(tmp_path, patch, {"new.py": "MISSING"})
     with pytest.raises(ValueError):
         apply(tmp_path, patch.replace("new.py", "../outside.py"), {"../outside.py": "MISSING"})
+    nested = patch.replace("new.py", "docs/report.md")
+    assert apply(tmp_path, nested, {"docs/report.md": "MISSING"}) == ["docs/report.md"]
+    assert (tmp_path / "docs/report.md").is_file()
+    (tmp_path / "linked").symlink_to(tmp_path / "docs", target_is_directory=True)
+    with pytest.raises(ValueError):
+        apply(tmp_path, patch.replace("new.py", "linked/other.md"), {"linked/other.md": "MISSING"})
 
 
 @pytest.mark.asyncio

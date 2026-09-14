@@ -7,6 +7,7 @@ from typing import Any
 
 def compact_failure(checks: dict[str, Any]) -> dict[str, Any]:
     return {
+        "failure": classify_failure(checks),
         "error": checks.get("error"),
         "checks": [
             {
@@ -18,6 +19,22 @@ def compact_failure(checks: dict[str, Any]) -> dict[str, Any]:
             if c.get("exit_code") != 0
         ],
     }
+
+
+def classify_failure(checks: dict[str, Any]) -> dict[str, str]:
+    """Classify observed evidence, never infer semantic correctness from an exit code."""
+    failed = [c for c in checks.get("checks", []) if c.get("exit_code") != 0]
+    if any(c.get("runtime_error") for c in failed):
+        category, action = "ENVIRONMENT", "STOP_RUNTIME"
+    elif str(checks.get("error", "")).startswith("Patch rejected:"):
+        category, action = "PATCH_APPLICATION", "BOUNDED_REPAIR"
+    elif checks.get("error"):
+        category, action = "UNKNOWN", "STOP_RUNTIME"
+    elif failed:
+        category, action = "CHECK_FAILURE", "BOUNDED_REPAIR"
+    else:
+        category, action = "UNKNOWN", "INSPECT_EVIDENCE"
+    return {"category": category, "action": action}
 
 
 def integration_repair_paths(checks: dict[str, Any], paths: list[str]) -> list[str]:
