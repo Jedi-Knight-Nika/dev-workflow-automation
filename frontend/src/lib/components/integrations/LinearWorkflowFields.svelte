@@ -6,7 +6,9 @@
   import { t } from '$lib/i18n/index.svelte';
 
   let {
-    triggerLabel = $bindable(),
+    assigneeId = $bindable(),
+    sourceStateIds = $bindable(),
+    linearMembers,
     repositoryId = $bindable(),
     todoStateId = $bindable(),
     inProgressStateId = $bindable(),
@@ -20,7 +22,9 @@
     hasCredentials,
     onDiscoverStates
   }: {
-    triggerLabel: string;
+    assigneeId: string;
+    sourceStateIds: string[];
+    linearMembers: { id: string; name: string; active: boolean }[];
     repositoryId: string;
     todoStateId: string;
     inProgressStateId: string;
@@ -37,12 +41,23 @@
 </script>
 
 <div class="mt-3 space-y-2">
-  <TextField
-    id="linear-trigger-label"
-    label={t('integrations.triggerLabel')}
-    bind:value={triggerLabel}
-    required
-  />
+  <label class="block text-sm" for="linear-assignee">Import tasks assigned to</label>
+  {#if linearMembers.length}
+    <select id="linear-assignee" class="input w-full" bind:value={assigneeId}>
+      <option value="">Select a member</option>
+      {#each linearMembers.filter((member) => member.active) as member (member.id)}
+        <option value={member.id}>{member.name}</option>
+      {/each}
+    </select>
+  {:else}
+    <TextField id="linear-assignee" bind:value={assigneeId} placeholder="Discover members and states, or enter a member ID" />
+  {/if}
+  <fieldset class="space-y-2 rounded border border-line p-3">
+    <legend class="text-sm">Import from these states</legend>
+    {#each linearStates as state (state.id)}
+      <label class="flex items-center gap-2 text-sm"><input type="checkbox" value={state.id} bind:group={sourceStateIds} />{state.team_key || state.team_name} — {state.name}</label>
+    {:else}<p class="text-xs text-muted">Discover states after saving credentials. No tasks are imported until a member and source states are selected.</p>{/each}
+  </fieldset>
   <Select
     id="linear-repository"
     label={t('integrations.repositoryForNewTasks')}

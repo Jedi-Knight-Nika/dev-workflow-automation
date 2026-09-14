@@ -10,6 +10,8 @@
     getGithubAppInstallUrl,
     getGithubInstallationAccount,
     listLinearWorkflowStates,
+    listLinearMembers,
+    type LinearMember,
     listTrelloBoards,
     listTrelloLists,
     requestIntegrationSync
@@ -81,7 +83,9 @@
   let editing = '';
   let credential = '';
   let saving = false;
-  let triggerLabel = 'AI Ready';
+  let assigneeId = '';
+  let sourceStateIds: string[] = [];
+  let linearMembers: LinearMember[] = [];
   let repositoryId = '';
   let todoStateId = '';
   let inProgressStateId = '';
@@ -196,7 +200,8 @@
         configuration:
           provider.name === 'linear'
             ? {
-                trigger_label: triggerLabel,
+                assignee_id: assigneeId || null,
+                source_state_ids: sourceStateIds,
                 repository_id: repositoryId || null,
                 todo_state_id: todoStateId || null,
                 in_progress_state_id: inProgressStateId || null,
@@ -232,7 +237,7 @@
     loadingLinearStates = true;
     formError = '';
     try {
-      linearStates = await listLinearWorkflowStates();
+      [linearStates, linearMembers] = await Promise.all([listLinearWorkflowStates(), listLinearMembers()]);
       if (!todoStateId) {
         todoStateId = linearStates.find((state) => state.name.toLowerCase() === 'todo')?.id || '';
       }
@@ -540,7 +545,9 @@
                     {/if}
                     {#if provider.name === 'linear'}
                       <LinearWorkflowFields
-                        bind:triggerLabel
+                        bind:assigneeId
+                        bind:sourceStateIds
+                        {linearMembers}
                         bind:repositoryId
                         bind:todoStateId
                         bind:inProgressStateId
@@ -647,7 +654,8 @@
                         const existing = integrationsResource.data.find(
                           (item) => item.provider_name === provider.name
                         )?.configuration;
-                        triggerLabel = String(existing?.trigger_label || 'AI Ready');
+                        assigneeId = String(existing?.assignee_id || '');
+                        sourceStateIds = Array.isArray(existing?.source_state_ids) ? existing.source_state_ids.map(String) : [];
                         repositoryId = String(existing?.repository_id || '');
                         inReviewStateId = String(existing?.in_review_state_id || '');
                         readyForTestingStateId = String(existing?.ready_for_testing_state_id || '');
