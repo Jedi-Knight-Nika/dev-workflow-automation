@@ -9,6 +9,7 @@ from app.engineering.infrastructure.task_models import Job, Task
 from app.intake.infrastructure.linear_client import LinearClient
 from app.intake.infrastructure.task_snapshot import ExternalTaskSnapshot
 from app.intake.infrastructure.trello_client import TrelloClient
+from app.platform.integrations.application.configuration import merge_configuration
 from app.platform.integrations.application.ports.integration_management import (
     ConfigureIntegrationCommand,
     IntegrationView,
@@ -163,7 +164,11 @@ class EncryptedIntegrationManagementWorkflow:
             self._session.add(item)
         item.provider_type = command.provider_type
         item.status = IntegrationStatus(command.status)
-        item.configuration = command.configuration
+        # Forms edit a subset of provider settings. Preserve routing and actor policy
+        # supplied through the API; explicit null/empty values still clear a setting.
+        item.configuration = merge_configuration(
+            command.provider_name, item.configuration or {}, command.configuration
+        )
         if command.credential is not None:
             item.encrypted_credentials = cipher.encrypt(command.credential)
         item.last_error = None
@@ -180,10 +185,19 @@ class EncryptedIntegrationManagementWorkflow:
             if provider_name == "github":
                 auth = await resolve_github_auth(credential)
                 await GitHubClient(auth.token, auth.installation).list_repositories()
-            elif provider_name == "linear":
-                await LinearClient(credential).list_workflow_states()
-            elif provider_name == "trello":
-                await TrelloClient(credential).list_boards()
+            elif provider_name in {"linear", "trello", "slack"}:
+                if provider_name == "linear":
+                    await LinearClient(credential).list_workflow_states()
+                elif provider_name == "trello":
+                    await TrelloClient(credential).list_boards()
+                from app.platform.integrations.infrastructure.conversations import (
+                    ProviderConversations,
+                )
+
+                item.configuration = {
+                    **(item.configuration or {}),
+                    **await ProviderConversations.verify_identity(provider_name, credential),
+                }
             elif provider_name in {"openai", "anthropic", "deepseek"}:
                 await create_provider(provider_name, credential).list_models()
             else:

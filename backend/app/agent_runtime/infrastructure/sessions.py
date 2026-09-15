@@ -2,7 +2,7 @@
 
 from uuid import UUID
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent_runtime.application.sessions import ChangeSession, SessionConflict, SessionView
@@ -11,6 +11,7 @@ from app.agent_runtime.domain.session_changes import (
     can_keep_native,
     handoff_request,
 )
+from app.agent_runtime.infrastructure.cost_queries import unsettled_usage
 from app.agent_runtime.infrastructure.models import AIRun, DeveloperSession
 from app.agent_runtime.infrastructure.versions import HARNESS_VERSIONS
 from app.engineering.infrastructure.task_models import Job, Task, TaskEvent
@@ -72,10 +73,7 @@ class SqlSessionAdministration:
             select(AIRun.id)
             .where(
                 AIRun.task_id == task.id,
-                or_(
-                    AIRun.status == "RUNNING",
-                    func.coalesce(AIRun.provider_cost_usd, AIRun.calculated_cost_usd).is_(None),
-                ),
+                unsettled_usage(),
             )
             .limit(1)
         ):

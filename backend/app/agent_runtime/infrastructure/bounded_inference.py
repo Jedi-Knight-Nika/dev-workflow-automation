@@ -1,15 +1,23 @@
 """One admission ledger for every planning, investigation and patch request."""
 
 import json
-import os
+from dataclasses import asdict
+from decimal import Decimal
 from time import monotonic
 from typing import Any
 
 import httpx
 
+from app.agent_runtime.domain.model_policy import EFFORTS
 from app.agent_runtime.domain.usage import Usage
-from app.agent_runtime.infrastructure.prompt_cache import bounded_request_context
-from app.agent_runtime.infrastructure.responses import ResponsesHarness, measured_usage
+from app.agent_runtime.infrastructure.patch_wire import (
+    ENDPOINTS,
+    authorization,
+    normalize_response,
+    request_payload,
+    validate_artifact,
+)
+from app.agent_runtime.infrastructure.responses import ResponsesHarness
 
 
 class BoundedStop(ValueError):
@@ -21,8 +29,11 @@ class BoundedStop(ValueError):
 class BoundedInference:
     """All requests share the admitted turn allowance; uncertain usage stops execution."""
 
-    def __init__(self, harness: ResponsesHarness):
+    def __init__(self, harness: ResponsesHarness, mode: str = "STRUCTURED_MULTI_PATCH"):
         self.harness = harness
+        self.mode = mode
+        self.cost_usd = Decimal(0)
+        self.priced_requests: list[dict[str, Any]] = []
         self.totals = {
             key: 0
             for key in (
@@ -50,14 +61,34 @@ class BoundedInference:
         output_limit: int = 6000,
     ) -> dict[str, Any]:
         settings = self.harness.settings
-        payload = {
-            **bounded_request_context(settings.model, instructions, packet),
-            "model": settings.model,
-            "store": False,
-            "reasoning": {"effort": settings.token_policy.developer_effort(effort)},
-            "text": {"verbosity": "low", "format": schema},
-            "max_output_tokens": output_limit,
-        }
+        route = next(
+            (
+                route
+                for route in settings.routed_models
+                if route.policy.role == kind and self.mode in route.policy.allowed_modes
+            ),
+            None,
+        )
+        provider, model, pricing, price_id = (
+            (route.policy.provider, route.policy.model, route.pricing, route.pricing_id)
+            if route
+            else (settings.provider, settings.model, settings.pricing, settings.pricing_id)
+        )
+        if provider != settings.provider:
+            raise BoundedStop("MODEL_POLICY", "Cross-provider routing is disabled")
+        if route:
+            effort = min(
+                route.policy.default_effort, route.policy.max_effort, effort, key=EFFORTS.index
+            )
+        payload = request_payload(
+            provider,
+            model,
+            instructions,
+            packet,
+            schema,
+            settings.token_policy.developer_effort(min(effort, settings.effort, key=EFFORTS.index)),
+            output_limit,
+        )
         # UTF-8 bytes are a deliberately conservative token admission upper bound.
         bound_tokens = len(json.dumps(payload, ensure_ascii=False).encode()) + 1024
         if self.uncertain:
@@ -72,8 +103,7 @@ class BoundedInference:
             raise BoundedStop(
                 "TURN_INPUT_LIMIT", "Next bounded request exceeds shared input headroom"
             )
-        pricing = settings.pricing
-        spent = pricing.calculate(measured_usage(self.totals)) if pricing else None
+        spent = self.cost_usd
         bound = (
             (
                 (
@@ -96,21 +126,24 @@ class BoundedInference:
             {
                 "type": "patch_request",
                 "kind": kind,
+                "provider": provider,
+                "model": model,
+                "pricing_id": price_id,
                 "packet": packet,
-                "prompt_cache_key": payload["prompt_cache_key"],
+                "prompt_cache_key": payload.get("prompt_cache_key"),
             }
         )
         self.harness._save()  # Admission persisted before network I/O; never replay after a crash.
         self.uncertain = True
         started = monotonic()
         response = await client.post(
-            "https://api.openai.com/v1/responses",
+            ENDPOINTS[provider],
             json=payload,
-            headers={"Authorization": f"Bearer {os.environ['OPENAI_API_KEY']}"},
+            headers=authorization(provider),
         )
         self.provider_seconds += monotonic() - started
         response.raise_for_status()
-        data = response.json()
+        data = normalize_response(provider, response.json())
         raw = data.get("usage", {})
         usage = Usage(
             raw.get("input_tokens"),
@@ -121,6 +154,19 @@ class BoundedInference:
         )
         if not usage.complete:
             raise BoundedStop("USAGE_INCOMPLETE", "Provider returned incomplete usage; no retry")
+        amount = pricing.calculate(usage) if pricing else None
+        if amount is None:
+            raise BoundedStop("USAGE_INCOMPLETE", "Routed request could not be priced")
+        self.cost_usd += amount
+        self.priced_requests.append(
+            {
+                "provider": provider,
+                "model": model,
+                "kind": kind,
+                "pricing_id": price_id,
+                "usage": asdict(usage),
+            }
+        )
         for key in self.totals:
             self.totals[key] += getattr(usage, key) or 0
         per_kind = self.usage_by_kind.setdefault(kind, dict.fromkeys(self.totals, 0))
@@ -131,7 +177,14 @@ class BoundedInference:
             self.totals["input_tokens"], usage.input_tokens, usage.cache_read_input_tokens
         )
         # Persist usage even if JSON/schema validation fails below.
-        self.harness.history.append({"type": "bounded_usage", "kind": kind, "usage": raw})
+        self.harness.history.append(
+            {
+                "type": "bounded_usage",
+                "kind": kind,
+                "usage": raw,
+                "priced_request": self.priced_requests[-1],
+            }
+        )
         self.harness._save()
         if data.get("status") != "completed":
             raise BoundedStop("RESPONSE_INCOMPLETE", "Incomplete bounded response; nothing applied")
@@ -143,6 +196,7 @@ class BoundedInference:
             if part.get("type") == "output_text"
         )
         result = json.loads(text)
+        validate_artifact(provider, schema, result)
         if not isinstance(result, dict):
             raise BoundedStop("PATCH_FAILED", "Response is not a structured artifact")
         self.harness.history.append({"type": "bounded_response", "kind": kind, "result": result})

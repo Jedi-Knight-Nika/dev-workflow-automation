@@ -37,6 +37,8 @@
     try {
       const result = await saveAutomation(teamId, {
         ...policy,
+        monthly_budget_usd: policy.monthly_budget_usd || null,
+        daily_allowance_usd: policy.daily_allowance_usd || null,
         repository_ids: split(repositories),
         authorized_reviewer_ids: split(reviewers),
         required_checks: split(checks)
@@ -113,6 +115,30 @@
               />
             </div></label
           >
+        </div>
+        <div class="two-columns">
+          <label
+            >Team monthly limit <span>Optional hard USD ceiling · UTC month</span>
+            <input
+              type="number"
+              min="0.01"
+              max="10000"
+              step="0.01"
+              bind:value={policy.monthly_budget_usd}
+              placeholder="No additional limit"
+            />
+          </label>
+          <label
+            >Daily allowance <span>Optional soft USD target · UTC day</span>
+            <input
+              type="number"
+              min="0.01"
+              max="10000"
+              step="0.01"
+              bind:value={policy.daily_allowance_usd}
+              placeholder="No daily target"
+            />
+          </label>
         </div>
       </fieldset>
 

@@ -2,7 +2,6 @@
 
 import asyncio
 import json
-import os
 from time import monotonic
 from typing import Any
 from uuid import uuid4
@@ -19,7 +18,13 @@ from app.agent_runtime.infrastructure.patch_preflight import (
     PatchRuntimeUnavailable,
     require_patch_runtime,
 )
-from app.agent_runtime.infrastructure.prompt_cache import bounded_request_context
+from app.agent_runtime.infrastructure.patch_wire import (
+    ENDPOINTS,
+    authorization,
+    normalize_response,
+    request_payload,
+    validate_artifact,
+)
 from app.agent_runtime.infrastructure.responses import ResponsesHarness, measured_usage
 from app.agent_runtime.infrastructure.work_plan import ExecutionMode
 
@@ -193,14 +198,15 @@ class PatchPipelineHarness(ResponsesHarness):
                             "previous_failure": errors,
                         }
                         require_patch_runtime(packet)
-                        payload = {
-                            **bounded_request_context(self.settings.model, CONTRACT, current),
-                            "model": self.settings.model,
-                            "store": False,
-                            "reasoning": {"effort": "low"},
-                            "text": {"verbosity": "low", "format": FORMAT},
-                            "max_output_tokens": 6000,
-                        }
+                        payload = request_payload(
+                            self.settings.provider,
+                            self.settings.model,
+                            CONTRACT,
+                            current,
+                            FORMAT,
+                            self.settings.token_policy.developer_effort("low"),
+                            6000,
+                        )
                         bound_tokens = len(json.dumps(payload).encode()) + 1024
                         pricing = self.settings.pricing
                         spent = pricing.calculate(measured_usage(totals)) if pricing else None
@@ -242,20 +248,20 @@ class PatchPipelineHarness(ResponsesHarness):
                                 "type": "patch_request",
                                 "attempt": attempt + 1,
                                 "packet": current,
-                                "prompt_cache_key": payload["prompt_cache_key"],
+                                "prompt_cache_key": payload.get("prompt_cache_key"),
                             }
                         )
                         self._save()  # Persist before admission: crashes cannot silently repeat a request.
                         uncertain = True
                         started = monotonic()
                         response = await client.post(
-                            "https://api.openai.com/v1/responses",
+                            ENDPOINTS[self.settings.provider],
                             json=payload,
-                            headers={"Authorization": f"Bearer {os.environ['OPENAI_API_KEY']}"},
+                            headers=authorization(self.settings.provider),
                         )
                         response.raise_for_status()
                         provider_seconds += monotonic() - started
-                        data = response.json()
+                        data = normalize_response(self.settings.provider, response.json())
                         raw = data["usage"]
                         usage = Usage(
                             raw.get("input_tokens"),
@@ -273,6 +279,14 @@ class PatchPipelineHarness(ResponsesHarness):
                         for key in totals:
                             totals[key] += getattr(usage, key) or 0
                         uncertain = False
+                        self.history.append(
+                            {
+                                "type": "bounded_usage",
+                                "kind": "patch" if attempt == 0 else "repair",
+                                "usage": raw,
+                            }
+                        )
+                        self._save()
                         self.governor.observe(
                             totals["input_tokens"],
                             usage.input_tokens,
@@ -292,6 +306,7 @@ class PatchPipelineHarness(ResponsesHarness):
                             if part.get("type") == "output_text"
                         )
                         proposed = json.loads(text)
+                        validate_artifact(self.settings.provider, FORMAT, proposed)
                         self.history.append(
                             {
                                 "type": "patch_response",

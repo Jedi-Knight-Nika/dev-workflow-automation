@@ -420,21 +420,12 @@
       if (!document.hidden && enabled) void refresh();
     };
     const configChanged = () => void configuration();
-    const ask = (event: Event) => {
-      const detail = (event as CustomEvent<{ question: string; context?: ObserverScope }>).detail;
-      if (!enabled || !detail?.question) return;
-      explicitScope = detail.context || routeScope;
-      conversation = undefined;
-      messages = [];
-      void openPanel().then(() => send(detail.question));
-    };
     const channel =
       typeof BroadcastChannel !== 'undefined'
         ? new BroadcastChannel('observer-configuration')
         : null;
     if (channel) channel.onmessage = configChanged;
     window.addEventListener('observer:configuration', configChanged);
-    window.addEventListener('observer:ask', ask);
     document.addEventListener('visibilitychange', visibility);
     return () => {
       mounted = false;
@@ -442,7 +433,6 @@
       stop();
       channel?.close();
       window.removeEventListener('observer:configuration', configChanged);
-      window.removeEventListener('observer:ask', ask);
       document.removeEventListener('visibilitychange', visibility);
       window.removeEventListener('resize', resize);
       window.visualViewport?.removeEventListener('resize', resize);

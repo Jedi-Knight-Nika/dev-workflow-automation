@@ -86,6 +86,7 @@ async def validate(manifest: ValidationManifest) -> dict[str, object]:
             "APP_SECRET_KEY",
             "OPENAI_API_KEY",
             "ANTHROPIC_API_KEY",
+            "DEEPSEEK_API_KEY",
             "GITHUB_TOKEN",
         )
     ):

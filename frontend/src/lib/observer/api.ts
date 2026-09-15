@@ -62,14 +62,7 @@ export const observerApi = {
       method: 'POST',
       body: JSON.stringify({ message, context, conversation_id }),
       signal
-    }),
-  usage: () =>
-    api<{
-      local_runs: number;
-      paid_cost_usd: string;
-      input_tokens: number | null;
-      output_tokens: number | null;
-    }>('/observer/usage')
+    })
 };
 
 export async function streamAnswer(
@@ -149,9 +142,4 @@ async function consumeStream<T>(response: Response, receive: (event: T) => void)
     await reader.cancel().catch(() => {});
     reader.releaseLock();
   }
-}
-
-/** Extension point for task cards/charts: send references, never client-supplied measurements. */
-export function askObserver(question: string, context?: ObserverScope): void {
-  window.dispatchEvent(new CustomEvent('observer:ask', { detail: { question, context } }));
 }

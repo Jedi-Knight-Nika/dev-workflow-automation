@@ -97,7 +97,7 @@ async def test_stop_interrupts_hung_external_polling() -> None:
     await scheduler.start()
     await asyncio.wait_for(started.wait(), timeout=1)
     await asyncio.wait_for(scheduler.stop(), timeout=1)
-    scheduler.jobs.claim.assert_not_awaited()
+    scheduler.jobs.claim.assert_awaited()  # Dispatch remains independent of hung providers.
 
 
 @pytest.mark.asyncio

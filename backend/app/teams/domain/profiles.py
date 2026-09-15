@@ -38,8 +38,12 @@ class AgentProfile:
             if self.harness is not None or self.provider not in {"ollama", "deepseek", "openai"}:
                 raise ValueError("Interpreter must use a supported classification provider")
         elif self.harness in {"responses", "patch"}:
-            if self.role_kind != RoleKind.DEVELOPER or self.provider != "openai":
-                raise ValueError("Responses is available only for OpenAI Developer profiles")
+            if self.role_kind != RoleKind.DEVELOPER or (
+                self.provider != "openai" and (self.provider, self.harness) != ("deepseek", "patch")
+            ):
+                raise ValueError(
+                    "Bounded harness requires OpenAI, or experimental DeepSeek with patch"
+                )
         elif (self.harness, self.provider) not in {("codex", "openai"), ("claude", "anthropic")}:
             raise ValueError("Coding profiles require a matching supported harness/provider")
         if self.effort not in {"none", "low", "medium", "high"}:

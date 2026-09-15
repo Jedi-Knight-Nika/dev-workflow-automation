@@ -9,6 +9,8 @@ from uuid import uuid4
 
 import httpx
 import pytest
+from alembic.config import Config
+from alembic.script import ScriptDirectory
 
 pytestmark = pytest.mark.skipif(
     os.getenv("RUN_DOCKER_ACCEPTANCE") != "true", reason="Unpaid Docker acceptance is opt-in"
@@ -106,7 +108,10 @@ def test_backup_restores_database_and_all_runtime_state():
             docker(*common, "postgres:16", "psql", "-d", db, "-At", "-c", query)
             for db in ("acceptance", destination)
         ]
-        assert rows[0] == rows[1] and rows[0].startswith("0001_initial|")
+        head = ScriptDirectory.from_config(
+            Config(str(ROOT / "backend/alembic.ini"))
+        ).get_current_head()
+        assert rows[0] == rows[1] and rows[0].startswith(str(head) + "|")
         # Recovery must never overwrite nonempty state on an accidental second invocation.
         with pytest.raises(subprocess.CalledProcessError):
             docker(*restore_args)
@@ -128,12 +133,11 @@ def test_caddy_protects_console_but_forwards_signed_webhook_boundary():
     name = f"acceptance-proxy-{uuid4().hex}"
     try:
         docker(
-            "run",
-            "-d",
+            "create",
             "--name",
             name,
             "--network",
-            NETWORK,
+            "engineering-acceptance_ingress",
             "-p",
             "127.0.0.1::8080",
             "-e",
@@ -146,6 +150,8 @@ def test_caddy_protects_console_but_forwards_signed_webhook_boundary():
             f"{ROOT}/deploy/Caddyfile:/etc/caddy/Caddyfile:ro",
             "caddy:2.10-alpine",
         )
+        docker("network", "connect", NETWORK, name)
+        docker("start", name)
         port = docker("port", name, "8080/tcp").rsplit(":", 1)[1]
         with httpx.Client(base_url=f"http://127.0.0.1:{port}", timeout=5) as client:
             deadline = time.monotonic() + 15
@@ -161,6 +167,10 @@ def test_caddy_protects_console_but_forwards_signed_webhook_boundary():
             assert client.get("/").status_code == 401
             assert client.get("/health/ready", auth=("acceptance", password)).status_code == 200
             assert client.get("/", auth=("acceptance", password)).status_code == 200
+            queue = client.get("/api/queue", auth=("acceptance", password))
+            assert queue.status_code == 200
+            assert queue.json()["recently_completed"] == []
+            assert queue.json()["mode"] == "off"
             webhook = client.post("/webhooks/github", json={})
             # No console Basic challenge for providers; unsigned events still fail at the API.
             assert "www-authenticate" not in webhook.headers

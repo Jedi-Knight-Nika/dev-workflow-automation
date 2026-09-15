@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.engineering.domain.lifecycle import Action, InvalidTransition
+from app.engineering.domain.lifecycle import Action, InvalidTransition, WaitReason
 from app.engineering.infrastructure.jobs import enqueue_phase
 from app.engineering.infrastructure.lifecycle import record_transition
 from app.engineering.infrastructure.models import ReviewCycle
@@ -14,7 +14,14 @@ from app.platform.scheduling.states import JobState
 from app.teams.infrastructure.team_models import Team
 
 
-async def control_task(session: AsyncSession, task: Task, action: Action, *, actor: str) -> None:
+async def control_task(
+    session: AsyncSession,
+    task: Task,
+    action: Action,
+    *,
+    actor: str,
+    wait_reason: WaitReason = WaitReason.NONE,
+) -> None:
     if action in {Action.RESUME, Action.RELEASE_TAKEOVER}:
         team = await session.get(Team, task.team_id) if task.team_id else None
         if not team or not team.enabled or team.archived_at or team.execution_paused:
@@ -23,7 +30,12 @@ async def control_task(session: AsyncSession, task: Task, action: Action, *, act
             await enqueue_phase(session, task)
             return
     await record_transition(
-        session, task.id, action, expected_version=task.lifecycle_version, actor=actor
+        session,
+        task.id,
+        action,
+        expected_version=task.lifecycle_version,
+        actor=actor,
+        wait_reason=wait_reason,
     )
     jobs = await session.scalars(
         select(Job)

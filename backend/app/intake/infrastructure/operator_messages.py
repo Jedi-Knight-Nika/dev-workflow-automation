@@ -41,6 +41,18 @@ async def operator_message(session: AsyncSession, task: Task, message: TaskMessa
         )
         return
     if intent is None:
+        from app.coordinator.infrastructure.inbox import enqueue
+
+        active = await enqueue(
+            session,
+            task,
+            provider="dashboard",
+            key=str(message.id),
+            actor="local-operator",
+            body=message.body,
+        )
+        if active:
+            message.context = {**message.context, "routing": "coordinator"}
         return
     if intent.intent in {Intent.PAUSE, Intent.RESUME, Intent.CANCEL}:
         await control_task(

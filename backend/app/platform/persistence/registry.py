@@ -2,6 +2,12 @@
 
 from app.agent_runtime.infrastructure.models import AIRun, DeveloperSession, PricingCatalog
 from app.analytics.infrastructure.models import TaskForecast
+from app.coordinator.infrastructure.models import (
+    CoordinatorAction,
+    CoordinatorEvent,
+    CoordinatorRun,
+    HumanRequest,
+)
 from app.delivery.infrastructure.status_sync import ExternalStatusSync
 from app.engineering.domain.lifecycle import TaskStatus
 from app.engineering.infrastructure.message_models import TaskMessage
@@ -36,9 +42,13 @@ from app.teams.infrastructure.team_models import TaskAssignment, Team
 __all__ = [
     "AIRun",
     "AccountSettings",
+    "CoordinatorAction",
+    "CoordinatorEvent",
+    "CoordinatorRun",
     "DeveloperSession",
     "ExternalStatusSync",
     "ExternalTaskSnapshot",
+    "HumanRequest",
     "InfrastructureEvent",
     "Integration",
     "IntegrationStatus",

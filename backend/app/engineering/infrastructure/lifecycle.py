@@ -135,5 +135,25 @@ async def record_transition(
             created_at=now,
         )
     )
+    from app.platform.configuration.settings import get_settings
+
+    if (
+        get_settings().coordinator_mode != "off"
+        and actor != "coordinator"
+        and action
+        in {
+            Action.PUBLISHED,
+            Action.MERGED,
+            Action.BLOCK,
+            Action.START,
+            Action.IMPLEMENTED,
+            Action.VALIDATION_PASSED,
+            Action.VALIDATION_FAILED,
+            Action.CANCEL,
+        }
+    ):
+        from app.coordinator.infrastructure.inbox import notify_engineering
+
+        await notify_engineering(session, task, action.value)
     await session.flush()
     return after

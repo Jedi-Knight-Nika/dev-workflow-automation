@@ -20,6 +20,7 @@ from app.bootstrap.engineering import (
     team_profiles,
     token_efficiency,
 )
+from app.interfaces.http.errors import service_errors
 from app.platform.configuration.settings import get_settings
 from app.teams.application.automation import AutomationAdmin
 from app.teams.application.profiles import (
@@ -50,12 +51,8 @@ class ContextRolloverWrite(BaseModel):
 async def read_task_token_policy(
     task_id: UUID, store: TokenEfficiencyQueries = Depends(token_efficiency)
 ) -> dict[str, Any]:
-    try:
+    with service_errors():
         return await store.task_policy(task_id)
-    except LookupError as exc:
-        raise HTTPException(404, str(exc)) from exc
-    except ValueError as exc:
-        raise HTTPException(409, str(exc)) from exc
 
 
 @router.put("/tasks/{task_id}/token-efficiency-policy")
@@ -255,6 +252,8 @@ class AutomationWrite(BaseModel):
     required_checks: list[str] = Field(default_factory=list, max_length=100)
     task_budget_usd: Decimal = Field(gt=0, le=10000, allow_inf_nan=False)
     team_budget_usd: Decimal = Field(gt=0, le=10000, allow_inf_nan=False)
+    monthly_budget_usd: Decimal | None = Field(default=None, gt=0, le=10000, allow_inf_nan=False)
+    daily_allowance_usd: Decimal | None = Field(default=None, gt=0, le=10000, allow_inf_nan=False)
     require_formal_approval: bool = True
     reviewer_scope: Literal["allowlist", "any_human"] = "allowlist"
 
@@ -289,13 +288,9 @@ async def save_automation(
 async def enroll_task(
     task_id: UUID, store: AutomationAdmin = Depends(automation_admin)
 ) -> dict[str, str]:
-    try:
+    with service_errors():
         await store.enroll(task_id)
         return {"status": "enrolled"}
-    except LookupError as exc:
-        raise HTTPException(404, str(exc)) from exc
-    except ValueError as exc:
-        raise HTTPException(409, str(exc)) from exc
 
 
 @router.post("/tasks/{task_id}/retry-status-sync", status_code=202)

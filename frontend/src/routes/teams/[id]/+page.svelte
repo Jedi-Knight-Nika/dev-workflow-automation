@@ -1,4 +1,5 @@
 <script lang="ts">
+  import QueuePanel from '$lib/components/coordination/QueuePanel.svelte';
   import { page } from '$app/state';
   import { onMount } from 'svelte';
   import ErrorBanner from '$lib/components/ErrorBanner.svelte';
@@ -117,6 +118,7 @@
   <ErrorBanner message={error} />
   {#if notice}<p role="status">{notice}</p>{/if}
   {#if loading}<p>Loading team…</p>{/if}
+  {#if activity}{#key activity.team_id}<QueuePanel teamId={activity.team_id} />{/key}{/if}
   {#if activity}<FixedLifecycleCanvas {activity} />{/if}
   {#if activity}{#key activity.team_id}<AutomationPolicyEditor
         teamId={activity.team_id}
@@ -155,14 +157,18 @@
             bind:value={profile.provider}
             providers={profile.role_kind === 'INTERPRETER'
               ? ['ollama', 'deepseek', 'openai']
-              : ['openai', 'anthropic']}
+              : profile.role_kind === 'DEVELOPER'
+                ? ['openai', 'anthropic', 'deepseek']
+                : ['openai', 'anthropic']}
             onChange={() => {
               profile.harness =
                 profile.role_kind === 'INTERPRETER'
                   ? null
                   : profile.provider === 'anthropic'
                     ? 'claude'
-                    : 'codex';
+                    : profile.provider === 'deepseek'
+                      ? 'patch'
+                      : 'codex';
             }}
           />
           <AiModelSelect provider={profile.provider} bind:value={profile.model} />
@@ -171,9 +177,15 @@
               >Developer harness<select bind:value={profile.harness}>
                 <option value="codex">Native Codex (baseline)</option>
                 <option value="responses">Responses tool loop (frontend only)</option>
-                <option value="patch">Bounded patch MVP (repository, max 2 calls)</option>
+                <option value="patch">Bounded patch (adaptive for complex work)</option>
               </select></label
             >
+          {/if}
+          {#if profile.role_kind === 'DEVELOPER' && profile.provider === 'deepseek'}
+            <p>
+              Experimental bounded patch runner. Verify pricing and compare accepted patches before
+              changing your baseline.
+            </p>
           {/if}
           <label
             >Soft budget (USD)<input

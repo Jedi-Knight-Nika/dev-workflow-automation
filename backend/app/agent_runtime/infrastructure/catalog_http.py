@@ -52,7 +52,12 @@ class DeepSeekProvider(AIProvider):
         )
         return sorted(
             [
-                ProviderModel(id=str(item["id"]), display_name=str(item["id"]))
+                ProviderModel(
+                    id=str(item["id"]),
+                    display_name="DeepSeek V4.1 Flash (experimental)"
+                    if item["id"] == "deepseek-flash"
+                    else str(item["id"]),
+                )
                 for item in response.json()["data"]
             ],
             key=lambda item: item.id,

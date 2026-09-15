@@ -12,8 +12,8 @@ def test_initial_and_additive_revisions_can_generate_sql_without_a_database() ->
     output = StringIO()
     config = Config("alembic.ini", output_buffer=output)
     revisions = ScriptDirectory.from_config(config)
-    assert revisions.get_heads() == ["0007_observer"]
-    assert len(list(revisions.walk_revisions())) == 7
+    assert revisions.get_heads() == ["0008_coordinator"]
+    assert len(list(revisions.walk_revisions())) == 8
     command.upgrade(config, "head", sql=True)
     sql = output.getvalue()
     assert "CREATE TABLE developer_sessions" in sql

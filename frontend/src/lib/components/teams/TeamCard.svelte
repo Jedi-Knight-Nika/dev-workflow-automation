@@ -114,7 +114,10 @@
             : t('teamsPage.stopWork')}</button
         >
       </span>
-      <button class="edit" onclick={onEdit} aria-label={t('teamsPage.editTeam', { name: team.name })}
+      <button
+        class="edit"
+        onclick={onEdit}
+        aria-label={t('teamsPage.editTeam', { name: team.name })}
         ><span aria-hidden="true">✎</span>
         {t('teamsPage.settings')}</button
       >

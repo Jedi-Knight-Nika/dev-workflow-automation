@@ -24,6 +24,8 @@ def policy_payload(policy: AutomationPolicy) -> dict[str, Any]:
     result["repository_ids"] = [str(value) for value in policy.repository_ids]
     result["task_budget_usd"] = str(policy.task_budget_usd)
     result["team_budget_usd"] = str(policy.team_budget_usd)
+    for key in ("monthly_budget_usd", "daily_allowance_usd"):
+        result[key] = str(result[key]) if result[key] is not None else None
     return result
 
 
@@ -39,4 +41,7 @@ async def read_policy(
     data["repository_ids"] = tuple(UUID(value) for value in data.get("repository_ids", []))
     data["task_budget_usd"] = Decimal(data["task_budget_usd"])
     data["team_budget_usd"] = Decimal(data["team_budget_usd"])
+    for key in ("monthly_budget_usd", "daily_allowance_usd"):
+        if data.get(key) is not None:
+            data[key] = Decimal(str(data[key]))
     return AutomationPolicy(**data)

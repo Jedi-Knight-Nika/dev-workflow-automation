@@ -7,10 +7,14 @@ from typing import Literal
 from uuid import uuid4
 
 import httpx
-from sqlalchemy import and_, case, func, or_, select
+from sqlalchemy import and_, case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.agent_runtime.infrastructure.container import RunnerMounts
+from app.agent_runtime.infrastructure.cost_queries import (
+    engineering_cost,
+    unsettled_engineering_usage,
+)
 from app.agent_runtime.infrastructure.docker_harness import DockerHarness
 from app.agent_runtime.infrastructure.helper_accounting import SqlHelperStore
 from app.agent_runtime.infrastructure.models import AIRun, DeveloperSession
@@ -20,6 +24,7 @@ from app.engineering.application.develop import DevelopTask, SessionContext
 from app.engineering.application.jobs import PhaseBlocked, PhaseLease
 from app.engineering.domain.consultation import outcome
 from app.engineering.domain.lifecycle import WaitReason
+from app.engineering.infrastructure.requirements import current_requirement
 from app.engineering.infrastructure.task_models import Task
 from app.platform.configuration.settings import Settings
 from app.platform.integrations.models import Integration
@@ -35,13 +40,13 @@ async def consultation_allowance(
     task_limit: Decimal,
     role_limit: Decimal,
 ) -> Decimal:
-    cost = func.coalesce(AIRun.provider_cost_usd, AIRun.calculated_cost_usd)
+    cost = engineering_cost()
     total, role_total, incomplete, planned = (
         await session.execute(
             select(
                 func.sum(cost),
                 func.sum(case((AIRun.role_kind == role, cost), else_=0)),
-                func.max(case((or_(cost.is_(None), AIRun.status == "RUNNING"), 1), else_=0)),
+                func.max(case((unsettled_engineering_usage(), 1), else_=0)),
                 func.max(
                     case(
                         (
@@ -133,6 +138,10 @@ async def consult(
         remaining = await consultation_allowance(
             session, task, role, policy.task_budget_usd, profile.hard_budget_usd
         )
+        try:
+            requirement = await current_requirement(session, task)
+        except ValueError as exc:
+            raise PhaseBlocked(WaitReason.MISSING_REQUIREMENT, str(exc)) from exc
     namespace = uuid4()
     state = settings.harness_state_root.resolve() / str(task.id) / "helpers" / str(namespace)
     directory = (
@@ -158,7 +167,7 @@ async def consult(
     )
     # Source is read on demand through native tools. Never attach the checkout or transcript.
     prompt = (
-        f"Requirement version {task.requirement_version}: {task.title}\n{task.description}\n"
+        f"Requirement version {task.requirement_version}: {requirement}\n"
         f"Base revision: {native.checkpoint.get('base_sha', '')}; current revision: {task.current_revision or ''}\n"
         f"Developer's concise report:\n{native.checkpoint.get('summary', '')}\n"
         f"Validated change summary (inspect named files on demand):\n{change_context[:6000]}"

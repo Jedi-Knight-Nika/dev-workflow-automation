@@ -43,8 +43,9 @@ test('Team policy persists any-human and natural-language approval settings', as
   await page.goto('/teams/' + teamId);
   await page.getByLabel('Who can approve on GitHub?').selectOption('any_human');
   await page.getByLabel('Require formal GitHub review approval').uncheck();
-  await page.getByLabel('Auto-merge after approval of the current commit and green CI').check();
-  await page.getByRole('button', { name: 'Save policy' }).click();
+  await page.locator('label[aria-label="Enable automatic merge"]').click();
+  await expect(page.getByRole('checkbox', { name: 'Enable automatic merge' })).toBeChecked();
+  await page.getByRole('button', { name: 'Save automation policy' }).click();
   await expect(page.getByRole('status')).toContainText('Policy saved');
   expect(policy).toMatchObject({
     reviewer_scope: 'any_human',

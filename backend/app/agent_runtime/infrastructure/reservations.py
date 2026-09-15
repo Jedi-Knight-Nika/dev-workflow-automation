@@ -1,24 +1,38 @@
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import UUID
 
-from sqlalchemy import and_, case, func, or_, select
+from sqlalchemy import and_, case, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.agent_runtime.infrastructure.cost_queries import (
+    budget_cost,
+    engineering_cost,
+    settled_cost,
+    unsettled_engineering_usage,
+    unsettled_usage,
+)
 from app.agent_runtime.infrastructure.models import AIRun
 from app.engineering.application.develop import DevelopmentBlocked
 from app.engineering.infrastructure.task_models import Task
+from app.platform.configuration.settings import get_settings
 from app.teams.infrastructure.automation import read_policy
 from app.teams.infrastructure.team_models import Team
 
 
-async def consumed_cost(session: AsyncSession, task_id: UUID) -> Decimal | None:
-    """Return settled task cost; running or unpriced receipts remain unknown."""
-    cost = func.coalesce(AIRun.provider_cost_usd, AIRun.calculated_cost_usd)
+async def consumed_cost(
+    session: AsyncSession, task_id: UUID, *, include_coordinator_reservations: bool = False
+) -> Decimal | None:
+    """Known cost; Developer admission may include an in-flight Coordinator reservation."""
+    cost = engineering_cost() if include_coordinator_reservations else settled_cost()
+    pending = (
+        unsettled_engineering_usage() if include_coordinator_reservations else unsettled_usage()
+    )
     total, unsettled = (
         await session.execute(
             select(
                 func.sum(cost),
-                func.max(case((or_(AIRun.status == "RUNNING", cost.is_(None)), 1), else_=0)),
+                func.max(case((pending, 1), else_=0)),
             ).where(AIRun.task_id == task_id)
         )
     ).one()
@@ -30,10 +44,7 @@ async def consumed_cost(session: AsyncSession, task_id: UUID) -> Decimal | None:
 async def budget_usage(
     session: AsyncSession, task: Task, role_kind: str | None = None
 ) -> tuple[Decimal, Decimal, Decimal]:
-    cost = case(
-        (AIRun.status == "RUNNING", AIRun.reserved_cost_usd),
-        else_=func.coalesce(AIRun.provider_cost_usd, AIRun.calculated_cost_usd),
-    )
+    cost = budget_cost()
     is_task = AIRun.task_id == task.id
     team_total, task_total, role_total, has_unknown_cost = (
         await session.execute(
@@ -90,11 +101,15 @@ async def reserve_budget(
     *,
     role_kind: str | None = None,
     role_budget: Decimal | None = None,
+    allow_coordination: bool = False,
 ) -> None:
     """Lock Team before Task; caller inserts the reservation in this transaction."""
     task = await session.get(Task, task_id)
     if task is None or task.team_id is None or not amount.is_finite() or amount <= 0:
         raise DevelopmentBlocked("A positive Team reservation is required")
+    account_limit = get_settings().account_monthly_budget_usd
+    if account_limit is not None and session.get_bind().dialect.name == "postgresql":
+        await session.execute(text("SELECT pg_advisory_xact_lock(741963207)"))
     team = await session.get(Team, task.team_id, with_for_update=True, populate_existing=True)
     task = await session.get(Task, task_id, with_for_update=True, populate_existing=True)
     if (
@@ -106,10 +121,22 @@ async def reserve_budget(
         or task.archived_at is not None
         or task.manual_takeover
         or task.team_id != team.id
-        or task.status not in {"NEW", "ACTIVE", "WAITING_EXTERNAL"}
+        or (
+            task.status not in {"NEW", "ACTIVE", "WAITING_EXTERNAL"}
+            and not (allow_coordination and role_kind == "COORDINATOR")
+        )
     ):
         raise DevelopmentBlocked("Task or Team is suspended; no new spending admitted")
     policy = await read_policy(session, team.id)
+    month = datetime.now(UTC).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    if account_limit is not None:
+        account_total, unknown = await periodic_usage(session, month)
+        if unknown or account_total + amount > account_limit:
+            raise DevelopmentBlocked("Account monthly budget is exhausted or usage is unknown")
+    if policy.monthly_budget_usd is not None:
+        monthly_total, unknown = await periodic_usage(session, month, team.id)
+        if unknown or monthly_total + amount > policy.monthly_budget_usd:
+            raise DevelopmentBlocked("Team monthly spending reservation is exhausted")
     team_total, task_total, role_total = await budget_usage(session, task, role_kind)
     if team_total + amount > policy.team_budget_usd or task_total + amount > policy.task_budget_usd:
         raise DevelopmentBlocked("Team/task spending reservation is exhausted")
@@ -117,3 +144,19 @@ async def reserve_budget(
         role_kind is None or not role_budget.is_finite() or role_total + amount > role_budget
     ):
         raise DevelopmentBlocked("Task role spending reservation is exhausted")
+
+
+async def periodic_usage(
+    session: AsyncSession, since: datetime, team_id: UUID | None = None
+) -> tuple[Decimal, bool]:
+    """UTC purchase period plus unresolved reservations from previous periods."""
+    cost = budget_cost()
+    query = (
+        select(func.sum(cost), func.max(case((cost.is_(None), 1), else_=0)))
+        .join(Task, Task.id == AIRun.task_id)
+        .where(or_(AIRun.started_at >= since, AIRun.status == "RUNNING", cost.is_(None)))
+    )
+    if team_id is not None:
+        query = query.where(Task.team_id == team_id)
+    amount, unknown = (await session.execute(query)).one()
+    return amount or Decimal(0), bool(unknown)

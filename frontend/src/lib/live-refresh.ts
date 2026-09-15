@@ -1,3 +1,17 @@
+/** Track which response still owns the view; requests themselves keep running. */
+export function createLatestRequest() {
+  let version = 0;
+  return {
+    begin() {
+      const current = ++version;
+      return () => current === version;
+    },
+    invalidate() {
+      version++;
+    }
+  };
+}
+
 /** Coalesce event bursts without overlapping requests or starving continuous streams. */
 export function createLiveRefresh(load: () => Promise<void>, delay = 350) {
   let timer: ReturnType<typeof setTimeout> | undefined;

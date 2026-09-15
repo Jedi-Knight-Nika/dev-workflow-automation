@@ -135,7 +135,7 @@ test('fullscreen map keeps the queue and milestones visible without workflow wri
     return route.fulfill({ json: [] });
   });
   await page.goto('/teams/' + ids[0]);
-  await page.getByRole('button', { name: 'Fullscreen', exact: true }).click();
+  await page.getByRole('main').getByRole('button', { name: 'Fullscreen', exact: true }).click();
   await expect.poll(() => page.evaluate(() => Boolean(document.fullscreenElement))).toBe(true);
   await expect(page.getByRole('complementary', { name: 'Queue and task details' })).toBeVisible();
   await expect(page.getByText('worker:1')).toBeVisible();

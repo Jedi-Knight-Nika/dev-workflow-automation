@@ -15,10 +15,15 @@ class AutomationPolicy:
     required_checks: tuple[str, ...] = ()
     task_budget_usd: Decimal = Decimal(2)
     team_budget_usd: Decimal = Decimal(20)
+    monthly_budget_usd: Decimal | None = None
+    daily_allowance_usd: Decimal | None = None
     require_formal_approval: bool = True
     reviewer_scope: Literal["allowlist", "any_human"] = "allowlist"
 
     def __post_init__(self) -> None:
+        for amount in (self.monthly_budget_usd, self.daily_allowance_usd):
+            if amount is not None and (not amount.is_finite() or not 0 < amount <= 10000):
+                raise ValueError("Periodic budgets must be positive and at most 10000 USD")
         if (
             not self.task_budget_usd.is_finite()
             or not self.team_budget_usd.is_finite()

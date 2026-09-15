@@ -7,39 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.engineering.infrastructure.task_models import Task, TaskRepositoryScope
 from app.intake.infrastructure.webhook_models import WebhookDelivery
 from app.platform.integrations.retry import DeliveryRetryPolicy
-from app.platform.scheduling.states import JobState
 from app.repositories.infrastructure.models import Repository
-
-SUCCESSFUL_CHECKS = {"SUCCESS", "NEUTRAL", "SKIPPED"}
-FAILED_CHECKS = {
-    "FAILURE",
-    "FAILED",
-    "ERROR",
-    "CANCELLED",
-    "TIMED_OUT",
-    "ACTION_REQUIRED",
-    "STALE",
-}
-BLOCKING_REVIEWS = {"CHANGES_REQUESTED"}
-ACTIVE_JOB_STATES = {JobState.QUEUED, JobState.CLAIMED, JobState.RUNNING, JobState.RETRY_WAIT}
-AUTHORIZED_MERGE_PERMISSIONS = {"admin", "maintain", "write"}
-MERGE_APPROVAL_COMMENTS = {
-    "/merge",
-    "approve and merge",
-    "approved",
-    "looks good to me",
-    "lgtm",
-    "merge",
-    "merge it",
-    "go merge",
-    "go ahead and merge",
-    "please merge",
-    "please merge it",
-    "lgtm, merge it",
-    "ready to merge",
-}
-MAX_DIAGNOSTIC_CHARS = 12_000
-MAX_ANNOTATIONS = 20
 
 
 def pull_request_number(payload: dict[str, Any]) -> int | None:

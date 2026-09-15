@@ -19,6 +19,7 @@ from app.agent_runtime.infrastructure.reservations import reserve_budget
 from app.engineering.application.jobs import PhaseBlocked, PhaseLease
 from app.engineering.domain.lifecycle import WaitReason
 from app.engineering.infrastructure.lease_guard import assert_current
+from app.engineering.infrastructure.requirements import current_requirement
 from app.engineering.infrastructure.task_models import Job, Task, TaskEvent
 from app.intake.infrastructure.cloud_wire import normalized_usage, response_text
 from app.platform.configuration.settings import Settings
@@ -91,11 +92,15 @@ class SqlSupervisor:
                 else await asyncio.to_thread(repository_paths, Path(native.workspace_path))
             )
             fresh_intake = not anomaly and task.stage == "DEVELOPING"
+            try:
+                requirement = await current_requirement(session, task)
+            except ValueError as exc:
+                raise PhaseBlocked(WaitReason.MISSING_REQUIREMENT, str(exc)) from exc
             packet = json.dumps(
                 {
                     "task_id": str(task.id),
                     "requirement_version": task.requirement_version,
-                    "objective": task.title + "\n" + task.description,
+                    "objective": requirement,
                     "stage": task.stage,
                     "current_sha": task.current_revision,
                     "feedback": native.checkpoint.get("next_feedback"),
@@ -111,7 +116,7 @@ class SqlSupervisor:
                     "unverified_filename_matches": await asyncio.to_thread(
                         candidate_paths,
                         Path(native.workspace_path),
-                        task.title + " " + task.description,
+                        requirement,
                     ),
                 },
                 ensure_ascii=False,

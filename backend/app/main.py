@@ -15,6 +15,7 @@ from app.bootstrap.observer import observer_controller
 from app.bootstrap.scheduler import create_scheduler
 from app.interfaces.http.routes.analytics import router as analytics_router
 from app.interfaces.http.routes.control_plane import router as control_plane_router
+from app.interfaces.http.routes.coordination import router as coordination_router
 from app.interfaces.http.routes.dashboard import router as dashboard_router
 from app.interfaces.http.routes.engineering import router as engineering_router
 from app.interfaces.http.routes.events import router as events_router
@@ -68,6 +69,7 @@ app.include_router(tasks_router, prefix="/api")
 app.include_router(teams_router, prefix="/api")
 app.include_router(settings_router, prefix="/api")
 app.include_router(control_plane_router, prefix="/api")
+app.include_router(coordination_router, prefix="/api")
 app.include_router(events_router, prefix="/api")
 app.include_router(webhooks_router)
 app.include_router(engineering_router, prefix="/api")

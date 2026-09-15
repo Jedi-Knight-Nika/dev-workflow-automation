@@ -58,6 +58,7 @@ async def process_source_delivery(session: AsyncSession) -> bool:
                                     "actor_id": actor.get("id"),
                                     "author": actor.get("fullName"),
                                     "raw_text": data.get("text"),
+                                    "provider_message_id": action.get("id"),
                                 },
                             )
                 delivery.status = "PROCESSED"

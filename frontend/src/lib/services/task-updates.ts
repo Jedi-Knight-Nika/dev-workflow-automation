@@ -1,10 +1,25 @@
 import { API_BASE_URL } from '$lib/api';
 
-/** Shared task events plus reconciliation polling; call only after mounting. */
-export function subscribeTaskUpdates(
-  refresh: () => void,
-  options: { taskId?: () => string | undefined; connected?: (value: boolean) => void } = {}
+type TaskUpdateOptions = {
+  taskId?: () => string | undefined;
+  connected?: (value: boolean) => void;
+};
+
+/** Mount an initial refresh and its event/poll subscription with one cleanup. */
+export function startTaskRefresh(
+  refresh: { request: () => void; stop: () => void },
+  options: TaskUpdateOptions = {}
 ) {
+  refresh.request();
+  const unsubscribe = subscribeTaskUpdates(refresh.request, options);
+  return () => {
+    unsubscribe();
+    refresh.stop();
+  };
+}
+
+/** Shared task events plus reconciliation polling; call only after mounting. */
+export function subscribeTaskUpdates(refresh: () => void, options: TaskUpdateOptions = {}) {
   const stream = new EventSource(API_BASE_URL + '/events/stream');
   stream.onopen = () => options.connected?.(true);
   stream.onerror = () => options.connected?.(false);

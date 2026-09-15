@@ -1,0 +1,50 @@
+# Isolated, unpaid deployment checks: no production volumes, keys or workers.
+name: engineering-acceptance
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: acceptance
+      POSTGRES_USER: acceptance
+      POSTGRES_PASSWORD: acceptance-only
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "acceptance", "-d", "acceptance"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+    tmpfs:
+      - /var/lib/postgresql/data:size=512m
+  backend:
+    image: engineering-acceptance-api:local
+    build:
+      context: ../backend
+      target: api
+    environment:
+      DATABASE_URL: postgresql+asyncpg://acceptance:acceptance-only@postgres:5432/acceptance
+      DATABASE_URL_SYNC: postgresql+psycopg://acceptance:acceptance-only@postgres:5432/acceptance
+      APP_SECRET_KEY: isolated-acceptance-only-secret
+      SCHEDULER_ENABLED: "false"
+      COORDINATOR_MODE: "off"
+      OBSERVER_ENABLED: "false"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/ready')"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+  frontend:
+    image: engineering-acceptance-frontend:local
+    build:
+      context: ../frontend
+    networks: [default, ingress]
+    environment:
+      API_URL: http://backend:8000
+    depends_on:
+      backend:
+        condition: service_healthy
+networks:
+  ingress: {}
+  default:
+    internal: true

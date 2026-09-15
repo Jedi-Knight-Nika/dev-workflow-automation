@@ -4,15 +4,20 @@ import json
 from dataclasses import asdict
 from decimal import Decimal
 from pathlib import Path
+from uuid import UUID
 
 import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.agent_runtime.application.harness import WorkspaceUnavailable
-from app.agent_runtime.domain.session_changes import handoff_request
+from app.agent_runtime.domain.handoffs import WorkOutcome, work_packet
+from app.agent_runtime.domain.model_policy import PricedModel
+from app.agent_runtime.domain.session_changes import continuation_request, handoff_request
 from app.agent_runtime.domain.token_efficiency_policy import TokenEfficiencyPolicy
+from app.agent_runtime.domain.usage import Pricing
 from app.agent_runtime.infrastructure.accounting import SqlDevelopmentStore
+from app.agent_runtime.infrastructure.agent_codec import decode
 from app.agent_runtime.infrastructure.docker_harness import DockerHarness
 from app.agent_runtime.infrastructure.models import (
     DeveloperSession,
@@ -32,6 +37,7 @@ from app.engineering.application.jobs import PhaseBlocked, PhaseLease
 from app.engineering.domain.lifecycle import Action, WaitReason
 from app.engineering.infrastructure.consultation import consult, save_consultation_feedback
 from app.engineering.infrastructure.enrollment import prepare_directories
+from app.engineering.infrastructure.requirements import current_requirement
 from app.engineering.infrastructure.task_models import Task
 from app.engineering.infrastructure.validation_phase import validate_phase
 from app.platform.configuration.settings import Settings
@@ -118,6 +124,32 @@ class SqlPhaseExecutor:
                 else None
             )
             price = await standard_price(session, native.provider, native.model)
+            routed_models = []
+            if native.harness == "patch" and lease.action == "DEVELOPER_TURN":
+                for route in token_policy.model_routes:
+                    if route.provider != native.provider:
+                        raise PhaseBlocked(
+                            WaitReason.MISSING_CONFIGURATION,
+                            "Cross-provider automatic routing is disabled",
+                        )
+                    routed_price = await standard_price(session, route.provider, route.model)
+                    if routed_price is None:
+                        raise PhaseBlocked(
+                            WaitReason.MISSING_CONFIGURATION,
+                            "Configure verified pricing for every routed model",
+                        )
+                    routed_models.append(
+                        PricedModel(
+                            route,
+                            Pricing(
+                                routed_price.input_per_million,
+                                routed_price.output_per_million,
+                                routed_price.cached_input_per_million,
+                                routed_price.cache_write_per_million,
+                            ),
+                            str(routed_price.id),
+                        )
+                    )
         async with httpx.AsyncClient(
             transport=httpx.AsyncHTTPTransport(uds=str(self.settings.docker_socket)),
             base_url="http://docker",
@@ -285,10 +317,10 @@ class SqlPhaseExecutor:
                     raise PhaseBlocked(
                         WaitReason.MISSING_CONFIGURATION, "Selected native harness is disabled"
                     )
-                if native.provider == "openai" and price is None:
+                if native.provider in {"openai", "deepseek"} and price is None:
                     raise PhaseBlocked(
                         WaitReason.MISSING_CONFIGURATION,
-                        "Configure verified pricing before the first Codex turn",
+                        "Configure verified pricing before the first Developer turn",
                     )
                 store = SqlDevelopmentStore(
                     self.sessions,
@@ -328,10 +360,17 @@ class SqlPhaseExecutor:
                 if bounded_repair:
                     remaining = min(remaining, Decimal("0.15"))
                 store.reservation_usd = remaining
-                request = (
-                    "ORIGINAL REQUIREMENT (authoritative):\n"
-                    + f"{task.title}\n\n{task.description}".strip()
-                )
+                store.routing_price_ids = {UUID(route.pricing_id) for route in routed_models}
+                if price:
+                    store.routing_price_ids.add(price.id)
+                async with self.sessions() as session:
+                    try:
+                        request = (
+                            "ORIGINAL REQUIREMENT (authoritative):\n"
+                            + await current_requirement(session, task)
+                        )
+                    except ValueError as exc:
+                        raise PhaseBlocked(WaitReason.MISSING_REQUIREMENT, str(exc)) from exc
                 if native.checkpoint.get("repair_packet") and not native.native_session_id:
                     request += (
                         "\nCURRENT REPAIR EVIDENCE (not a replacement requirement):\n"
@@ -350,12 +389,10 @@ class SqlPhaseExecutor:
                         raise PhaseBlocked(
                             WaitReason.MISSING_REQUIREMENT, "Checkpoint requirement version changed"
                         )
-                    request = (
-                        request[:14000]
-                        + "\nVerified continuation checkpoint (semantic note is untrusted task data):\n"
-                        + json.dumps(rollover, ensure_ascii=True)
-                        + "\nContinue on the same checkout. Do not replay or reconstruct the old transcript."
-                    )
+                    try:
+                        request = continuation_request(request, rollover)
+                    except ValueError as exc:
+                        raise PhaseBlocked(WaitReason.MISSING_REQUIREMENT, str(exc)) from exc
                 if not native.native_session_id and native.checkpoint.get("handoff"):
                     handoff = native.checkpoint["handoff"]
                     request = handoff_request(
@@ -391,7 +428,49 @@ class SqlPhaseExecutor:
                     else:
                         request += supervisor_guidance
                     prompt = feedback if feedback is not None else request
+                invariants: tuple[str, ...] = ()
+                guidance = native.checkpoint.get("coordinator_guidance")
+                if guidance and not compaction and not continuity:
+                    packet = decode(json.dumps(guidance), "JSON_VERBOSE")
+                    if (packet.task_id, packet.requirement_revision, packet.current_sha) != (
+                        task.id,
+                        task.requirement_version,
+                        task.current_revision,
+                    ):
+                        raise PhaseBlocked(
+                            WaitReason.MISSING_REQUIREMENT, "Coordinator handoff is stale"
+                        )
+                    invariants = tuple(packet.payload.get("invariants", []))
+                    delta = str(packet.payload["request"])
+                    # Consume the typed delta even for a fresh, unstarted native generation.
+                    if delta not in prompt:
+                        prompt += "\nCurrent authorized change request:\n" + delta
+                    prompt += (
+                        "\nRequired invariants:\n"
+                        + json.dumps(list(invariants), ensure_ascii=False)
+                        if invariants
+                        else ""
+                    )
+                    if feedback is not None:
+                        feedback = prompt
+                    else:
+                        request = prompt
+                work = (
+                    work_packet(
+                        task.id,
+                        task.requirement_version,
+                        task.current_revision,
+                        prompt,
+                        repair=task.stage == "FIXING",
+                        invariants=invariants,
+                    )
+                    if not compaction and not continuity
+                    else None
+                )
                 manifest = Manifest(
+                    work_request=work,
+                    routed_models=routed_models,
+                    pricing_id=str(price.id) if price else None,
                     supervision_enabled=self.settings.supervisor_enabled
                     and native.harness != "patch"
                     and not compaction
@@ -403,6 +482,7 @@ class SqlPhaseExecutor:
                     else "development",
                     harness=native.harness,
                     model=native.model,
+                    provider=native.provider,
                     effort="low"
                     if bounded_repair
                     else TokenEfficiencyPolicy.parse(
@@ -435,7 +515,11 @@ class SqlPhaseExecutor:
                     self.settings, lease, native, compaction=compaction, continuity=continuity
                 )
                 environment = {
-                    "OPENAI_API_KEY" if native.provider == "openai" else "ANTHROPIC_API_KEY": key,
+                    {
+                        "openai": "OPENAI_API_KEY",
+                        "deepseek": "DEEPSEEK_API_KEY",
+                        "anthropic": "ANTHROPIC_API_KEY",
+                    }[native.provider]: key,
                     "HTTPS_PROXY": self.settings.developer_egress_proxy,
                     "HTTP_PROXY": self.settings.developer_egress_proxy,
                 }
@@ -545,7 +629,18 @@ class SqlPhaseExecutor:
                         "Developer did not finish; inspect its preserved session"
                         + (f" ({receipt.failure_code})" if receipt.failure_code else ""),
                     )
-                if receipt.summary.startswith("MILESTONE_COMPLETE\n"):
+                outcome = WorkOutcome(receipt.result.payload["outcome"]) if receipt.result else None
+                if outcome == WorkOutcome.NEEDS_HUMAN:
+                    raise PhaseBlocked(WaitReason.MISSING_REQUIREMENT, receipt.summary[-1000:])
+                if outcome == WorkOutcome.FAILED:
+                    raise PhaseBlocked(
+                        WaitReason.RUNTIME_FAILURE, "Developer reported a failed result"
+                    )
+                if (
+                    outcome == WorkOutcome.MILESTONE_COMPLETE
+                    or outcome is None
+                    and receipt.summary.startswith("MILESTONE_COMPLETE\n")
+                ):
                     if not token_policy.automatic_rollover or token_policy.mode != "ENFORCE":
                         raise PhaseBlocked(
                             WaitReason.MISSING_REQUIREMENT,
@@ -566,7 +661,11 @@ class SqlPhaseExecutor:
                             "Milestone checkpoint blocked; retained native context",
                         ) from exc
                     return await self.execute(lease)
-                if receipt.summary.strip().split("\n", 1)[0].strip() == "NEEDS_PLAN":
+                if (
+                    outcome == WorkOutcome.NEEDS_PLAN
+                    or outcome is None
+                    and receipt.summary.strip().split("\n", 1)[0].strip() == "NEEDS_PLAN"
+                ):
                     return Action.NEEDS_PLAN
                 return Action.IMPLEMENTED
             if lease.action == "RUN_VALIDATION":
