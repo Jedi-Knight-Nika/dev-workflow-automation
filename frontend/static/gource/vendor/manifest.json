@@ -1,0 +1,11 @@
+{
+  "upstream": "https://github.com/Posnet/gource-web",
+  "revision": "2ad10b412c2c2918046dbe2f4187ad9b880f9686",
+  "sha256": {
+    "COPYING": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903",
+    "gource-web.data": "6192ca7045f5a0d4b65c935598e6a000a49667408a7dcd344b685423cce821d7",
+    "gource-web.js": "552cc3fab23eb4cd8cd2f0233016cbf32394fbb584b1b7088816a4e8ca1db80a",
+    "gource-web.wasm": "ee32b50f855b2701307a02cc8d53295038c8db6fd2808bc1ff07d717c00ea910",
+    "source.tar.gz": "1a5fb56341557004b16dd2875d65aec9c9e0599480be9712f3d8daed138a4ab0"
+  }
+}

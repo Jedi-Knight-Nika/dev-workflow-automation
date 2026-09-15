@@ -12,6 +12,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.agent_runtime.domain.request_usage import with_request_count
 from app.agent_runtime.domain.usage import Pricing, Usage
 from app.agent_runtime.infrastructure.models import AIRun, DeveloperSession
 from app.agent_runtime.infrastructure.pricing_catalog import standard_price
@@ -60,6 +61,7 @@ class SqlSupervisor:
         self.decision_key = ""
         self.run_id: UUID
         self.pricing: Pricing
+        self.request_started = False
 
     async def admit(self) -> SupervisorDecision | None:
         sessions, settings, lease = self.sessions, self.settings, self.lease
@@ -208,13 +210,14 @@ class SqlSupervisor:
         payload, key, run_id, pricing = self.payload, self.key, self.run_id, self.pricing
         inventory = self.inventory
         started = monotonic()
+        self.request_started = True
         data = await request_decision(payload, key)
         raw = data.get("usage") or {}
         usage = normalized_usage("openai", raw)
         async with sessions.begin() as session:
             row = await session.get(AIRun, run_id, with_for_update=True)
             assert row
-            row.raw_usage, row.usage_complete = raw, usage.complete
+            row.raw_usage, row.usage_complete = with_request_count(raw, 1), usage.complete
             row.input_tokens, row.output_tokens = usage.input_tokens, usage.output_tokens
             row.cache_read_tokens, row.cache_write_tokens = (
                 usage.cache_read_input_tokens,
@@ -268,6 +271,7 @@ class SqlSupervisor:
         async with sessions.begin() as session:
             row = await session.get(AIRun, run_id, with_for_update=True)
             if row:
+                row.raw_usage = with_request_count(row.raw_usage or {}, int(self.request_started))
                 row.status, row.failure_code = "FAILED", type(exc).__name__[:100]
                 row.finished_at = datetime.now(UTC)
 

@@ -60,6 +60,51 @@ async function mockTaskApi(page: Page, handle: (route: Route, path: string) => P
   });
 }
 
+test('prerequisite controls save explicit changes and retain state after a conflict', async ({
+  page
+}) => {
+  let dependencies: { id: string; title: string; status: string }[] = [];
+  const writes: Record<string, unknown>[] = [];
+  let conflict = false;
+  await mockTaskApi(page, async (route, path) => {
+    if (path === `/api/tasks/${first}`)
+      await route.fulfill({ json: { ...task(first, 'PAUSED'), dependencies } });
+    else if (path === '/api/tasks') await route.fulfill({ json: [task(second)] });
+    else if (path === `/api/tasks/${first}/dependencies`) {
+      const body = route.request().postDataJSON();
+      writes.push(body);
+      if (conflict)
+        await route.fulfill({
+          status: 409,
+          json: { detail: 'Prerequisites changed; refresh the task before saving' }
+        });
+      else {
+        dependencies = body.dependency_ids.length
+          ? [{ id: second, title: 'Second task', status: 'ACTIVE' }]
+          : [];
+        await route.fulfill({ status: 204 });
+      }
+    } else return false;
+    return true;
+  });
+  await page.goto(`/tasks/${first}`);
+  const panel = page.getByRole('region', { name: 'Task prerequisites' });
+  await panel.getByLabel('Find prerequisite task').fill('Second');
+  await panel.getByRole('button', { name: 'Search tasks' }).click();
+  await panel.getByRole('button', { name: 'Add prerequisite' }).click();
+  await expect(
+    panel.getByText('Execution waits until every prerequisite is merged.')
+  ).toBeVisible();
+  expect(writes[0]).toEqual({ dependency_ids: [second], expected_dependency_ids: [] });
+  conflict = true;
+  await panel.getByRole('button', { name: 'Remove prerequisite' }).click();
+  await expect(panel.getByRole('alert')).toContainText('Prerequisites changed');
+  await expect(panel.getByRole('link', { name: 'Second task' })).toBeVisible();
+  conflict = false;
+  await panel.getByRole('button', { name: 'Remove prerequisite' }).click();
+  await expect(panel.getByText('This task has no prerequisites.')).toBeVisible();
+});
+
 test('navigation clears old controls and ignores a late Coordinator mode', async ({ page }) => {
   const destination = deferred(),
     oldCoordination = deferred();

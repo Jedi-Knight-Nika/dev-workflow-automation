@@ -12,6 +12,7 @@ from app.agent_runtime.infrastructure.reservations import periodic_usage
 from app.coordinator.infrastructure.inbox import human_response
 from app.coordinator.infrastructure.models import CoordinatorAction, CoordinatorRun, HumanRequest
 from app.coordinator.infrastructure.queries import latest_human_request
+from app.engineering.infrastructure.dependencies import dependency_views
 from app.engineering.infrastructure.message_models import TaskMessage
 from app.engineering.infrastructure.task_models import Job, Task, TaskEvent
 from app.platform.configuration.settings import Settings
@@ -225,6 +226,7 @@ class CoordinationAdministration:
                 .limit(200)
             )
             rows = (await session.execute(query)).all()
+            dependencies = await dependency_views(session, [task.id for task, _, _ in rows])
             total = int(await session.scalar(select(func.count(Task.id)).where(*conditions)) or 0)
             active = int(
                 await session.scalar(
@@ -254,9 +256,16 @@ class CoordinationAdministration:
             )
             entries = []
             for task, team_name, job in rows:
+                blockers = [
+                    str(value.id)
+                    for value in dependencies.get(task.id, [])
+                    if value.status != "MERGED"
+                ]
                 lane = (
                     "RUNNING"
                     if job and job.state in {JobState.CLAIMED, JobState.RUNNING}
+                    else "WAITING_DEPENDENCY"
+                    if blockers and task.status in {"NEW", "ACTIVE"}
                     else "QUEUED"
                     if job
                     else "NEEDS_YOU"
@@ -275,6 +284,7 @@ class CoordinationAdministration:
                         "lane": lane,
                         "stage": task.stage,
                         "wait_reason": task.wait_reason,
+                        "dependency_blockers": blockers,
                     }
                 )
             now = datetime.now(UTC)

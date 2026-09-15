@@ -11,6 +11,7 @@ import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.agent_runtime.domain.request_usage import with_request_count
 from app.agent_runtime.domain.usage import Pricing, Usage
 from app.agent_runtime.infrastructure.models import AIRun
 from app.agent_runtime.infrastructure.pricing_catalog import standard_price
@@ -155,7 +156,7 @@ class MeteredDecisionModel:
             async with self.sessions.begin() as session:
                 row = await session.get(AIRun, receipt_id, with_for_update=True)
                 assert row
-                row.raw_usage, row.usage_complete = raw, usage.complete
+                row.raw_usage, row.usage_complete = with_request_count(raw, 1), usage.complete
                 row.input_tokens, row.output_tokens = usage.input_tokens, usage.output_tokens
                 row.cache_read_tokens, row.cache_write_tokens = (
                     usage.cache_read_input_tokens,
@@ -179,6 +180,7 @@ class MeteredDecisionModel:
             async with self.sessions.begin() as session:
                 row = await session.get(AIRun, receipt_id, with_for_update=True)
                 if row:
+                    row.raw_usage = with_request_count(row.raw_usage or {}, 1)
                     row.status, row.failure_code, row.finished_at = (
                         "FAILED",
                         type(exc).__name__,

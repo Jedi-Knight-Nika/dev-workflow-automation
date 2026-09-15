@@ -41,9 +41,10 @@ def supporting_sessions() -> async_sessionmaker[AsyncSession]:
 
 
 async def render_metrics() -> bytes:
+    from app.bootstrap.activity import render_activity_metrics
     from app.observability.infrastructure.instrumentation import instrumentation
 
-    return await instrumentation.render(supporting_sessions())
+    return await instrumentation.render(supporting_sessions()) + await render_activity_metrics()
 
 
 def observe_request(path: str, method: str, status: int, seconds: float) -> None:

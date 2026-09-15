@@ -10,6 +10,7 @@ from app.agent_runtime.domain.envelope import AgentEnvelope
 from app.agent_runtime.domain.handoffs import validate_result, work_packet
 from app.agent_runtime.infrastructure.models import AIRun, DeveloperSession
 from app.agent_runtime.infrastructure.reservations import consumed_cost
+from app.engineering.domain.causality import TransitionCause
 from app.engineering.domain.lifecycle import Action
 from app.engineering.infrastructure.jobs import enqueue_phase
 from app.engineering.infrastructure.lifecycle import record_transition
@@ -17,7 +18,9 @@ from app.engineering.infrastructure.task_models import Job, Task
 from app.platform.scheduling.states import JobState
 
 
-async def request_validation(session: AsyncSession, task: Task, *, actor: str) -> None:
+async def request_validation(
+    session: AsyncSession, task: Task, *, actor: str, cause: TransitionCause | None = None
+) -> None:
     """Caller holds the task lock and has verified Team/repository/operator authority."""
     if task.status != "ACTIVE" or task.stage not in {"DEVELOPING", "FIXING", "VALIDATING"}:
         raise ValueError("Validation requires an active candidate in development or validation")
@@ -91,6 +94,7 @@ async def request_validation(session: AsyncSession, task: Task, *, actor: str) -
             Action.VALIDATE_CANDIDATE,
             expected_version=task.lifecycle_version,
             actor=actor,
+            cause=cause,
         )
     await session.flush()
-    await enqueue_phase(session, task)
+    await enqueue_phase(session, task, cause=cause)

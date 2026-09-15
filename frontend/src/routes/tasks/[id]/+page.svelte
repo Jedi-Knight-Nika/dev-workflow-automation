@@ -16,6 +16,7 @@
   import DeveloperSessionPanel from '$lib/components/task-detail/DeveloperSessionPanel.svelte';
   import JobList from '$lib/components/task-detail/JobList.svelte';
   import RunList from '$lib/components/task-detail/RunList.svelte';
+  import TaskDependencies from '$lib/components/task-detail/TaskDependencies.svelte';
   import TimelineList from '$lib/components/task-detail/TimelineList.svelte';
   import ValidationList from '$lib/components/task-detail/ValidationList.svelte';
   import { ApiError } from '$lib/api';
@@ -246,6 +247,7 @@
         onMode={(mode) => (coordinationMode = mode)}
       />{/key}
     <TaskControls {task} {commanding} onTaskCommand={command} />
+    {#key task.id}<TaskDependencies {task} onChanged={refresh} />{/key}
     <TaskMetricsPanel {metrics} taskId={task.id} taskTitle={task.title} />
     {#key task.id}<DeveloperSessionPanel taskId={task.id} onChanged={refresh} />{/key}
     <section class="min-w-0 xl:col-span-2">

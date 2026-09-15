@@ -269,12 +269,15 @@ The Python backend is a modular monolith:
 - `repositories`: inventory and runtime profiles;
 - `observability`: typed metrics, attribution, summaries, availability, and incidents;
 - `analytics`: efficiency, forecasts, and accuracy;
+- `activity`: optional read-only activity projection, history queries, and replay metadata;
 - `supervisor/infrastructure`: bounded task decisions, provider wire schemas, and durable-memory adapters; recovery uses the shared engineering lease guard rather than depending on the Supervisor service;
 - `platform`: configuration, database composition, integration storage, scheduling, and telemetry;
 - `interfaces/http`: transport validation and errors;
 - `bootstrap`: dependency and scheduler composition.
 
 Domain modules do not import web frameworks, ORM, Docker, or provider SDKs. Application services depend on protocols and domain values. Infrastructure implements persistence and external boundaries.
+
+The [activity replay guide](docs/activity-visualizer.md) describes the separate projector process, lazy dashboard viewer, live sequence resumption, deployment settings, and historical data limits. It reads existing engineering records without adding visualization writes to task execution.
 
 One PostgreSQL database contains settings, integrations, Teams, profiles, automation, repositories, tasks, messages, events, snapshots, assignments, jobs, phases, sessions, contexts, checkpoints, token policy, AI/local receipts, prices, validations, reviews, webhook delivery, status outbox, workers, monitoring settings, runtime profiles, runner bindings/summaries, infrastructure observations/events, incidents, and forecasts.
 

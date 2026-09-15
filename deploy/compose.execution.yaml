@@ -46,6 +46,12 @@ services:
       - ${EXECUTION_DATA_ROOT}:${EXECUTION_DATA_ROOT}
     networks: [default, interpreter-private]
 
+  activity:
+    environment:
+      WORKSPACE_ROOT: ${EXECUTION_DATA_ROOT}/workspaces
+    volumes:
+      - ${EXECUTION_DATA_ROOT}/workspaces:${EXECUTION_DATA_ROOT}/workspaces:ro
+
   worker:
     environment:
       <<: *execution-environment

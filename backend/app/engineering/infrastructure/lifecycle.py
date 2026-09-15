@@ -5,6 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.delivery.infrastructure.status_sync import enqueue_status
+from app.engineering.domain.causality import TransitionCause
 from app.engineering.domain.lifecycle import (
     Action,
     EngineeringState,
@@ -41,6 +42,7 @@ async def record_transition(
     actor: str,
     wait_reason: WaitReason = WaitReason.NONE,
     external_wait: bool = False,
+    cause: TransitionCause | None = None,
 ) -> EngineeringState:
     """Atomic state/history update; caller owns commit and external authority."""
     if not actor.strip():
@@ -122,12 +124,15 @@ async def record_transition(
             source="engineering",
             event_type="TASK_LIFECYCLE_CHANGED",
             payload={
+                **(cause.facts() if cause else {}),
                 "actor": actor,
                 "action": action.value,
                 "from_status": before.status.value,
                 "to_status": after.status.value,
                 "from_stage": before.stage.value,
                 "to_stage": after.stage.value,
+                "from_manual_takeover": before.manual_takeover,
+                "manual_takeover": after.manual_takeover,
                 "wait_reason": after.wait_reason.value,
                 "requirement_version": after.requirement_version,
                 "version": task.lifecycle_version,

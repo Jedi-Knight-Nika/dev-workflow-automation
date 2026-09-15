@@ -18,6 +18,7 @@ from openai_codex.generated.v2_all import CommandExecResponse, ThreadStartRespon
 
 from app.agent_runtime.application.developer_progress_governor import DeveloperProgressGovernor
 from app.agent_runtime.application.harness import HarnessSettings, TurnReceipt, WorkspaceUnavailable
+from app.agent_runtime.domain.request_usage import with_request_count
 from app.agent_runtime.domain.usage import Usage
 from app.agent_runtime.infrastructure.checkpoints import workspace_facts
 from app.agent_runtime.infrastructure.responses_tools import TOOLS
@@ -67,6 +68,7 @@ class ResponsesHarness:
         self.running: asyncio.Task[Any] | None = None
         self.supervised: set[str] = set()
         self.tool_history: list[dict[str, str]] = []
+        self.request_count = 0
 
     async def start(self) -> str:
         if self.settings.read_only:
@@ -159,6 +161,7 @@ class ResponsesHarness:
         }
 
     async def run_turn(self, prompt: str) -> TurnReceipt:
+        self.request_count = 0
         self.running = asyncio.current_task()
         provider_seconds = 0.0
         totals = {
@@ -218,6 +221,7 @@ class ResponsesHarness:
                         break
                     uncertain = True
                     request_started = monotonic()
+                    self.request_count += 1
                     response = await self.http.post(
                         "https://api.openai.com/v1/responses",
                         json=payload,
@@ -406,7 +410,9 @@ class ResponsesHarness:
             summary,
             status,
             Usage() if uncertain else measured_usage(totals),
-            raw_usage={"observed": totals, "usage_complete": not uncertain},
+            raw_usage=with_request_count(
+                {"observed": totals, "usage_complete": not uncertain}, self.request_count
+            ),
             provider_duration_ms=int(provider_seconds * 1000) if not uncertain else None,
             failure_code=failure,
             token_efficiency=snapshot,

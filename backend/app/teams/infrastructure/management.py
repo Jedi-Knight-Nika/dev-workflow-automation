@@ -25,7 +25,7 @@ from app.teams.domain.automation import AutomationPolicy
 from app.teams.domain.profiles import default_profiles
 from app.teams.infrastructure.automation import TeamAutomationPolicy, policy_payload
 from app.teams.infrastructure.profiles import initialize_profiles
-from app.teams.infrastructure.team_models import TaskAssignment, Team
+from app.teams.infrastructure.team_models import TaskAssignment, Team, TeamCapacityChange
 
 
 class SqlAlchemyTeamManagementWorkflow:
@@ -60,6 +60,9 @@ class SqlAlchemyTeamManagementWorkflow:
         self._session.add(team)
         try:
             await self._session.flush()
+            self._session.add(
+                TeamCapacityChange(team_id=team.id, capacity=team.max_concurrent_tasks)
+            )
             await initialize_profiles(self._session, team.id, default_profiles())
             self._session.add(
                 TeamAutomationPolicy(
@@ -74,13 +77,17 @@ class SqlAlchemyTeamManagementWorkflow:
 
     async def update(self, team_id: uuid.UUID, command: SaveTeamCommand) -> TeamView:
         self._validate(command)
-        team = await self._session.get(Team, team_id)
+        team = await self._session.get(Team, team_id, with_for_update=True, populate_existing=True)
         if team is None or team.archived_at:
             raise TeamNotFound("Team not found")
         team.name = command.name.strip()
         team.description = command.description.strip()
         team.enabled = command.enabled
-        team.max_concurrent_tasks = command.max_concurrent_tasks
+        if team.max_concurrent_tasks != command.max_concurrent_tasks:
+            self._session.add(
+                TeamCapacityChange(team_id=team.id, capacity=command.max_concurrent_tasks)
+            )
+            team.max_concurrent_tasks = command.max_concurrent_tasks
         team.repository_ids = [str(item) for item in command.repository_ids]
         try:
             await self._session.commit()

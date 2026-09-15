@@ -51,6 +51,12 @@ services:
       LINEAR_WEBHOOK_SECRET: ${LINEAR_WEBHOOK_SECRET:?Set LINEAR_WEBHOOK_SECRET}
       WORKSPACE_ROOT: /data/workspaces
       SCHEDULER_ENABLED: "false"
+      ACTIVITY_ENABLED: ${ACTIVITY_ENABLED:-true}
+      ACTIVITY_COLLECT_FILES: ${ACTIVITY_COLLECT_FILES:-true}
+      ACTIVITY_MAX_EVENTS: ${ACTIVITY_MAX_EVENTS:-5000}
+      ACTIVITY_MAX_FILES: ${ACTIVITY_MAX_FILES:-5000}
+      ACTIVITY_MAX_TASKS: ${ACTIVITY_MAX_TASKS:-200}
+      ACTIVITY_MAX_REPLAY_DAYS: ${ACTIVITY_MAX_REPLAY_DAYS:-90}
       OBSERVER_ENABLED: ${OBSERVER_ENABLED:-true}
       OBSERVER_LOCAL_AI_ENABLED: ${OBSERVER_LOCAL_AI_ENABLED:-false}
       OBSERVER_MODEL: ${OBSERVER_MODEL:-qwen3.5:4b}
@@ -109,6 +115,32 @@ services:
     expose:
       - "3000"
     restart: unless-stopped
+
+  activity:
+    build:
+      context: ../backend
+      target: api
+    command: [.venv/bin/python, -m, app.activity_runner]
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL with URL-encoded credentials}
+      WORKSPACE_ROOT: /data/workspaces
+      ACTIVITY_ENABLED: ${ACTIVITY_ENABLED:-true}
+      ACTIVITY_COLLECT_FILES: ${ACTIVITY_COLLECT_FILES:-true}
+      ACTIVITY_POLL_SECONDS: ${ACTIVITY_POLL_SECONDS:-5}
+      ACTIVITY_FILE_RETENTION_DAYS: ${ACTIVITY_FILE_RETENTION_DAYS:-0}
+    depends_on:
+      backend:
+        condition: service_healthy
+    volumes:
+      - workspaces:/data/workspaces:ro
+    init: true
+    read_only: true
+    tmpfs: [/tmp]
+    pids_limit: 32
+    mem_limit: 256m
+    cpus: 0.25
+    restart: unless-stopped
+
 
   backup:
     image: postgres:16-alpine

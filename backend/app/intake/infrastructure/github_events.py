@@ -92,6 +92,11 @@ async def process_github_event(
     )
     if repository is None:
         return
+    if event_type in {"deployment", "deployment_status"}:
+        from app.delivery.infrastructure.deployments import record_deployment
+
+        await record_deployment(session, repository.id, event_type, payload)
+        return
     if event_type == "issues":
         from app.intake.infrastructure.github_issues import issue_event
 

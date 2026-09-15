@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.delivery.domain.merge import MergePolicy
 from app.delivery.infrastructure.git_transport import github_token
 from app.delivery.infrastructure.github import GitHubDelivery, github_client
+from app.delivery.infrastructure.merge_history import observe_merge
 from app.delivery.infrastructure.review_state import review_state
 from app.engineering.application.jobs import PhaseBlocked, PhaseLease
 from app.engineering.domain.lifecycle import Action, WaitReason
@@ -95,6 +96,7 @@ async def merge_phase(sessions: async_sessionmaker[AsyncSession], lease: PhaseLe
             )
             if pull.get("merged") and pull["head"]["sha"] == task.current_revision:
                 # Reconcile a lost merge response, never submit a second mutation.
+                await observe_merge(session, task, repository.id, pull.get("merge_commit_sha"))
                 return Action.MERGED
             blockers = policy.blockers(evidence)
             if blockers:

@@ -13,6 +13,7 @@ from app.engineering.application.ports.task_queries import (
     TaskRepositoryScopeView,
     TaskView,
 )
+from app.engineering.infrastructure.dependencies import dependency_views
 from app.engineering.infrastructure.repositories import task_to_domain
 from app.engineering.infrastructure.task_models import Task, TaskRepositoryScope
 from app.intake.infrastructure.task_snapshot import ExternalTaskSnapshot
@@ -145,6 +146,7 @@ class SqlAlchemyTaskQueries:
         if not records:
             return []
         task_ids = [record.id for record in records]
+        dependencies = await dependency_views(self._session, task_ids)
         snapshots = list(
             (
                 await self._session.scalars(
@@ -229,6 +231,7 @@ class SqlAlchemyTaskQueries:
                 tuple(record.labels or []),
                 float(record.estimate) if record.estimate is not None else None,
                 tuple(scopes_by_task.get(record.id, [])),
+                tuple(dependencies.get(record.id, [])),
             )
             for record in records
         ]

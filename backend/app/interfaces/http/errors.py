@@ -7,11 +7,11 @@ from fastapi import HTTPException
 
 
 @contextmanager
-def service_errors() -> Iterator[None]:
-    """Use only for endpoints whose contract maps missing/conflicting state to 404/409."""
+def service_errors(*, value_status: int = 409) -> Iterator[None]:
+    """Missing state is 404; callers may select the status for invalid input."""
     try:
         yield
     except LookupError as exc:
         raise HTTPException(404, str(exc)) from exc
     except ValueError as exc:
-        raise HTTPException(409, str(exc)) from exc
+        raise HTTPException(value_status, str(exc)) from exc

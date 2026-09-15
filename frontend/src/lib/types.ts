@@ -28,6 +28,7 @@ export type Task = {
   project_name?: string | null;
   labels?: string[];
   estimate?: number | null;
+  dependencies?: Array<{ id: string; title: string; status: string }>;
   repository_scopes?: Array<{
     repository_id: string;
     repository_name: string;

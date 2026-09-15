@@ -15,6 +15,7 @@
     ['QUEUED', 'Queued'],
     ['NEEDS_YOU', 'Needs you'],
     ['WAITING_EXTERNAL', 'Waiting externally'],
+    ['WAITING_DEPENDENCY', 'Waiting for prerequisites'],
     ['BACKLOG', 'Backlog']
   ];
   const refresh = createLiveRefresh(async () => {

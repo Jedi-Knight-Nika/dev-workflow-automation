@@ -10,7 +10,8 @@ export default tseslint.config(
       'build/**',
       'node_modules/**',
       'playwright-report/**',
-      'test-results/**'
+      'test-results/**',
+      'static/gource/vendor/**'
     ]
   },
   eslint.configs.recommended,

@@ -215,6 +215,7 @@ def test_new_file_requires_absence_and_source_scope(tmp_path):
     ],
 )
 async def test_bounded_execution(tmp_path, monkeypatch, scenario):
+    snapshots = []
     settings = HarnessSettings(
         model="gpt-5.6-terra",
         workspace=tmp_path,
@@ -222,6 +223,7 @@ async def test_bounded_execution(tmp_path, monkeypatch, scenario):
         effort="low",
         max_cost_usd=Decimal("0.001") if scenario == "budget" else Decimal(5),
         pricing=Pricing(Decimal(2), Decimal(12), Decimal("0.2"), Decimal("2.5")),
+        progress_callback=lambda snapshot: snapshots.append(json.loads(json.dumps(snapshot))),
     )
     h = patch_pipeline.PatchPipelineHarness(settings)
     h.root, h.logs = tmp_path / "state", tmp_path / "logs"
@@ -340,6 +342,9 @@ async def test_bounded_execution(tmp_path, monkeypatch, scenario):
         "budget": 0,
     }[scenario]
     assert len(calls) == expected
+    assert receipt.raw_usage["request_count"] == expected
+    assert receipt.raw_usage["request_count_complete"] is True
+    assert all(len(json.dumps(snapshot)) <= 8000 for snapshot in snapshots)
     assert receipt.status == (
         "completed"
         if scenario in {"success", "repair", "investigate", "investigate_search"}
@@ -355,6 +360,11 @@ async def test_bounded_execution(tmp_path, monkeypatch, scenario):
             {"paths": ["first.py", "second.py"], "intermediate": False},
         )
         assert receipt.token_efficiency["completed_work_units"] == 2
+        units = receipt.token_efficiency["work_plans"][0]["units"]
+        assert units == [
+            {"id": "first", "depends_on": [], "status": "READY"},
+            {"id": "second", "depends_on": [0], "status": "READY"},
+        ]
         again = await h.run_turn(prompt)
         assert again.failure_code == "PATCH_ALREADY_ATTEMPTED"
         assert len(calls) == expected

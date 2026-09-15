@@ -23,6 +23,7 @@ from app.coordinator.infrastructure.models import (
 from app.coordinator.infrastructure.queries import latest_human_request, requeue_run_events
 from app.coordinator.infrastructure.schemas import parse_decision
 from app.delivery.infrastructure.status_sync import enqueue_status
+from app.engineering.domain.causality import TransitionCause
 from app.engineering.domain.lifecycle import Action, WaitReason
 from app.engineering.infrastructure.controls import control_task
 from app.engineering.infrastructure.job_queue import request_execution
@@ -149,15 +150,23 @@ class ActionExecutor:
                 or repository.id not in policy.repository_ids
             ):
                 raise ValueError("Repository validation scope was revoked")
-            await request_validation(session, task, actor="coordinator")
+            await request_validation(
+                session, task, actor="coordinator", cause=TransitionCause(action_id=action.id)
+            )
         if decision.action == Directive.SYNC_STATUS:
             await enqueue_status(session, task.id, task.lifecycle_version, task.status, task.stage)
         actor = "coordinator"
+        cause = TransitionCause(action_id=action.id)
         if decision.action == Directive.ASK_HUMAN:
             if human:
                 human.status = "CANCELLED"
             await control_task(
-                session, task, Action.BLOCK, actor=actor, wait_reason=WaitReason.MISSING_REQUIREMENT
+                session,
+                task,
+                Action.BLOCK,
+                actor=actor,
+                wait_reason=WaitReason.MISSING_REQUIREMENT,
+                cause=cause,
             )
             session.add(
                 HumanRequest(
@@ -212,13 +221,14 @@ class ActionExecutor:
             }
             await current_requirement(session, task, addition=amendment)
             if native:
-                await control_task(session, task, Action.PAUSE, actor=actor)
+                await control_task(session, task, Action.PAUSE, actor=actor, cause=cause)
                 await record_transition(
                     session,
                     task.id,
                     Action.REVISE_REQUIREMENT,
                     expected_version=task.lifecycle_version,
                     actor=actor,
+                    cause=cause,
                 )
                 native.checkpoint = {
                     **native.checkpoint,
@@ -238,20 +248,26 @@ class ActionExecutor:
                         )
                     ),
                 }
-                await control_task(session, task, Action.RESUME, actor=actor)
+                await control_task(session, task, Action.RESUME, actor=actor, cause=cause)
             else:
                 task.requirement_version += 1
-                await request_execution(session, task, actor=actor)
+                await request_execution(session, task, actor=actor, cause=cause)
             session.add(
                 TaskEvent(
                     task_id=task.id,
                     source=actor,
                     event_type=ACCEPTED_REQUIREMENT,
-                    payload={**amendment, "requirement_revision": task.requirement_version},
+                    payload={
+                        **amendment,
+                        "requirement_revision": task.requirement_version,
+                        "action_id": str(action.id),
+                    },
                 )
             )
         elif decision.action in {Directive.PAUSE, Directive.CANCEL}:
-            await control_task(session, task, Action(decision.action.value), actor=actor)
+            await control_task(
+                session, task, Action(decision.action.value), actor=actor, cause=cause
+            )
         if event.context.get("review_cycle_id"):
             cycle = await session.get(
                 ReviewCycle, UUID(str(event.context["review_cycle_id"])), with_for_update=True

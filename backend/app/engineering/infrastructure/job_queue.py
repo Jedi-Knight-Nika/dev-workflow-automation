@@ -8,6 +8,8 @@ from sqlalchemy import func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
+from app.engineering.domain.causality import TransitionCause
+from app.engineering.infrastructure.dependencies import lock_admission, unmet_dependencies
 from app.engineering.infrastructure.task_models import Job, Task, TaskEvent
 from app.platform.scheduling.states import JobState
 from app.teams.infrastructure.team_models import Team
@@ -29,7 +31,9 @@ async def record_event(
     session.add(TaskEvent(task_id=task_id, event_type=event_type, payload=payload, source=source))
 
 
-async def request_execution(session: AsyncSession, task: Task, *, actor: str) -> None:
+async def request_execution(
+    session: AsyncSession, task: Task, *, actor: str, cause: TransitionCause | None = None
+) -> None:
     """Register a new task or record an actionable, free configuration wait."""
     from app.engineering.domain.lifecycle import Action, WaitReason
     from app.engineering.infrastructure.enrollment import enroll
@@ -38,7 +42,7 @@ async def request_execution(session: AsyncSession, task: Task, *, actor: str) ->
 
     try:
         async with session.begin_nested():
-            await enroll(session, task, get_settings(), actor=actor)
+            await enroll(session, task, get_settings(), actor=actor, cause=cause)
     except ValueError as exc:
         await session.refresh(task)
         if task.status in {"NEW", "ACTIVE", "WAITING_HUMAN"}:
@@ -49,6 +53,7 @@ async def request_execution(session: AsyncSession, task: Task, *, actor: str) ->
                 expected_version=task.lifecycle_version,
                 actor=actor,
                 wait_reason=WaitReason.MISSING_CONFIGURATION,
+                cause=cause,
             )
         await record_event(
             session,
@@ -70,10 +75,7 @@ async def claim_next_job(
     now = datetime.now(UTC)
     # All controllers share admission capacity. This short lock covers claiming only,
     # never execution, HTTP calls or model inference.
-    if (
-        global_developer_slots is not None or validation_slots is not None
-    ) and session.get_bind().dialect.name == "postgresql":
-        await session.execute(text("SELECT pg_advisory_xact_lock(741963206)"))
+    await lock_admission(session)
     candidate = aliased(Job)
     already_running = (
         select(candidate.id)
@@ -139,6 +141,7 @@ async def claim_next_job(
                 occupied < Team.max_concurrent_tasks,
             ),
             ~already_running,
+            ~unmet_dependencies(),
             *limits,
         )
         .order_by(Job.priority, last_dispatch.asc().nullsfirst(), Job.created_at)

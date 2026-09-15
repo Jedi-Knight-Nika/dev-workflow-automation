@@ -168,11 +168,27 @@ class CoordinatorProcessor:
                 for item in admitted:
                     item.status, item.run_id = "FAILED", failed.id
                 return None
+            from app.engineering.infrastructure.dependencies import dependency_views
+
+            prerequisites = (await dependency_views(session, [task.id])).get(task.id, [])
             packet = {
                 "trigger_provider": latest.provider,
                 "original_requirement": requirement,
                 "status": task.status,
                 "stage": task.stage,
+                **(
+                    {
+                        "prerequisites": [
+                            {"id": str(value.id), "title": value.title, "status": value.status}
+                            for value in prerequisites
+                        ],
+                        "waiting_for_prerequisites": any(
+                            value.status != "MERGED" for value in prerequisites
+                        ),
+                    }
+                    if prerequisites
+                    else {}
+                ),
                 "current_sha": task.current_revision,
                 "requirement_revision": task.requirement_version,
                 "events": [

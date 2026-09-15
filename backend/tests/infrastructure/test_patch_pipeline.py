@@ -211,6 +211,8 @@ async def test_one_patch_and_at_most_one_repair(
     monkeypatch.setattr(patch_pipeline.httpx, "AsyncClient", lambda **kwargs: client)
     receipt = await harness.run_turn("Move the window, not its contents")
     assert len(requests) == expected_calls
+    assert receipt.raw_usage["request_count"] == expected_calls
+    assert receipt.raw_usage["request_count_complete"] is True
     assert receipt.status == expected_status
     assert receipt.usage.input_tokens == expected_calls * 1000
     assert any(check["name"] == "format" for check in harness.checks["checks"])

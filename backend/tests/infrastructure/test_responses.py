@@ -133,6 +133,8 @@ async def test_compound_check_has_no_wait_turn_and_uncertain_usage_is_not_zero(
     client = httpx.AsyncClient(transport=httpx.MockTransport(handle))
     monkeypatch.setattr(responses.httpx, "AsyncClient", lambda **kwargs: client)
     receipt = await harness.run_turn("Move and resize the window, not its contents")
+    assert receipt.raw_usage["request_count"] == len(requests)
+    assert receipt.raw_usage["request_count_complete"] is True
     if disconnect:
         assert len(requests) == 1
         assert not receipt.usage.complete

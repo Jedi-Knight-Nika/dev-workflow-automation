@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.agent_runtime.infrastructure.models import DeveloperSession
 from app.agent_runtime.infrastructure.versions import HARNESS_VERSIONS
 from app.delivery.infrastructure.status_sync import enqueue_status
+from app.engineering.domain.causality import TransitionCause
 from app.engineering.infrastructure.jobs import enqueue_phase
 from app.engineering.infrastructure.models import TaskPhaseRun
 from app.engineering.infrastructure.task_models import Job, Task, TaskEvent
@@ -20,7 +21,14 @@ from app.teams.infrastructure.models import TeamAgentProfile
 from app.teams.infrastructure.team_models import Team
 
 
-async def enroll(session: AsyncSession, task: Task, settings: Settings, *, actor: str) -> None:
+async def enroll(
+    session: AsyncSession,
+    task: Task,
+    settings: Settings,
+    *,
+    actor: str,
+    cause: TransitionCause | None = None,
+) -> None:
     if await session.scalar(select(DeveloperSession.id).where(DeveloperSession.task_id == task.id)):
         return
     if task.team_id is None or task.repository_id is None:
@@ -114,11 +122,15 @@ async def enroll(session: AsyncSession, task: Task, settings: Settings, *, actor
             task_id=task.id,
             source=actor,
             event_type="ENGINEERING_TASK_ENROLLED",
-            payload={"repository_id": str(repository.id), "profile_id": str(profile.id)},
+            payload={
+                "repository_id": str(repository.id),
+                "profile_id": str(profile.id),
+                **(cause.facts() if cause else {}),
+            },
         )
     )
     await session.flush()
-    await enqueue_phase(session, task)
+    await enqueue_phase(session, task, cause=cause)
 
 
 def prepare_directories(workspace: Path, state: Path, task_id: str, settings: Settings) -> None:

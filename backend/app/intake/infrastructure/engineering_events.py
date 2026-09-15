@@ -11,8 +11,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.agent_runtime.infrastructure.models import DeveloperSession
 from app.delivery.infrastructure.git_transport import github_token
 from app.delivery.infrastructure.github import GitHubDelivery, github_client
+from app.delivery.infrastructure.merge_history import observe_merge
 from app.delivery.infrastructure.review_state import review_state
 from app.delivery.infrastructure.workflow import delivery_gate
+from app.engineering.domain.causality import TransitionCause
 from app.engineering.domain.lifecycle import Action, WaitReason
 from app.engineering.infrastructure.controls import control_task
 from app.engineering.infrastructure.jobs import enqueue_phase
@@ -20,6 +22,7 @@ from app.engineering.infrastructure.lifecycle import record_transition
 from app.engineering.infrastructure.models import ReviewCycle
 from app.engineering.infrastructure.task_models import Task, TaskEvent
 from app.intake.application.interpret import InterpretEvent
+from app.intake.domain.ci import ci_observation
 from app.intake.domain.events import Event, Intent, requirement_fingerprint
 from app.intake.infrastructure.authorization import actor_allowed
 from app.intake.infrastructure.observed_reviews import observe_review_messages
@@ -94,6 +97,7 @@ async def apply_pending_feedback(session: AsyncSession, task: Task) -> bool:
         Action.REVIEW_FIX,
         expected_version=task.lifecycle_version,
         actor="github-review",
+        cause=TransitionCause(review_ids=tuple(row.id for row in rows)),
     )
     await enqueue_phase(session, task)
     return True
@@ -135,6 +139,17 @@ async def github_event(
     )
     session.add(cycle)
     await session.flush()
+    ci = ci_observation(repository.id, kind, payload)
+    if ci:
+        session.add(
+            TaskEvent(
+                task_id=task.id,
+                source="github",
+                event_type="CI_CHECK_UPDATED",
+                external_event_id=f"ci:{task.id}:{event_id}",
+                payload={**ci, "review_cycle_id": str(cycle.id)},
+            )
+        )
     if kind in {
         "issue_comment",
         "pull_request_review_comment",
@@ -268,6 +283,7 @@ async def github_event(
         # Reconcile a fact already confirmed by GitHub (including a human merge),
         # not authority to submit a merge mutation. Paused work was excluded above.
         cycle.decision = "MERGED_EXTERNALLY"
+        await observe_merge(session, task, repository.id, pull.get("merge_commit_sha"))
         await record_transition(
             session,
             task.id,

@@ -136,6 +136,7 @@ async def test_create_task_use_case_rolls_back_as_one_transaction() -> None:
         "analytics",
         "supervisor",
         "coordinator",
+        "activity",
     ],
 )
 @pytest.mark.parametrize("layer", ["domain", "application"])
@@ -171,6 +172,16 @@ def test_adapters_never_import_http_contracts():
         if "infrastructure" not in path.parts:
             continue
         assert not any("app.interfaces" in name for name in imported_modules(path)), path
+
+
+def test_engineering_execution_never_depends_on_activity_projection():
+    root = BACKEND_ROOT / "app"
+    for context in ("engineering", "agent_runtime", "coordinator", "delivery", "supervisor"):
+        for path in (root / context).rglob("*.py"):
+            assert not any(
+                name.startswith(("app.activity", "app.bootstrap.activity"))
+                for name in imported_modules(path)
+            ), path
 
 
 def test_supervisor_adapters_are_layered_and_recovery_is_independent():

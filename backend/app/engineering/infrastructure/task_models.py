@@ -87,6 +87,20 @@ class Task(Base):
     )
 
 
+class TaskDependency(Base):
+    __tablename__ = "task_dependencies"
+    __table_args__ = (
+        CheckConstraint("task_id != prerequisite_id", name="ck_task_dependency_self"),
+        Index("ix_task_dependencies_prerequisite", "prerequisite_id"),
+    )
+    task_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("tasks.id", ondelete="CASCADE"), primary_key=True
+    )
+    prerequisite_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("tasks.id", ondelete="RESTRICT"), primary_key=True
+    )
+
+
 class TaskRepositoryScope(Base):
     """Repository selected from the owning Team's available execution scope."""
 

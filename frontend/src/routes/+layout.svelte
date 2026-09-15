@@ -7,6 +7,7 @@
   import type { Snippet } from 'svelte';
   import MobileNav from '$lib/components/MobileNav.svelte';
   import ObserverShell from '$lib/observer/ObserverShell.svelte';
+  import ActivityLauncher from '$lib/visualization/ActivityLauncher.svelte';
   import ClickBurst from '$lib/components/ClickBurst.svelte';
   import JarvisOverlay from '$lib/components/JarvisOverlay.svelte';
   import { NAV_ITEMS, isActiveNavItem } from '$lib/nav';
@@ -186,6 +187,7 @@
   <div class="min-w-0">
     {#key page.url.pathname}
       <div in:fade={{ duration: transitionDuration }}>
+        <ActivityLauncher />
         {@render children()}
       </div>
     {/key}

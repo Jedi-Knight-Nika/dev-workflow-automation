@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Literal, Protocol
 
+from app.engineering.application.ports.task_dependencies import TaskDependencyView
 from app.engineering.domain.lifecycle import TaskStatus
 from app.engineering.domain.task import Task
 
@@ -83,6 +84,7 @@ class TaskView:
     labels: tuple[str, ...] = ()
     estimate: float | None = None
     repository_scopes: tuple[TaskRepositoryScopeView, ...] = ()
+    dependencies: tuple[TaskDependencyView, ...] = ()
 
 
 class TaskQueries(Protocol):

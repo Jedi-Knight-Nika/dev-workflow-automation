@@ -18,6 +18,7 @@ from app.agent_runtime.infrastructure.models import (
 from app.agent_runtime.infrastructure.receipts import apply_receipt, known_no_inference
 from app.agent_runtime.infrastructure.reservations import consumed_cost, reserve_budget
 from app.agent_runtime.infrastructure.token_efficiency import ensure_generation
+from app.agent_runtime.infrastructure.work_history import record_work_history
 from app.engineering.application.develop import checkpoint_payload
 from app.engineering.infrastructure.task_models import Job, Task
 from app.platform.scheduling.states import JobState
@@ -61,6 +62,7 @@ class SqlDevelopmentStore:
                 .with_for_update()
             )
             if row:
+                record_work_history(session, row, snapshot)
                 row.token_efficiency = snapshot
                 # Operational signal only. Provider receipts own all invoice fields.
                 row.active_context_estimate = snapshot.get("active_context_estimate")
@@ -214,6 +216,7 @@ class SqlDevelopmentStore:
                     len({request["model"] for request in receipt.raw_usage["priced_requests"]}) > 1
                 ):
                     row.model, row.pricing_id = "multiple-models", None
+            record_work_history(session, row, receipt.token_efficiency)
             row.token_efficiency = receipt.token_efficiency or None
             row.active_context_estimate = receipt.token_efficiency.get("active_context_estimate")
             row.active_context_estimate_source = (

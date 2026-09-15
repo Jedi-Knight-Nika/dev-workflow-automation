@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.engineering.domain.causality import TransitionCause
 from app.engineering.domain.lifecycle import Action, InvalidTransition, WaitReason
 from app.engineering.infrastructure.jobs import enqueue_phase
 from app.engineering.infrastructure.lifecycle import record_transition
@@ -21,13 +22,14 @@ async def control_task(
     *,
     actor: str,
     wait_reason: WaitReason = WaitReason.NONE,
+    cause: TransitionCause | None = None,
 ) -> None:
     if action in {Action.RESUME, Action.RELEASE_TAKEOVER}:
         team = await session.get(Team, task.team_id) if task.team_id else None
         if not team or not team.enabled or team.archived_at or team.execution_paused:
             raise InvalidTransition("Enable execution for this Team before resuming its task")
         if task.status == "NEW" and not task.manual_takeover:
-            await enqueue_phase(session, task)
+            await enqueue_phase(session, task, cause=cause)
             return
     await record_transition(
         session,
@@ -36,6 +38,7 @@ async def control_task(
         expected_version=task.lifecycle_version,
         actor=actor,
         wait_reason=wait_reason,
+        cause=cause,
     )
     jobs = await session.scalars(
         select(Job)
@@ -72,4 +75,6 @@ async def control_task(
             row.decision = "CLASSIFY_PENDING"
         if await apply_pending_feedback(session, task):
             return
-    await enqueue_phase(session, task)  # PAUSED/WAITING_EXTERNAL/CANCELLED do not enqueue.
+    await enqueue_phase(
+        session, task, cause=cause
+    )  # PAUSED/WAITING_EXTERNAL/CANCELLED do not enqueue.

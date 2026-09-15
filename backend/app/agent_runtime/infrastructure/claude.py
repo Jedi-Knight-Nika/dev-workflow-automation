@@ -10,6 +10,7 @@ from uuid import uuid4
 from app.agent_runtime.application.developer_progress_governor import DeveloperProgressGovernor
 from app.agent_runtime.application.harness import HarnessSettings, TurnReceipt
 from app.agent_runtime.domain.context_generation import CLAUDE_CAPABILITIES
+from app.agent_runtime.domain.request_usage import with_request_count
 from app.agent_runtime.infrastructure.checkpoints import workspace_facts
 from app.agent_runtime.infrastructure.normalization import claude_usage
 from app.agent_runtime.infrastructure.tool_logs import ToolLogs
@@ -174,6 +175,7 @@ class ClaudeHarness:
     async def run_turn(self, prompt: str) -> TurnReceipt:
         from claude_agent_sdk import AssistantMessage, ResultMessage
 
+        observed_requests: set[str] = set()
         if self.client is None:
             raise RuntimeError("Start or resume a session before running")
         if self.governor.diff_fingerprint is None:
@@ -186,6 +188,8 @@ class ClaudeHarness:
             async with asyncio.timeout(self.settings.timeout_seconds):
                 await self.client.query(prompt)
                 async for message in self.client.receive_response():
+                    if isinstance(message, AssistantMessage) and message.message_id:
+                        observed_requests.add(message.message_id)
                     if (
                         isinstance(message, AssistantMessage)
                         and message.usage
@@ -215,7 +219,11 @@ class ClaudeHarness:
                             if message.is_error
                             else "completed",
                             usage=claude_usage(raw, message.total_cost_usd),
-                            raw_usage=raw,
+                            raw_usage=with_request_count(
+                                raw, len(observed_requests), complete=False
+                            )
+                            if observed_requests
+                            else raw,
                             provider_duration_ms=message.duration_api_ms,
                             token_efficiency=self.governor.snapshot(),
                             failure_code=self.governor.stop_reason,

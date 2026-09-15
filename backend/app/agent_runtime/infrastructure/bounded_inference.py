@@ -136,6 +136,7 @@ class BoundedInference:
         self.harness._save()  # Admission persisted before network I/O; never replay after a crash.
         self.uncertain = True
         started = monotonic()
+        self.harness.request_count += 1
         response = await client.post(
             ENDPOINTS[provider],
             json=payload,

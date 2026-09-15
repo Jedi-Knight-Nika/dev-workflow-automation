@@ -10,6 +10,7 @@ from pydantic import BaseModel
 
 from app.agent_runtime.application.harness import TurnReceipt
 from app.agent_runtime.domain.repair_progress import repair_allowance
+from app.agent_runtime.domain.request_usage import with_request_count
 from app.agent_runtime.domain.usage import Usage
 from app.agent_runtime.infrastructure.bounded_inference import BoundedInference, BoundedStop
 from app.agent_runtime.infrastructure.checkpoints import workspace_facts
@@ -136,19 +137,31 @@ class AdaptivePatchExecution:
         self.total_units = 0
         self.attempted_units = 0
         self.replans = 0
+        self.work_plans: list[dict[str, Any]] = []
 
     async def facts(self) -> dict[str, Any]:
         h = self.harness
         return await workspace_facts(h.settings.workspace, h.settings.workspace)
 
     def save(self, kind: str, value: dict[str, Any]) -> None:
+        if kind == "work_unit_result" and self.work_plans:
+            for unit in self.work_plans[-1]["units"]:
+                if unit["id"] == value.get("unit_id"):
+                    unit["status"] = "READY"
         self.harness.history.append({"type": kind, **value})
         self.harness._save()
 
     def progress(
         self, phase: str, unit: str | None = None, *, stop_reason: str | None = None
     ) -> None:
+        if self.work_plans:
+            for item in self.work_plans[-1]["units"]:
+                if item["id"] == unit:
+                    item["status"] = "REPAIRING" if phase == "REPAIRING" else "RUNNING"
+                if phase == "STOPPED" and item["status"] in {"RUNNING", "REPAIRING"}:
+                    item["status"] = "FAILED"
         self.harness.execution_state = {
+            "work_plans": self.work_plans,
             "execution_mode": self.mode.value,
             "execution_phase": phase,
             "current_work_unit": unit,
@@ -428,6 +441,24 @@ class AdaptivePatchExecution:
                 )
             available.update(unit.new_files)
         self.total_units = len(self.results) + len(ordered)
+        for plan in self.work_plans:
+            for item in plan["units"]:
+                if item["status"] in {"PENDING", "RUNNING", "REPAIRING"}:
+                    item["status"] = "SUPERSEDED"
+        indices = {unit.id: index for index, unit in enumerate(ordered)}
+        self.work_plans.append(
+            {
+                "revision": self.replans,
+                "units": [
+                    {
+                        "id": unit.id,
+                        "depends_on": [indices[id] for id in unit.depends_on],
+                        "status": "PENDING",
+                    }
+                    for unit in ordered
+                ],
+            }
+        )
         self.save(
             "work_graph",
             {
@@ -592,12 +623,19 @@ class AdaptivePatchExecution:
             summary,
             status,
             Usage() if usage.uncertain else measured_usage(usage.totals),
-            raw_usage={
-                "observed": usage.totals,
-                "by_kind": usage.usage_by_kind,
-                "usage_complete": not usage.uncertain,
-                **({"priced_requests": usage.priced_requests} if h.settings.routed_models else {}),
-            },
+            raw_usage=with_request_count(
+                {
+                    "observed": usage.totals,
+                    "by_kind": usage.usage_by_kind,
+                    "usage_complete": not usage.uncertain,
+                    **(
+                        {"priced_requests": usage.priced_requests}
+                        if h.settings.routed_models
+                        else {}
+                    ),
+                },
+                h.request_count,
+            ),
             provider_duration_ms=None if usage.uncertain else int(usage.provider_seconds * 1000),
             failure_code=failure,
             token_efficiency=h.efficiency_snapshot(),

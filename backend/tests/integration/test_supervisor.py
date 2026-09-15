@@ -140,6 +140,8 @@ async def test_supervisor_accounts_once_and_does_not_repurchase_failed_decision(
                 runs = list(await session.scalars(select(AIRun).where(AIRun.task_id == task_id)))
                 assert len(runs) == 1
                 assert runs[0].role_kind == "SUPERVISOR"
+                assert runs[0].raw_usage["request_count"] == 1
+                assert runs[0].raw_usage["request_count_complete"] is True
                 assert runs[0].input_tokens == 100 and runs[0].calculated_cost_usd is not None
             if valid:
                 decision.clear()

@@ -9,6 +9,7 @@ from uuid import uuid4
 import httpx
 
 from app.agent_runtime.application.harness import TurnReceipt
+from app.agent_runtime.domain.request_usage import with_request_count
 from app.agent_runtime.domain.usage import Usage
 from app.agent_runtime.infrastructure.adaptive_patch import AdaptivePatchExecution, execution_mode
 from app.agent_runtime.infrastructure.checkpoints import workspace_facts
@@ -139,9 +140,11 @@ class PatchPipelineHarness(ResponsesHarness):
             Usage(0, 0, 0, 0, 0),
             failure_code=failure,
             provider_duration_ms=0,
+            raw_usage=with_request_count({}, 0),
         )
 
     async def run_turn(self, prompt: str) -> TurnReceipt:
+        self.request_count = 0
         self.running = asyncio.current_task()
         totals = {
             key: 0
@@ -170,6 +173,7 @@ class PatchPipelineHarness(ResponsesHarness):
                 "failed",
                 measured_usage(totals),
                 failure_code="PATCH_ALREADY_ATTEMPTED",
+                raw_usage=with_request_count({}, 0),
             )
         mode = execution_mode(prompt)
         if mode != ExecutionMode.FAST_PATCH:
@@ -254,6 +258,7 @@ class PatchPipelineHarness(ResponsesHarness):
                         self._save()  # Persist before admission: crashes cannot silently repeat a request.
                         uncertain = True
                         started = monotonic()
+                        self.request_count += 1
                         response = await client.post(
                             ENDPOINTS[self.settings.provider],
                             json=payload,
@@ -404,7 +409,9 @@ class PatchPipelineHarness(ResponsesHarness):
             summary,
             status,
             Usage() if uncertain else measured_usage(totals),
-            raw_usage={"observed": totals, "usage_complete": not uncertain},
+            raw_usage=with_request_count(
+                {"observed": totals, "usage_complete": not uncertain}, self.request_count
+            ),
             provider_duration_ms=None if uncertain else int(provider_seconds * 1000),
             failure_code=failure,
             token_efficiency=self.efficiency_snapshot(),

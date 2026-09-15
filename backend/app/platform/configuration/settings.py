@@ -110,6 +110,14 @@ class Settings(BaseSettings):
     metrics_token_file: Path | None = None
     observability_alert_token_file: Path | None = None
     forecasts_enabled: bool = False
+    activity_enabled: bool = True
+    activity_collect_files: bool = True
+    activity_file_retention_days: int = Field(default=0, ge=0, le=3650)
+    activity_poll_seconds: float = Field(default=5, ge=1, le=60)
+    activity_max_events: int = Field(default=5000, ge=100, le=20000)
+    activity_max_files: int = Field(default=5000, ge=200, le=20000)
+    activity_max_tasks: int = Field(default=200, ge=10, le=500)
+    activity_max_replay_days: int = Field(default=90, ge=1, le=365)
     forecast_min_samples: int = Field(default=5, ge=3, le=100)
     forecast_horizon_days: int = Field(default=7, ge=1, le=30)
 
