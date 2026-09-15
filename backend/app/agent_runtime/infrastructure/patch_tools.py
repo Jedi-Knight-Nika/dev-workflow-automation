@@ -244,7 +244,7 @@ def apply(workspace: Path, patch: str, hashes: dict[str, str]) -> list[str]:
     return sorted(set(changed))
 
 
-def apply_edits(workspace: Path, edits: list[dict], hashes: dict[str, str]) -> list[str]:
+def apply_edits(workspace: Path, edits: list[dict[str, Any]], hashes: dict[str, str]) -> list[str]:
     """Validate all replacements in memory, then reuse atomic, hash-checked Git application."""
     if not isinstance(edits, list) or len(edits) > 64:
         raise ValueError("Patch rejected: expected at most 64 exact edits")

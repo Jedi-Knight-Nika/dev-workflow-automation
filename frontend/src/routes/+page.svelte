@@ -1,9 +1,10 @@
 <script lang="ts">
+  import QueuePanel from '$lib/components/coordination/QueuePanel.svelte';
   import { resolve } from '$app/paths';
   import { onMount } from 'svelte';
   import { t } from '$lib/i18n/index.svelte';
   import { API_BASE_URL } from '$lib/api';
-  import { createLiveRefresh } from '$lib/live-refresh';
+  import { createLatestRequest, createLiveRefresh } from '$lib/live-refresh';
   import ErrorBanner from '$lib/components/ErrorBanner.svelte';
   import EngineeringStatisticsPanel from '$lib/components/EngineeringStatisticsPanel.svelte';
   import OperationsDashboard from '$lib/components/observability/OperationsDashboard.svelte';
@@ -24,7 +25,7 @@
   let telemetryError = $state('');
   let telemetryLoading = false;
   const refresh = createLiveRefresh(load);
-  let requestId = 0;
+  const requests = createLatestRequest();
   const compact = new Intl.NumberFormat(undefined, {
     notation: 'compact',
     maximumFractionDigits: 1
@@ -46,17 +47,17 @@
   const maxUsage = (items: DashboardUsageBucket[]) => Math.max(1, ...items.map(total));
 
   async function load() {
-    const thisRequest = ++requestId;
+    const current = requests.begin();
     try {
       const nextDashboard = await getDashboardSummary(period);
-      if (thisRequest !== requestId) return;
+      if (!current()) return;
       dashboard = nextDashboard;
       error = '';
     } catch (cause) {
-      if (thisRequest !== requestId) return;
+      if (!current()) return;
       error = cause instanceof Error ? cause.message : String(cause);
     } finally {
-      if (thisRequest === requestId) loading = false;
+      if (current()) loading = false;
     }
   }
   async function selectPeriod(value: typeof period) {
@@ -120,6 +121,7 @@
   description={t('cockpit.description')}
 />
 <main class="cockpit">
+  <QueuePanel />
   <div class="toolbar">
     <span class="live"
       ><i class:connected={live}></i>{live ? t('cockpit.live') : t('cockpit.reconnecting')}</span

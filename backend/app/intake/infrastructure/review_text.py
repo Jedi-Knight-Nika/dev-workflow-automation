@@ -143,6 +143,24 @@ async def process_review_text(
         ):
             cycle.decision = "AUTHORITY_REVOKED"
             return True
+        if not is_control:
+            from app.coordinator.infrastructure.inbox import enqueue
+
+            if await enqueue(
+                session,
+                task,
+                provider=event.provider,
+                key=cycle.external_event_id,
+                actor=event.actor,
+                body=event.body,
+                context={
+                    "review_cycle_id": str(cycle.id),
+                    "actor_type": cycle.feedback.get("actor_type"),
+                    "head_sha": cycle.head_sha,
+                },
+            ):
+                cycle.decision = "COORDINATOR_PENDING"
+                return True
         if not is_control and (task.status in {"PAUSED", "WAITING_HUMAN"} or task.manual_takeover):
             cycle.decision = "CLASSIFY_AFTER_RESUME"
             return True

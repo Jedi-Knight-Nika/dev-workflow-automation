@@ -63,8 +63,17 @@ async def claim_next_job(
     session: AsyncSession,
     worker_id: str,
     lease_seconds: int,
+    *,
+    global_developer_slots: int | None = None,
+    validation_slots: int | None = None,
 ) -> Job | None:
     now = datetime.now(UTC)
+    # All controllers share admission capacity. This short lock covers claiming only,
+    # never execution, HTTP calls or model inference.
+    if (
+        global_developer_slots is not None or validation_slots is not None
+    ) and session.get_bind().dialect.name == "postgresql":
+        await session.execute(text("SELECT pg_advisory_xact_lock(741963206)"))
     candidate = aliased(Job)
     already_running = (
         select(candidate.id)
@@ -88,6 +97,30 @@ async def claim_next_job(
         .correlate(Team)
         .scalar_subquery()
     )
+    last_job, last_task = aliased(Job), aliased(Task)
+    last_dispatch = (
+        select(func.max(last_job.started_at))
+        .join(last_task, last_task.id == last_job.task_id)
+        .where(last_task.team_id == Team.id, last_job.action.in_(CONCURRENCY_SLOT_ACTIONS))
+        .correlate(Team)
+        .scalar_subquery()
+    )
+    limits = []
+    for actions, capacity in (
+        (CONCURRENCY_SLOT_ACTIONS, global_developer_slots),
+        (("RUN_VALIDATION",), validation_slots),
+    ):
+        if capacity is not None:
+            running = aliased(Job)
+            count = (
+                select(func.count(running.id))
+                .where(
+                    running.state.in_([JobState.CLAIMED, JobState.RUNNING]),
+                    running.action.in_(actions),
+                )
+                .scalar_subquery()
+            )
+            limits.append(or_(Job.action.not_in(actions), count < capacity))
     job = await session.scalar(
         select(Job)
         .join(Task)
@@ -106,8 +139,9 @@ async def claim_next_job(
                 occupied < Team.max_concurrent_tasks,
             ),
             ~already_running,
+            *limits,
         )
-        .order_by(Job.priority, Job.created_at)
+        .order_by(Job.priority, last_dispatch.asc().nullsfirst(), Job.created_at)
         .with_for_update(of=Job, skip_locked=True)
         .limit(1)
     )

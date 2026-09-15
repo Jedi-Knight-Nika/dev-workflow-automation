@@ -3,6 +3,8 @@
 from dataclasses import asdict, dataclass
 from typing import Any
 
+from app.agent_runtime.domain.model_policy import ModelPolicy
+
 
 @dataclass(frozen=True)
 class TokenEfficiencyPolicy:
@@ -21,6 +23,8 @@ class TokenEfficiencyPolicy:
     max_compactions: int = 2
     max_model_visible_tool_result_tokens: int = 4000
     automatic_rollover: bool = False
+    adaptive_replans: int = 1
+    model_routes: tuple[ModelPolicy, ...] = ()
 
     def developer_effort(self, profile_effort: str, override: str | None = None) -> str:
         """Team policy is a ceiling; only an explicit task override raises effort."""
@@ -50,6 +54,14 @@ class TokenEfficiencyPolicy:
                 raise ValueError("Loop thresholds must be integers between 2 and 20")
         if not 0 <= self.max_rollovers <= 10 or not 0 <= self.max_compactions <= 5:
             raise ValueError("Context transitions must be bounded")
+        if type(self.adaptive_replans) is not int or self.adaptive_replans not in {0, 1}:
+            raise ValueError("At most one evidence-triggered replan is allowed")
+        if any(not isinstance(route, ModelPolicy) for route in self.model_routes):
+            raise TypeError("Model routes must be policy objects")
+        if len(self.model_routes) > 3 or len({route.role for route in self.model_routes}) != len(
+            self.model_routes
+        ):
+            raise ValueError("Configure at most one route per adaptive role")
         if type(self.automatic_rollover) is not bool:
             raise ValueError("Automatic rollover must be boolean")
 
@@ -81,4 +93,18 @@ class TokenEfficiencyPolicy:
                 "repeated_command_threshold": 4,
                 "max_rollovers": 6,
             }
-        return cls(**(defaults | values))
+        merged = defaults | values
+        merged["model_routes"] = tuple(
+            ModelPolicy(
+                **{
+                    **route,
+                    "allowed_modes": tuple(
+                        route.get("allowed_modes", ("STRUCTURED_MULTI_PATCH", "BOUNDED_AGENTIC"))
+                    ),
+                }
+            )
+            if isinstance(route, dict)
+            else route
+            for route in merged.get("model_routes", ())
+        )
+        return cls(**merged)

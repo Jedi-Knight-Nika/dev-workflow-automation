@@ -40,13 +40,16 @@ class SqlAlchemyTrelloTaskReconciliation:
             configuration = dict(integration.configuration or {})
             if not configuration.get("sync_enabled", True):
                 return ReconciliationResult(processed=False)
-            interval = max(int(True), 15)
+            configured_interval = configuration.get("poll_interval_seconds")
+            interval = (
+                max(15, min(3600, configured_interval)) if type(configured_interval) is int else 60
+            )
             if (
                 integration.last_synced_at is not None
                 and integration.last_synced_at + timedelta(seconds=interval) > now
             ):
                 return ReconciliationResult(processed=False)
-            board_id = str(configuration.get("board_id")).strip()
+            board_id = str(configuration.get("board_id") or "").strip()
             if not board_id:
                 integration.sync_status = "FAILED"
                 integration.last_error = "Select a Trello board to import cards"

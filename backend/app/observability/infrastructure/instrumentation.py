@@ -9,6 +9,7 @@ from prometheus_client.core import CounterMetricFamily, GaugeMetricFamily, Metri
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.observability.infrastructure.coordination_metrics import coordination_metrics
 from app.observability.infrastructure.models import MonitoringConfiguration
 from app.platform.configuration.settings import get_settings
 
@@ -116,6 +117,14 @@ class Instrumentation:
                                     name, name, value=float(await session.scalar(text(sql)) or 0)
                                 )
                             )
+                        values.extend(await coordination_metrics(session))
+                        values.append(
+                            GaugeMetricFamily(
+                                "aew_paid_slots_capacity",
+                                "Configured global paid slot limit",
+                                value=defaults.global_developer_slots,
+                            )
+                        )
                         stages = GaugeMetricFamily(
                             "aew_tasks_by_stage", "Tasks by stage", labels=["stage"]
                         )

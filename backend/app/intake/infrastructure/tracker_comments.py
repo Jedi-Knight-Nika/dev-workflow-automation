@@ -51,6 +51,18 @@ async def tracker_comment(
     body = str(payload.get("raw_text") or "")
     if not 0 < len(body) <= 16000:
         return
+    from app.coordinator.infrastructure.inbox import enqueue
+
+    if await enqueue(
+        session,
+        task,
+        provider=provider,
+        key=key,
+        actor=actor,
+        body=body,
+        context={"provider_effect_ref": str(payload.get("provider_message_id") or "")},
+    ):
+        return
     session.add(
         ReviewCycle(
             task_id=task.id,

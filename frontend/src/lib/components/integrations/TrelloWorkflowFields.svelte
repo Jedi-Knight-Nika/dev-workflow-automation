@@ -2,6 +2,7 @@
   import Button from '$lib/components/Button.svelte';
   import TextField from '$lib/components/TextField.svelte';
   import Select from '$lib/components/Select.svelte';
+  import DestinationSelect from './DestinationSelect.svelte';
   import type { Repository, TrelloBoard, TrelloList } from '$lib/types';
   import { t } from '$lib/i18n/index.svelte';
 
@@ -62,8 +63,8 @@
   <div class="border-brand/30 bg-brand/5 rounded-lg border p-3 text-xs">
     <p class="font-semibold">Trello requires two credentials</p>
     <p class="text-muted mt-1 leading-relaxed">
-      Use the API key generated for a Trello app, then generate its Trello user token. An
-      Atlassian account API token is different and will not work here.
+      Use the API key generated for a Trello app, then generate its Trello user token. An Atlassian
+      account API token is different and will not work here.
     </p>
     <a
       class="mt-2 inline-block font-medium text-brand hover:underline"
@@ -101,9 +102,16 @@
     variant="primary"
     onclick={onContinueSetup}
     disabled={saving || loading || (!hasCredentials && (!apiKey || !token))}
-    >{verifying ? t('integrations.verifyingCredentials') : t('integrations.verifyAndContinue')}</Button
+    >{verifying
+      ? t('integrations.verifyingCredentials')
+      : t('integrations.verifyAndContinue')}</Button
   >
-  <Select id="trello-board" label={t('integrations.trelloBoard')} bind:value={boardId} onchange={onDiscoverLists}>
+  <Select
+    id="trello-board"
+    label={t('integrations.trelloBoard')}
+    bind:value={boardId}
+    onchange={onDiscoverLists}
+  >
     <option value="">{t('integrations.trelloSelectBoard')}</option>
     {#each boards as board (board.id)}<option value={board.id}>{board.name}</option>{/each}
   </Select>
@@ -123,30 +131,48 @@
     </fieldset>
     <fieldset class="grid gap-3 sm:grid-cols-2">
       <legend class="text-muted col-span-full text-xs">Workflow destination lists</legend>
-      <Select id="trello-todo-list" label="New / Todo" bind:value={todoListId}>
-        <option value="">Do not move</option>
-        {#each lists as list (list.id)}<option value={list.id}>{list.name}</option>{/each}
-      </Select>
-      <Select id="trello-progress-list" label="In progress" bind:value={inProgressListId}>
-        <option value="">Do not move</option>
-        {#each lists as list (list.id)}<option value={list.id}>{list.name}</option>{/each}
-      </Select>
-      <Select id="trello-review-list" label="In review" bind:value={inReviewListId}>
-        <option value="">Do not move</option>
-        {#each lists as list (list.id)}<option value={list.id}>{list.name}</option>{/each}
-      </Select>
-      <Select id="trello-blocked-list" label="Blocked / needs attention" bind:value={blockedListId}>
-        <option value="">Do not move</option>
-        {#each lists as list (list.id)}<option value={list.id}>{list.name}</option>{/each}
-      </Select>
-      <Select id="trello-ready-list" label="Ready for testing" bind:value={readyForTestingListId}>
-        <option value="">Do not move</option>
-        {#each lists as list (list.id)}<option value={list.id}>{list.name}</option>{/each}
-      </Select>
-      <Select id="trello-done-list" label="Done / cancelled" bind:value={doneListId}>
-        <option value="">Do not move</option>
-        {#each lists as list (list.id)}<option value={list.id}>{list.name}</option>{/each}
-      </Select>
+      <DestinationSelect
+        id="trello-todo-list"
+        label="New / Todo"
+        bind:value={todoListId}
+        destinations={lists}
+        emptyLabel="Do not move"
+      />
+      <DestinationSelect
+        id="trello-progress-list"
+        label="In progress"
+        bind:value={inProgressListId}
+        destinations={lists}
+        emptyLabel="Do not move"
+      />
+      <DestinationSelect
+        id="trello-review-list"
+        label="In review"
+        bind:value={inReviewListId}
+        destinations={lists}
+        emptyLabel="Do not move"
+      />
+      <DestinationSelect
+        id="trello-blocked-list"
+        label="Blocked / needs attention"
+        bind:value={blockedListId}
+        destinations={lists}
+        emptyLabel="Do not move"
+      />
+      <DestinationSelect
+        id="trello-ready-list"
+        label="Ready for testing"
+        bind:value={readyForTestingListId}
+        destinations={lists}
+        emptyLabel="Do not move"
+      />
+      <DestinationSelect
+        id="trello-done-list"
+        label="Done / cancelled"
+        bind:value={doneListId}
+        destinations={lists}
+        emptyLabel="Do not move"
+      />
     </fieldset>
   {/if}
   <Select

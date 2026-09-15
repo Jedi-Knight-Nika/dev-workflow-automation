@@ -23,9 +23,10 @@ async def test_review_wakes_with_task_memory_and_current_evidence(monkeypatch):
     session = SimpleNamespace(
         scalar=AsyncMock(return_value=SimpleNamespace(status="COMPLETED", failure_code=None)),
         scalars=AsyncMock(
-            return_value=SimpleNamespace(
-                all=lambda: [SimpleNamespace(status="PASSED", exit_code=0)]
-            )
+            side_effect=[
+                SimpleNamespace(all=lambda: [SimpleNamespace(status="PASSED", exit_code=0)]),
+                [SimpleNamespace(payload={"request": "Also support mobile", "invariants": []})],
+            ]
         ),
     )
     monkeypatch.setattr(
@@ -50,3 +51,5 @@ async def test_review_wakes_with_task_memory_and_current_evidence(monkeypatch):
     assert packet["current_sha"] == task.current_revision
     assert packet["validation"][0]["status"] == "PASSED"
     assert packet["latest_event"]["body"] == event.body
+    assert "Preserve contents" in packet["objective"]
+    assert "Also support mobile" in packet["objective"]

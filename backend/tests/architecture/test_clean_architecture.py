@@ -135,6 +135,7 @@ async def test_create_task_use_case_rolls_back_as_one_transaction() -> None:
         "observability",
         "analytics",
         "supervisor",
+        "coordinator",
     ],
 )
 @pytest.mark.parametrize("layer", ["domain", "application"])

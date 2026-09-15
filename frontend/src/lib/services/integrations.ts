@@ -60,3 +60,6 @@ export function listTrelloBoards(): Promise<TrelloBoard[]> {
 export function listTrelloLists(boardId: string): Promise<TrelloList[]> {
   return api<TrelloList[]>(`/trello/boards/${encodeURIComponent(boardId)}/lists`);
 }
+
+export type LinearMember = { id: string; name: string; email: string; active: boolean };
+export const listLinearMembers = () => api<LinearMember[]>('/linear/members');

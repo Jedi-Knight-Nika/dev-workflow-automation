@@ -4,6 +4,8 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any, Protocol
 
+from app.agent_runtime.domain.envelope import AgentEnvelope
+from app.agent_runtime.domain.model_policy import PricedModel
 from app.agent_runtime.domain.token_efficiency_policy import TokenEfficiencyPolicy
 from app.agent_runtime.domain.usage import Pricing, Usage
 
@@ -24,6 +26,10 @@ class HarnessSettings:
     pricing: Pricing | None = None
     read_only: bool = False
     token_policy: TokenEfficiencyPolicy = field(default_factory=TokenEfficiencyPolicy)
+    routed_models: tuple[PricedModel, ...] = ()
+    pricing_id: str | None = None
+    work_request: AgentEnvelope | None = None
+    provider: str = "openai"
     progress_callback: Callable[[dict[str, Any]], None] | None = None
     progress_baseline: dict[str, Any] = field(default_factory=dict)
     supervision_callback: Callable[[dict[str, Any]], Awaitable[dict[str, Any]]] | None = None
@@ -49,6 +55,7 @@ class TurnReceipt:
     cumulative_usage: dict[str, int | None] | None = None
     failure_code: str | None = None
     token_efficiency: dict[str, Any] = field(default_factory=dict)
+    result: AgentEnvelope | None = None
 
 
 class DeveloperHarness(Protocol):

@@ -4,10 +4,11 @@ import json
 import re
 from pathlib import Path
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.agent_runtime.infrastructure.checkpoints import workspace_facts
+from app.agent_runtime.infrastructure.cost_queries import unsettled_usage
 from app.agent_runtime.infrastructure.models import (
     AIRun,
     DeveloperContextGeneration,
@@ -41,10 +42,7 @@ async def prepare_repair(
             select(AIRun.id)
             .where(
                 AIRun.task_id == task.id,
-                or_(
-                    AIRun.status == "RUNNING",
-                    func.coalesce(AIRun.provider_cost_usd, AIRun.calculated_cost_usd).is_(None),
-                ),
+                unsettled_usage(),
             )
             .limit(1)
         ):

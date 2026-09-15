@@ -185,6 +185,24 @@ async def github_event(
                     {"body": body, "actor_type": (review.get("user") or {}).get("type")},
                 )
                 return
+            from app.coordinator.infrastructure.inbox import enqueue
+
+            if await enqueue(
+                session,
+                task,
+                provider="github",
+                key=event_id,
+                actor=actor,
+                body=body or "The reviewer requested changes; inspect inline review comments.",
+                kind="PR_REVIEWED",
+                context={
+                    "head_sha": sha,
+                    "review_cycle_id": str(cycle.id),
+                    "actor_type": (review.get("user") or {}).get("type"),
+                },
+            ):
+                cycle.decision, cycle.feedback = "COORDINATOR_PENDING", {"body": body}
+                return
             interpretation = await InterpretEvent().execute(
                 Event(
                     "github",
@@ -268,6 +286,17 @@ async def github_event(
     blockers = merge_policy.blockers(evidence)
     cycle.decision = "MERGE_ELIGIBLE" if not blockers else "WAITING"
     cycle.feedback = {"blockers": blockers}
+    if kind in {"check_run", "check_suite", "status", "pull_request", "pull_request_review"}:
+        from app.coordinator.infrastructure.inbox import notify_observation
+
+        await notify_observation(
+            session,
+            task,
+            kind="CI_CHANGED" if kind in {"check_run", "check_suite", "status"} else "PR_UPDATED",
+            key=event_id,
+            provider="github",
+            body=f"Current GitHub evidence for PR {task.pull_request_number}, SHA {task.current_revision}. Merge blockers: {', '.join(blockers) or 'none'}. This observation does not authorize new work or a merge.",
+        )
     if not blockers:
         await record_transition(
             session,

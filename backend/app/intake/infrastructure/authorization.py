@@ -19,11 +19,26 @@ async def actor_allowed(
             or (policy.reviewer_scope == "any_human" and actor_type == "User")
         )
     if provider == "slack":
-        return any(
+        from app.intake.infrastructure.task_snapshot import ExternalTaskSnapshot
+
+        snapshot = await session.scalar(
+            select(ExternalTaskSnapshot)
+            .where(
+                ExternalTaskSnapshot.task_id == task.id,
+                ExternalTaskSnapshot.provider == "slack",
+            )
+            .order_by(ExternalTaskSnapshot.synchronized_at.desc())
+            .limit(1)
+        )
+        if not snapshot:
+            return False
+        route = get_settings().slack_team_routes.get(
+            ":".join(snapshot.external_id.split(":")[:2]), {}
+        )
+        return (
             route.get("team_id") == str(task.team_id)
             and route.get("repository_id") == str(task.repository_id)
             and actor in route.get("actor_ids", "").split(",")
-            for route in get_settings().slack_team_routes.values()
         )
     if provider not in {"trello", "linear"}:
         return False

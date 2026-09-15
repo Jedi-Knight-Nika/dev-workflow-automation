@@ -5,6 +5,7 @@ from uuid import UUID
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.agent_runtime.infrastructure.cost_queries import settled_cost
 from app.agent_runtime.infrastructure.models import AIRun
 from app.engineering.infrastructure.models import TaskPhaseRun
 from app.engineering.infrastructure.task_models import Task
@@ -24,7 +25,7 @@ async def statistics(session: AsyncSession, team_id: UUID | None, days: int = 30
                 func.count(AIRun.id),
                 complete_sum(AIRun.input_tokens),
                 complete_sum(AIRun.output_tokens),
-                complete_sum(func.coalesce(AIRun.provider_cost_usd, AIRun.calculated_cost_usd)),
+                complete_sum(settled_cost()),
                 func.count(AIRun.id).filter(AIRun.usage_complete.is_(False)),
                 complete_sum(AIRun.provider_duration_ms),
                 func.count(AIRun.id).filter(AIRun.prompt_version == "developer.compaction"),

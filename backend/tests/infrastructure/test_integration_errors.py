@@ -16,6 +16,52 @@ from app.platform.scheduling.states import IntegrationStatus
 from app.platform.security.crypto import cipher
 
 
+@pytest.mark.parametrize("provider", ["linear", "trello", "slack"])
+async def test_verification_preserves_configuration_and_provider_call_order(provider, monkeypatch):
+    credential = '{"api_key":"test-key","token":"test-token"}'
+    row = Integration(
+        provider_name=provider,
+        provider_type="task_management",
+        status=IntegrationStatus.CONFIGURED,
+        configuration={"actor_ids": ["owner"], "repository_id": "repository"},
+        encrypted_credentials=cipher.encrypt(credential),
+    )
+    session = AsyncMock()
+    session.scalar.return_value = row
+    calls = []
+
+    async def list_resources():
+        calls.append("resources")
+        return []
+
+    async def identity(name, key):
+        assert (name, key) == (provider, credential)
+        calls.append("identity")
+        return {"identity_id": "verified-bot"}
+
+    monkeypatch.setattr(
+        "app.intake.infrastructure.linear_client.LinearClient.list_workflow_states",
+        AsyncMock(side_effect=list_resources),
+    )
+    monkeypatch.setattr(
+        "app.intake.infrastructure.trello_client.TrelloClient.list_boards",
+        AsyncMock(side_effect=list_resources),
+    )
+    monkeypatch.setattr(
+        "app.platform.integrations.infrastructure.conversations.ProviderConversations.verify_identity",
+        AsyncMock(side_effect=identity),
+    )
+    result = await EncryptedIntegrationManagementWorkflow(session).verify(provider)
+    assert result.status == "CONNECTED"
+    assert result.configuration == {
+        "actor_ids": ["owner"],
+        "repository_id": "repository",
+        "identity_id": "verified-bot",
+    }
+    assert calls == (["identity"] if provider == "slack" else ["resources", "identity"])
+    session.commit.assert_awaited_once()
+
+
 def rejected(status: int) -> httpx.HTTPStatusError:
     request = httpx.Request("GET", "https://api.trello.com/1/members/me/boards?token=secret")
     response = httpx.Response(status, request=request)

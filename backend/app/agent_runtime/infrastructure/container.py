@@ -82,7 +82,14 @@ def developer_container_spec(
         raise ValueError("Helper workspaces must be read-only")
     if network in {"host", "bridge", "none", "default", ""}:
         raise ValueError("An explicitly isolated provider-egress network is required")
-    allowed = {"OPENAI_API_KEY", "ANTHROPIC_API_KEY", "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY"}
+    allowed = {
+        "OPENAI_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "DEEPSEEK_API_KEY",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "NO_PROXY",
+    }
     if set(provider_environment) - allowed:
         raise ValueError("Runner must not receive database, GitHub or host credentials")
     return {

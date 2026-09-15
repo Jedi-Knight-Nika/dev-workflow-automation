@@ -24,6 +24,8 @@ from app.engineering.infrastructure.consultation import consultation_allowance
         ),
         ([("DEVELOPER", 1, "RUNNING", 1, 1)], "REVIEWER", "Reconcile incomplete"),
         ([("DEVELOPER", 1, "FAILED", None, None)], "REVIEWER", "Reconcile incomplete"),
+        ([("COORDINATOR", 1, "RUNNING", None, None)], "REVIEWER", Decimal(1)),
+        ([("COORDINATOR", 1, "FAILED", None, None)], "REVIEWER", "Reconcile incomplete"),
         ([("REVIEWER", 1, "COMPLETED", 5, 1)], "REVIEWER", "spending limit"),
         ([("THINKER", 1, "COMPLETED", 1, 1)], "THINKER", Decimal(4)),
         (
@@ -38,14 +40,16 @@ async def test_consultation_aggregate_preserves_limits_and_blocker_order(rows, r
     with sqlite3.connect(":memory:") as connection:
         connection.execute(
             "CREATE TABLE ai_runs (task_id TEXT, role_kind TEXT, requirement_version INTEGER, "
-            "status TEXT, provider_cost_usd NUMERIC, calculated_cost_usd NUMERIC)"
+            "status TEXT, provider_cost_usd NUMERIC, calculated_cost_usd NUMERIC, "
+            "reserved_cost_usd NUMERIC DEFAULT 9)"
         )
         connection.executemany(
-            "INSERT INTO ai_runs VALUES (?, ?, ?, ?, ?, ?)",
+            "INSERT INTO ai_runs (task_id, role_kind, requirement_version, status, "
+            "provider_cost_usd, calculated_cost_usd) VALUES (?, ?, ?, ?, ?, ?)",
             [(task.id.hex, *row) for row in rows],
         )
         connection.execute(
-            "INSERT INTO ai_runs VALUES (?, 'THINKER', 2, 'RUNNING', NULL, NULL)",
+            "INSERT INTO ai_runs VALUES (?, 'THINKER', 2, 'RUNNING', NULL, NULL, 9)",
             (uuid4().hex,),
         )
 

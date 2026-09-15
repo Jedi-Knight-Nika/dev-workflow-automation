@@ -72,13 +72,23 @@ class SqlPhaseJobs:
         lease_seconds: int,
         *,
         orphan_cleanup: Callable[[], Awaitable[None]] | None = None,
+        global_developer_slots: int | None = None,
+        validation_slots: int | None = None,
     ) -> None:
         self.sessions, self.worker_id, self.lease_seconds = sessions, worker_id, lease_seconds
         self.orphan_cleanup = orphan_cleanup
+        self.global_developer_slots = global_developer_slots
+        self.validation_slots = validation_slots
 
     async def claim(self) -> PhaseLease | None:
         async with self.sessions() as session:
-            job = await claim_next_job(session, self.worker_id, self.lease_seconds)
+            job = await claim_next_job(
+                session,
+                self.worker_id,
+                self.lease_seconds,
+                global_developer_slots=self.global_developer_slots,
+                validation_slots=self.validation_slots,
+            )
             if job is None:
                 return None
             assert job.lease_token is not None

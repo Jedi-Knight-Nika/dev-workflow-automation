@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 
 from app.agent_runtime.application.harness import TurnReceipt
 from app.agent_runtime.domain.usage import Pricing
+from app.agent_runtime.infrastructure.agent_codec import canonical
 from app.agent_runtime.infrastructure.models import AIRun, PricingCatalog
 
 
@@ -19,6 +20,8 @@ def apply_receipt(row: AIRun, receipt: TurnReceipt, price: PricingCatalog | None
     )
     row.reasoning_tokens, row.usage_complete = usage.reasoning_tokens, usage.complete
     row.provider_cost_usd, row.raw_usage = usage.provider_cost_usd, receipt.raw_usage
+    if receipt.result is not None:
+        row.raw_usage = {**receipt.raw_usage, "agent_result": canonical(receipt.result)}
     row.provider_duration_ms = receipt.provider_duration_ms
     if price is not None and (price.provider, price.model) == (row.provider, row.model):
         row.pricing_id = price.id

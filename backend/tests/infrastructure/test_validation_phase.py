@@ -9,7 +9,8 @@ from app.agent_runtime.infrastructure.models import DeveloperSession
 from app.engineering.application.jobs import PhaseBlocked
 from app.engineering.domain.lifecycle import Action
 from app.engineering.infrastructure import validation_phase
-from app.engineering.infrastructure.task_models import Task
+from app.engineering.infrastructure.models import ValidationRun
+from app.engineering.infrastructure.task_models import Task, TaskEvent
 
 
 @pytest.mark.asyncio
@@ -75,8 +76,8 @@ async def test_validation_preserves_evidence_feedback_and_review_order(
 
     async def review(*args, **kwargs):
         assert events == ["validate", "persisted"]
-        assert len(evidence) == 1
-        assert evidence[0].head_sha == sha
+        checks = [item for item in evidence if isinstance(item, ValidationRun)]
+        assert len(checks) == 1 and checks[0].head_sha == sha
         events.append("review")
         return ("REVIEW_CHANGES", "Fix details") if outcome == "review_changes" else None
 
@@ -101,6 +102,9 @@ async def test_validation_preserves_evidence_feedback_and_review_order(
         assert result == (
             Action.VALIDATION_PASSED if outcome == "passed" else Action.VALIDATION_FAILED
         )
+    batches = [item for item in evidence if isinstance(item, TaskEvent)]
+    assert len(batches) == 1 and batches[0].payload["passed"] == passed
+    assert batches[0].payload["requirement_version"] == 1
     assert task.current_revision == sha
     if passed:
         assert native.checkpoint["publication_checks"] == commands

@@ -46,10 +46,14 @@
   });
 
   function persistLayout(nextPositions = savedPositions, nextNicknames = nicknames) {
-    localStorage.setItem(
-      storageKey,
-      JSON.stringify({ positions: nextPositions, nicknames: nextNicknames })
-    );
+    try {
+      localStorage.setItem(
+        storageKey,
+        JSON.stringify({ positions: nextPositions, nicknames: nextNicknames })
+      );
+    } catch {
+      /* storage unavailable, layout just won't persist */
+    }
   }
 
   function renameNode(id: string, nickname: string) {
@@ -460,9 +464,6 @@
   @media (prefers-reduced-motion: reduce) {
     .flow :global(.svelte-flow__edge.animated path) {
       animation: none;
-    }
-    .flow :global(.svelte-flow__node[style*='node-pulse']) {
-      animation: none !important;
     }
   }
 </style>

@@ -14,7 +14,9 @@ def prompt_cache_settings(model: str, instructions: str) -> dict[str, Any]:
     return settings
 
 
-def bounded_request_context(model: str, instructions: str, packet: dict) -> dict[str, Any]:
+def bounded_request_context(
+    model: str, instructions: str, packet: dict[str, Any]
+) -> dict[str, Any]:
     """Put reusable repository evidence before the task, without duplicating it."""
     dynamic = dict(packet)
     shared = dynamic.pop("repository_context", None)

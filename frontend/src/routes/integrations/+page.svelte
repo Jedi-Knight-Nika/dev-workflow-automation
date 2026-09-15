@@ -10,6 +10,8 @@
     getGithubAppInstallUrl,
     getGithubInstallationAccount,
     listLinearWorkflowStates,
+    listLinearMembers,
+    type LinearMember,
     listTrelloBoards,
     listTrelloLists,
     requestIntegrationSync
@@ -35,6 +37,7 @@
     { name: 'github', type: 'source_control', label: 'GitHub', active: true },
     { name: 'linear', type: 'task_management', label: 'Linear', active: true },
     { name: 'trello', type: 'task_management', label: 'Trello', active: true },
+    { name: 'slack', type: 'communication', label: 'Slack', active: true },
     { name: 'openai', type: 'ai', label: 'OpenAI', active: true },
     { name: 'anthropic', type: 'ai', label: 'Anthropic', active: true },
     { name: 'deepseek', type: 'ai', label: 'DeepSeek', active: true }
@@ -42,12 +45,20 @@
   const groups = [
     { type: 'source_control', label: 'Source control' },
     { type: 'task_management', label: 'Task management' },
+    { type: 'communication', label: 'Conversations' },
     { type: 'ai', label: 'AI providers' }
   ];
   const credentialHelp: Record<
     string,
     { label: string; description: string; url: string; action: string }
   > = {
+    slack: {
+      label: 'Slack OAuth token',
+      description:
+        'Use a token with chat:write and conversation history access. Channel routes and the webhook signing secret are configured on the server.',
+      url: 'https://api.slack.com/apps',
+      action: 'Open Slack apps'
+    },
     linear: {
       label: 'Linear personal API key',
       description: 'Create a personal API key in Linear Settings → Security & access → API.',
@@ -68,7 +79,8 @@
     },
     deepseek: {
       label: 'DeepSeek API key',
-      description: 'Used only for an explicitly configured interpreter fallback.',
+      description:
+        'Available for explicitly selected Coordinator and interpreter models; experimental models keep their own verified prices.',
       url: 'https://platform.deepseek.com/api_keys',
       action: 'Open DeepSeek API keys'
     }
@@ -81,7 +93,9 @@
   let editing = '';
   let credential = '';
   let saving = false;
-  let triggerLabel = 'AI Ready';
+  let assigneeId = '';
+  let sourceStateIds: string[] = [];
+  let linearMembers: LinearMember[] = [];
   let repositoryId = '';
   let todoStateId = '';
   let inProgressStateId = '';
@@ -196,7 +210,8 @@
         configuration:
           provider.name === 'linear'
             ? {
-                trigger_label: triggerLabel,
+                assignee_id: assigneeId || null,
+                source_state_ids: sourceStateIds,
                 repository_id: repositoryId || null,
                 todo_state_id: todoStateId || null,
                 in_progress_state_id: inProgressStateId || null,
@@ -232,7 +247,10 @@
     loadingLinearStates = true;
     formError = '';
     try {
-      linearStates = await listLinearWorkflowStates();
+      [linearStates, linearMembers] = await Promise.all([
+        listLinearWorkflowStates(),
+        listLinearMembers()
+      ]);
       if (!todoStateId) {
         todoStateId = linearStates.find((state) => state.name.toLowerCase() === 'todo')?.id || '';
       }
@@ -540,7 +558,9 @@
                     {/if}
                     {#if provider.name === 'linear'}
                       <LinearWorkflowFields
-                        bind:triggerLabel
+                        bind:assigneeId
+                        bind:sourceStateIds
+                        {linearMembers}
                         bind:repositoryId
                         bind:todoStateId
                         bind:inProgressStateId
@@ -647,7 +667,10 @@
                         const existing = integrationsResource.data.find(
                           (item) => item.provider_name === provider.name
                         )?.configuration;
-                        triggerLabel = String(existing?.trigger_label || 'AI Ready');
+                        assigneeId = String(existing?.assignee_id || '');
+                        sourceStateIds = Array.isArray(existing?.source_state_ids)
+                          ? existing.source_state_ids.map(String)
+                          : [];
                         repositoryId = String(existing?.repository_id || '');
                         inReviewStateId = String(existing?.in_review_state_id || '');
                         readyForTestingStateId = String(existing?.ready_for_testing_state_id || '');

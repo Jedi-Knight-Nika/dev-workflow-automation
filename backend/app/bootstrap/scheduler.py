@@ -29,6 +29,8 @@ def create_scheduler(settings: Settings) -> Scheduler:
         SessionLocal,
         worker_id,
         settings.worker_lease_seconds,
+        global_developer_slots=settings.global_developer_slots,
+        validation_slots=settings.validation_slots,
         orphan_cleanup=lambda: reap_orphans(SessionLocal, settings),
     )
     return Scheduler(

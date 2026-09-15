@@ -17,7 +17,7 @@ from app.engineering.domain.lifecycle import Action, WaitReason
 from app.engineering.domain.publication_title import publication_title
 from app.engineering.infrastructure.consultation import consult, save_consultation_feedback
 from app.engineering.infrastructure.models import ValidationRun
-from app.engineering.infrastructure.task_models import Task
+from app.engineering.infrastructure.task_models import Task, TaskEvent
 from app.engineering.infrastructure.validator_runner import ValidationManifest
 from app.platform.configuration.settings import Settings
 from app.repositories.infrastructure.models import RepositoryRuntimeProfile
@@ -106,6 +106,19 @@ async def validate_phase(
                     if "@sha256:" in runtime.validator_image_ref
                     else None
                 )
+        session.add(
+            TaskEvent(
+                task_id=task.id,
+                source="engineering",
+                event_type="VALIDATION_BATCH_COMPLETED",
+                payload={
+                    "passed": passed,
+                    "head_sha": result["head_sha"],
+                    "requirement_version": task.requirement_version,
+                    "job_id": str(lease.job_id),
+                },
+            )
+        )
         for check in result["checks"]:
             session.add(
                 ValidationRun(

@@ -3,6 +3,7 @@
   import type { TaskMessage } from '$lib/types';
 
   let {
+    coordinationMode = 'off',
     messages,
     taskStatus,
     hasOlder = false,
@@ -11,6 +12,7 @@
     onLoadOlder,
     onSend
   }: {
+    coordinationMode?: 'off' | 'shadow' | 'active';
     messages: TaskMessage[];
     taskStatus: string;
     hasOlder?: boolean;
@@ -21,23 +23,31 @@
   } = $props();
   let draft = $state('');
   let error = $state('');
+  let submitting = $state(false);
   async function submit() {
-    if (!draft.trim() || sending) return;
+    if (!draft.trim() || sending || submitting) return;
+    const submittedDraft = draft;
+    submitting = true;
     error = '';
     try {
-      await onSend(draft.trim());
-      draft = '';
+      await onSend(submittedDraft.trim());
+      if (draft === submittedDraft) draft = '';
     } catch (cause) {
       error = String(cause);
+    } finally {
+      submitting = false;
     }
   }
 </script>
 
 <section class="rounded-xl border border-line bg-panel p-5">
-  <h2 class="font-semibold">Task notes and feedback</h2>
+  <h2 class="font-semibold">Task conversation</h2>
   <p class="my-2 text-xs text-muted">
-    Notes do not start AI work. Explicit /feedback, /pause, /resume and /cancel commands include the
-    task ID. Current status: {taskStatus}.
+    {#if coordinationMode === 'active'}Send a question or describe a change. The Coordinator will
+      respond here and request engineering work when needed.
+    {:else}Notes do not start engineering work. Explicit /feedback, /pause, /resume and /cancel
+      commands include the task ID.{/if}
+    Current status: {taskStatus}.
   </p>
   {#if hasOlder}<Button disabled={loadingOlder} onclick={onLoadOlder}
       >{loadingOlder ? 'Loading…' : 'Earlier notes'}</Button
@@ -46,7 +56,9 @@
     {#each messages as message (message.id)}
       <article class="border-l border-line pl-3">
         <p class="text-xs text-muted">
-          {message.author_name} · {message.author_role || message.author_type}
+          {message.context.provider
+            ? String(message.context.provider) + ' · '
+            : ''}{message.author_name} · {message.author_role || message.author_type}
           ·
           <time datetime={message.created_at}>{new Date(message.created_at).toLocaleString()}</time>
         </p>
@@ -71,8 +83,12 @@
       placeholder="Add context or a note…"
     ></textarea>
     {#if error}<p role="alert" class="text-sm text-danger">{error}</p>{/if}
-    <Button type="submit" disabled={sending || !draft.trim()}
-      >{sending ? 'Saving…' : 'Save note'}</Button
+    <Button type="submit" disabled={sending || submitting || !draft.trim()}
+      >{sending || submitting
+        ? 'Sending…'
+        : coordinationMode === 'active'
+          ? 'Send message'
+          : 'Save note'}</Button
     >
   </form>
 </section>

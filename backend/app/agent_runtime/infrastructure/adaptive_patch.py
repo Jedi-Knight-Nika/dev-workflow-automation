@@ -1,6 +1,7 @@
 """Sequential bounded patch composition inside the existing isolated Developer turn."""
 
 import asyncio
+from dataclasses import asdict
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
@@ -8,6 +9,7 @@ import httpx
 from pydantic import BaseModel
 
 from app.agent_runtime.application.harness import TurnReceipt
+from app.agent_runtime.domain.repair_progress import repair_allowance
 from app.agent_runtime.domain.usage import Usage
 from app.agent_runtime.infrastructure.bounded_inference import BoundedInference, BoundedStop
 from app.agent_runtime.infrastructure.checkpoints import workspace_facts
@@ -105,9 +107,24 @@ class AdaptivePatchExecution:
     ):
         self.harness = harness
         self.mode = mode
-        self.inference = BoundedInference(harness)
+        self.inference = BoundedInference(harness, mode.value)
         if prior_usage is not None:
             self.inference.totals = dict(prior_usage)
+            usage = measured_usage(prior_usage)
+            amount = harness.settings.pricing.calculate(usage) if harness.settings.pricing else None
+            if amount is None:
+                self.inference.uncertain = True
+            else:
+                self.inference.cost_usd = amount
+                self.inference.priced_requests.append(
+                    {
+                        "provider": harness.settings.provider,
+                        "model": harness.settings.model,
+                        "kind": "fast_attempt",
+                        "pricing_id": harness.settings.pricing_id,
+                        "usage": asdict(usage),
+                    }
+                )
             self.inference.usage_by_kind["fast_attempt"] = dict(prior_usage)
             self.inference.provider_seconds = provider_seconds
             self.inference.calls["patch"] = sum(
@@ -117,6 +134,8 @@ class AdaptivePatchExecution:
         self.allowed: set[str] = set()
         self.initial_changed: set[str] = set()
         self.total_units = 0
+        self.attempted_units = 0
+        self.replans = 0
 
     async def facts(self) -> dict[str, Any]:
         h = self.harness
@@ -233,11 +252,13 @@ class AdaptivePatchExecution:
         unit: WorkUnit,
         *,
         failure: dict[str, Any] | None = None,
-        attempts: int = 2,
+        attempts: int = 4,
     ) -> dict[str, Any]:
         unit_paths = unit.candidate_files + unit.new_files
         self.allowed.update(unit_paths)
         created: set[str] = set()
+        previous_failures: frozenset[str] | None = None
+        effort = "low"
         for attempt in range(attempts):
             self.progress("REPAIRING" if failure else "IMPLEMENTING", unit.id)
             packet = await self.harness.operation(
@@ -260,7 +281,15 @@ class AdaptivePatchExecution:
                 **packet,
                 "work_unit": unit.model_dump(),
                 "integration_invariants": graph.integration_invariants,
-                "completed_units": self.results,
+                "completed_units": (
+                    [
+                        {"unit_id": r["unit_id"], "exported_contracts": r["exported_contracts"]}
+                        for r in self.results
+                    ]
+                    if failure
+                    else self.results
+                ),
+                "context_strategy": "current_unit_and_contracts" if failure else "work_graph",
                 "previous_failure": failure,
                 "instruction": "Implement ONLY this work unit; the original objective is completed across all units.",
             }
@@ -282,6 +311,7 @@ class AdaptivePatchExecution:
                 instructions=CONTRACT,
                 packet=current,
                 schema=FORMAT,
+                effort=effort,
             )
             if proposal.get("outcome") != "PATCH":
                 raise BoundedStop(
@@ -299,6 +329,8 @@ class AdaptivePatchExecution:
             if applied.get("error"):
                 failure = {"kind": "PATCH_APPLY_FAILURE", "error": applied["error"]}
                 self.save("work_apply_failure", {"unit_id": unit.id, "failure": failure})
+                if attempt >= 1:
+                    raise BoundedStop("PATCH_STALLED", "Repeated patch application failure")
                 continue
             facts = await self.facts()
             created.update(set(applied["changed_files"]) & set(unit.new_files))
@@ -318,10 +350,148 @@ class AdaptivePatchExecution:
                 }
                 self.save("work_unit_result", result)
                 return result
+            failing_checks = frozenset(
+                str(check.get("name", "unknown"))
+                for check in checks.get("checks", [])
+                if check.get("exit_code") != 0
+            ) or frozenset({"unknown-check-failure"})
+            allowance = repair_allowance(
+                previous_failures,
+                failing_checks,
+                attempts=attempt + 1,
+                hard_attempt_limit=attempts,
+            )
+            self.save("repair_progress", {"unit_id": unit.id, **asdict(allowance)})
+            if not allowance.continue_work:
+                self.save(
+                    "work_unit_failure", {"unit_id": unit.id, "evidence": compact_failure(checks)}
+                )
+                raise BoundedStop(
+                    "PATCH_" + allowance.classification, allowance.reason + ": " + unit.id
+                )
+            previous_failures = failing_checks
+            # Both profile and Team policy are ceilings; no implicit high effort/model switch.
+            effort = min(
+                allowance.effort,
+                self.harness.settings.effort,
+                key=["none", "low", "medium", "high"].index,
+            )
             failure = compact_failure(checks)
         raise BoundedStop(
-            "PATCH_LIMIT", "Work unit exhausted its initial patch and bounded repair: " + unit.id
+            "PATCH_LIMIT", "Work unit exhausted its progress-based repair allowance: " + unit.id
         )
+
+    async def plan(
+        self,
+        client: httpx.AsyncClient,
+        prompt: str,
+        survey: dict[str, Any],
+        findings: dict[str, Any] | None,
+        baseline: dict[str, Any],
+    ) -> WorkGraph:
+        self.progress("REPLANNING" if self.replans else "PLANNING")
+        proposal = PlanProposal.model_validate(
+            await self.inference.generate(
+                client,
+                kind="planning",
+                instructions=PLANNER,
+                packet={
+                    "original_requirement_and_guidance": prompt,
+                    "repository_evidence": survey,
+                    "investigation": findings,
+                    "completed_units": self.results,
+                    "remaining_unit_allowance": 6 - self.attempted_units,
+                    "planning_scope": "Remaining work only; preserve completed contracts and current edits",
+                },
+                schema=output_format(PlanProposal, "work_graph"),
+                effort="medium",
+                output_limit=3500,
+            )
+        )
+        graph = proposal.graph
+        if graph is None:
+            raise BoundedStop(
+                "PATCH_BLOCKED", proposal.blocked_reason or "Planner needs more evidence"
+            )
+        available = set(survey["repository_paths"])
+        ordered = graph.ordered_units()
+        if len(ordered) > 6 - self.attempted_units:
+            raise BoundedStop("PATCH_LIMIT", "Replanning cannot reset the six-unit allowance")
+        for unit in ordered:
+            if (
+                not set(unit.candidate_files + unit.reference_files) <= available
+                or set(unit.new_files) & available
+            ):
+                raise BoundedStop(
+                    "PATCH_FAILED",
+                    "Plan references unavailable files or recreates existing source",
+                )
+            available.update(unit.new_files)
+        self.total_units = len(self.results) + len(ordered)
+        self.save(
+            "work_graph",
+            {
+                "graph": graph.model_dump(),
+                "starting_sha": baseline["workspace_head"],
+                "index_key": survey.get("index_key"),
+                "replan": self.replans,
+            },
+        )
+        return graph
+
+    async def execute_graph(
+        self,
+        client: httpx.AsyncClient,
+        prompt: str,
+        survey: dict[str, Any],
+        findings: dict[str, Any] | None,
+        baseline: dict[str, Any],
+    ) -> WorkGraph:
+        while True:
+            try:
+                graph = await self.plan(client, prompt, survey, findings, baseline)
+                for unit in graph.ordered_units():
+                    self.attempted_units += 1
+                    self.results.append(await self.unit(client, prompt, graph, unit))
+                return graph
+            except BoundedStop as exc:
+                if (
+                    exc.code not in {"PATCH_STALLED", "PATCH_BLOCKED"}
+                    or self.replans >= self.harness.settings.token_policy.adaptive_replans
+                    or self.attempted_units >= 6
+                    or self.inference.uncertain
+                ):
+                    raise
+                self.replans += 1
+                # Persist the transition before another purchase. The shared admission
+                # ledger and crash guard remain authoritative across this strategy change.
+                self.save(
+                    "replan_requested",
+                    {"reason": str(exc), "code": exc.code, "replan": self.replans},
+                )
+                survey = await self.harness.operation("survey", {"objective": prompt})
+                if survey.get("error") or not survey.get("repository_paths"):
+                    raise BoundedStop(
+                        "PATCH_TOOL_FAILURE", "Fresh replan evidence unavailable"
+                    ) from exc
+                survey["replan_evidence"] = {
+                    "reason": str(exc),
+                    "completed_units": self.results,
+                    "latest_failure": next(
+                        (
+                            event
+                            for event in reversed(self.harness.history)
+                            if event.get("type") in {"work_unit_failure", "work_apply_failure"}
+                        ),
+                        None,
+                    ),
+                }
+                self.mode = ExecutionMode.BOUNDED_AGENTIC
+                self.inference.mode = self.mode.value
+                findings = await self.investigate(client, prompt, survey)
+                self.mode = ExecutionMode.STRUCTURED_MULTI_PATCH
+                self.inference.mode = self.mode.value
+                baseline = await self.facts()
 
     async def run(self, prompt: str) -> TurnReceipt:
         h = self.harness
@@ -350,51 +520,8 @@ class AdaptivePatchExecution:
                     )
                     if findings is not None:
                         self.mode = ExecutionMode.STRUCTURED_MULTI_PATCH
-                    self.progress("PLANNING")
-                    proposal = PlanProposal.model_validate(
-                        await self.inference.generate(
-                            client,
-                            kind="planning",
-                            instructions=PLANNER,
-                            packet={
-                                "original_requirement_and_guidance": prompt,
-                                "repository_evidence": survey,
-                                "investigation": findings,
-                            },
-                            schema=output_format(PlanProposal, "work_graph"),
-                            effort="medium",
-                            output_limit=3500,
-                        )
-                    )
-                    graph = proposal.graph
-                    if graph is None:
-                        raise BoundedStop(
-                            "PATCH_BLOCKED",
-                            proposal.blocked_reason or "Planner needs more evidence",
-                        )
-                    available = set(survey["repository_paths"])
-                    ordered_units = graph.ordered_units()
-                    self.total_units = len(ordered_units)
-                    for planned in ordered_units:
-                        if (
-                            not set(planned.candidate_files + planned.reference_files) <= available
-                            or set(planned.new_files) & available
-                        ):
-                            raise BoundedStop(
-                                "PATCH_BLOCKED",
-                                "Plan references unavailable files or recreates existing source",
-                            )
-                        available.update(planned.new_files)
-                    self.save(
-                        "work_graph",
-                        {
-                            "graph": graph.model_dump(),
-                            "starting_sha": baseline["workspace_head"],
-                            "index_key": survey.get("index_key"),
-                        },
-                    )
-                    for unit in ordered_units:
-                        self.results.append(await self.unit(client, prompt, graph, unit))
+                    self.inference.mode = self.mode.value
+                    graph = await self.execute_graph(client, prompt, survey, findings, baseline)
                     self.progress("INTEGRATION_CHECKS")
                     paths = sorted(self.allowed | self.initial_changed)
                     checks = await self.checks(paths, intermediate=False)
@@ -433,7 +560,7 @@ class AdaptivePatchExecution:
                         "IMPLEMENTED\n"
                         + self.results[0]["summary"]
                         + "\n"
-                        + "\n".join("- Completed " + u.objective for u in ordered_units)
+                        + "\n".join("- " + r["summary"] for r in self.results)
                         + "\nIntegration developer checks passed; full validation required."
                     )
         except BoundedStop as exc:
@@ -469,6 +596,7 @@ class AdaptivePatchExecution:
                 "observed": usage.totals,
                 "by_kind": usage.usage_by_kind,
                 "usage_complete": not usage.uncertain,
+                **({"priced_requests": usage.priced_requests} if h.settings.routed_models else {}),
             },
             provider_duration_ms=None if usage.uncertain else int(usage.provider_seconds * 1000),
             failure_code=failure,

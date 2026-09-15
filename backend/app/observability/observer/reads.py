@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import load_only
 from sqlalchemy.sql.elements import ColumnElement
 
+from app.agent_runtime.infrastructure.cost_queries import settled_cost
 from app.agent_runtime.infrastructure.models import AIRun
 from app.analytics.application.ports import AnalyticsQueries
 from app.engineering.infrastructure.models import ValidationRun
@@ -150,7 +151,7 @@ class ProductObserverReads:
             snap.tasks_truncated = len(task_rows) > 100
             task_rows = task_rows[:100]
             ids = [t.id for t in task_rows]
-            cost = func.coalesce(AIRun.provider_cost_usd, AIRun.calculated_cost_usd)
+            cost = settled_cost()
             usage = {
                 r.task_id: r
                 for r in (
