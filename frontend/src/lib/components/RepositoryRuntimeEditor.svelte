@@ -25,6 +25,7 @@
     if (!runtime) return;
     busy = true;
     error = '';
+    notice = '';
     try {
       const argv: unknown = JSON.parse(commands);
       if (!Array.isArray(argv)) throw new Error('Use JSON arrays of arguments');

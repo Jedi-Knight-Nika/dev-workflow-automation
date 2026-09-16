@@ -128,6 +128,7 @@
             xAxis: { type: 'time' },
             yAxis: { type: 'value' },
             series: history.series.map((row) => ({
+              id: row.labels.name,
               name: row.labels.name,
               type: 'line',
               showSymbol: false,

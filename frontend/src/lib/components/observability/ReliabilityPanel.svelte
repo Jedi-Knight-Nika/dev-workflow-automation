@@ -34,6 +34,7 @@
       xAxis: { type: 'time' },
       yAxis: { type: 'value', min: 0, max: 1 },
       series: (availability?.services ?? []).map((s) => ({
+        id: s.service,
         name: s.service,
         type: 'line',
         step: 'end',

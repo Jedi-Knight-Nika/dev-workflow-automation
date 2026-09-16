@@ -8,6 +8,7 @@
     required = false,
     ariaLabel,
     class: extraClass = '',
+    onchange,
     children
   }: {
     value?: string;
@@ -16,6 +17,7 @@
     required?: boolean;
     ariaLabel?: string;
     class?: string;
+    onchange?: (event: Event & { currentTarget: HTMLSelectElement }) => void;
     children: Snippet;
   } = $props();
 </script>
@@ -26,6 +28,7 @@
   {required}
   aria-label={ariaLabel}
   bind:value
+  {onchange}
   class="border-line w-full rounded-md border bg-input p-3 text-heading outline-none focus:border-brand {extraClass}"
 >
   {@render children()}

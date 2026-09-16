@@ -46,10 +46,14 @@
   });
 
   function persistLayout(nextPositions = savedPositions, nextNicknames = nicknames) {
-    localStorage.setItem(
-      storageKey,
-      JSON.stringify({ positions: nextPositions, nicknames: nextNicknames })
-    );
+    try {
+      localStorage.setItem(
+        storageKey,
+        JSON.stringify({ positions: nextPositions, nicknames: nextNicknames })
+      );
+    } catch {
+      /* storage unavailable, layout just won't persist */
+    }
   }
 
   function renameNode(id: string, nickname: string) {

@@ -136,7 +136,13 @@ async function consumeStream<T>(response: Response, receive: (event: T) => void)
           .map((line) => line.slice(5).trimStart())
           .join('\n');
         if (!payload) continue;
-        receive(JSON.parse(payload) as T);
+        let event: T;
+        try {
+          event = JSON.parse(payload) as T;
+        } catch {
+          continue; // A single malformed frame should not end the whole stream.
+        }
+        receive(event);
       }
     }
   } finally {

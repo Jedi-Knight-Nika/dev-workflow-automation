@@ -29,8 +29,9 @@
         tooltip,
         animation: !reduce,
         textStyle: { color: textColor }
-      },
-      { notMerge: true }
+      }
+      // Merge (default) instead of notMerge: a live-polled chart should patch
+      // changed values in place, not tear down and rebuild every refresh.
     );
   });
   onMount(() => {
