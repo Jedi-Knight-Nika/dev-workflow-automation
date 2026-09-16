@@ -237,7 +237,13 @@ async function setup(page: Page, history = events) {
           delayed: false,
           warnings: [],
           live_available: true,
-          last_projected_at: start
+          last_projected_at: start,
+          capacity: {
+            as_of: start,
+            through_sequence: history.length,
+            truncated: false,
+            teams: []
+          }
         }
       });
     }
@@ -300,6 +306,7 @@ test('loads on demand, replays through a frozen sequence, and releases graphics 
   await dialog.getByRole('button', { name: 'Start visualization' }).click();
   const timeline = dialog.getByRole('slider', { name: 'Activity timeline' });
   await expect(timeline).toHaveAttribute('max', '4');
+  await expect(dialog.getByRole('alert')).toHaveCount(0);
   expect(await page.evaluate(() => window.activityHarness.workers)).toBe(1);
   const pages = calls.filter((call) => call.includes('/visualization/events'));
   expect(pages).toHaveLength(2);
@@ -318,6 +325,7 @@ test('loads on demand, replays through a frozen sequence, and releases graphics 
   await expect(dialog).toHaveClass(/maximized/);
   await page.setViewportSize({ width: 1100, height: 900 });
   await expect(timeline).toHaveValue('4');
+  await expect(dialog.getByRole('alert')).toHaveCount(0);
   await page.screenshot({ path: '/tmp/aew-activity.png' });
   await dialog.getByRole('button', { name: 'Close activity visualization' }).click();
   await expect(dialog).toHaveCount(0);

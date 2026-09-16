@@ -225,7 +225,8 @@
     });
   }
   async function start() {
-    const flight = preflight;
+    // Workers require plain data; nested Svelte state proxies cannot be transferred.
+    const flight = $state.snapshot(preflight);
     if (!flight || flight.too_large) return;
     stopView();
     error = '';
