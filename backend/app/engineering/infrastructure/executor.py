@@ -185,15 +185,12 @@ class SqlPhaseExecutor:
                 return await self._publish(client, lease, task, native, repository)
             if lease.action == "DEVELOPER_TURN":
                 from app.agent_runtime.infrastructure.bounded_recovery import (
+                    schedule_bounded_repair,
                     schedule_candidate_validation,
                 )
 
                 if await schedule_candidate_validation(self.sessions, lease, native.id):
                     return Action.VALIDATE_CANDIDATE
-                from app.agent_runtime.infrastructure.bounded_recovery import (
-                    schedule_bounded_repair,
-                )
-
                 if task.stage == "DEVELOPING" and await schedule_bounded_repair(
                     self.sessions, lease, native.id
                 ):
