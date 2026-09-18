@@ -26,3 +26,25 @@ it('coalesces event bursts and never overlaps requests', async () => {
   await vi.advanceTimersByTimeAsync(1000);
   expect(load).toHaveBeenCalledTimes(2);
 });
+
+it('now() runs immediately when idle and never overlaps a load already in flight', async () => {
+  vi.useFakeTimers();
+  let release!: () => void;
+  const pending = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const load = vi
+    .fn()
+    .mockImplementationOnce(() => pending)
+    .mockResolvedValue(undefined);
+  const refresh = createLiveRefresh(load, 100);
+  refresh.now();
+  expect(load).toHaveBeenCalledTimes(1);
+  refresh.request();
+  refresh.now();
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(load).toHaveBeenCalledTimes(1);
+  release();
+  await vi.advanceTimersByTimeAsync(100);
+  expect(load).toHaveBeenCalledTimes(2);
+});

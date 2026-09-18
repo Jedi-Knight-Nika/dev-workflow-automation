@@ -65,7 +65,7 @@
     else if (!forward && cursors.length > 1) cursors = cursors.slice(0, -1);
     else return;
     loading = true;
-    void refresh();
+    live.now();
   }
   const live = createLiveRefresh(refresh);
   const creationRequest = createTaskRequest();

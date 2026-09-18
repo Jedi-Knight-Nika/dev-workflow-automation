@@ -38,8 +38,17 @@ export function createLiveRefresh(load: () => Promise<void>, delay = 350) {
         void drain();
       }, delay);
   }
+  /** Run without waiting for the debounce, still serialized against a load already in flight. */
+  function now() {
+    if (stopped) return;
+    clearTimeout(timer);
+    timer = undefined;
+    if (running) pending = true;
+    else void drain();
+  }
   return {
     request,
+    now,
     stop() {
       stopped = true;
       clearTimeout(timer);
