@@ -7,7 +7,6 @@ from sqlalchemy import DateTime, Index, String, delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.platform.configuration.settings import get_settings
 from app.platform.messaging.application.ports import OutboxClaim, TaskWakeup
 from app.platform.persistence.base import Base, utcnow
 
@@ -28,8 +27,7 @@ class NotificationOutbox(Base):
 
 
 def enqueue_task_wakeup(session: AsyncSession, task_id: UUID, revision: int) -> None:
-    if get_settings().event_transport == "rabbitmq":
-        session.add(NotificationOutbox(task_id=task_id, revision=revision))
+    session.add(NotificationOutbox(task_id=task_id, revision=revision))
 
 
 class SqlEventOutbox:

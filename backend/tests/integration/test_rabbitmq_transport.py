@@ -15,7 +15,6 @@ def broker():
     url = os.getenv("TEST_RABBITMQ_URL")
     if not url:
         pytest.skip("Set TEST_RABBITMQ_URL to an isolated RabbitMQ test vhost")
-    pytest.importorskip("aio_pika")
     return url, importlib.import_module("app.platform.messaging.infrastructure.rabbitmq")
 
 
@@ -80,14 +79,13 @@ async def test_handler_failure_is_redelivered_after_connection_closes(broker):
 
 
 async def test_transactional_outbox_to_projection_is_duplicate_safe(
-    broker, postgres_session_factory, monkeypatch
+    broker, postgres_session_factory
 ):
     from sqlalchemy import delete, func, select
 
     from app.activity.infrastructure.projector import ActivityProjector
     from app.engineering.domain.lifecycle import Action
     from app.engineering.infrastructure.lifecycle import record_transition
-    from app.platform.configuration.settings import get_settings
     from app.platform.messaging.application.dispatch import DispatchOutbox, DispatchResult
     from app.platform.messaging.infrastructure.outbox import SqlEventOutbox
     from app.platform.persistence.registry import ActivityEvent, NotificationOutbox, Task
@@ -95,8 +93,8 @@ async def test_transactional_outbox_to_projection_is_duplicate_safe(
     url, rabbit = broker
     factory = postgres_session_factory
     task_id = uuid4()
-    monkeypatch.setattr(get_settings(), "event_transport", "rabbitmq")
     async with factory.begin() as session:
+        await session.execute(delete(NotificationOutbox))
         session.add(Task(id=task_id, title="Broker projection round trip"))
         await session.flush()
         await record_transition(session, task_id, Action.CANCEL, expected_version=1, actor="test")

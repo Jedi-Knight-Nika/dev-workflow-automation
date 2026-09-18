@@ -6,9 +6,9 @@ Commands run from the repository root unless stated otherwise. Keep secrets and 
 
 ## Local setup
 
-1. Install Docker with Compose.
+1. Install Docker with Compose and OpenSSL (used to generate local secrets).
 2. For a new checkout, copy `.env.example` to `.env`. Do not overwrite existing configuration. Replace placeholder secrets; generate independent secrets with `openssl rand -hex 32`.
-3. Keep PostgreSQL credentials synchronized with both database URLs. Configure the GitHub App identity and PEM mount when using repository integration.
+3. Keep PostgreSQL credentials synchronized with both database URLs. Leave the RabbitMQ fields blank for automatic first-time setup; no external account is needed. Configure the GitHub App identity and PEM mount when using repository integration.
 4. Start the console:
 
 ```sh
@@ -19,25 +19,29 @@ UI: `http://localhost:3000`. API: `http://localhost:8000/api`.
 
 Choose `console`, `execution` or `full` explicitly. Execution adds native workers; full also adds monitoring/alerts. The shell default is **full**, not console. Execution modes can resume authorized queued work and require prepared repository images, validation commands, provider credentials, verified prices, Team enrollment, budgets and reviewer policy. Console does not stop separately running workers. `--no-build` reuses existing images and does not deploy source changes.
 
-## Optional RabbitMQ notifications
+## RabbitMQ messaging
 
-The default stack needs no broker. The optional adapter currently accelerates **activity projection after task lifecycle changes only**; it does not dispatch paid work or replace the engineering scheduler. Keep the normal `activity` service running for periodic reconciliation and file maintenance.
+RabbitMQ and the `messaging` process start with every normal Compose mode and with the production stack. There is no transport selector or extra messaging overlay. Lifecycle changes always record a transactional notification; RabbitMQ currently delivers these to **activity projection**, not to paid-work dispatch. The `activity` service still performs periodic reconciliation and file maintenance, including during broker outages.
 
-After backing up your database, deploy the backend with migrations through `0015_notification_outbox`. Set `RABBITMQ_USER`, a strong `RABBITMQ_PASSWORD`, and `RABBITMQ_URL=amqp://USER:URL_ENCODED_PASSWORD@rabbitmq:5672/aew` in `.env`. Credentials in the URL must match the broker credentials. Then, from the repository root:
+Normal local startup (including the desktop launcher and `make up`) creates a random RabbitMQ password and matching URL in the ignored `.env` file when the RabbitMQ fields are missing, blank or unchanged examples. No registration or external credential provider is involved. The file is written with owner-only permissions, credentials are never printed, and existing credentials are reused on subsequent starts. Partial custom configuration or existing broker data without its credentials stops setup rather than silently changing the password.
+
+When upgrading an existing checkout, back up the database and remove the obsolete `EVENT_TRANSPORT` setting. Rebuild through your normal startup command; the API applies migrations through `0015_notification_outbox` before messaging starts:
 
 ```sh
-docker compose -f compose.yaml -f deploy/compose.messaging.yaml up -d --build
+sh scripts/start-local.sh --mode console
 ```
 
-When using native execution, include `-f deploy/compose.execution.yaml` **before** the messaging overlay. The overlay enables notification writes in the API/worker and adds an isolated messaging process. Only that process receives the broker URL; no broker ports are published to the host. This is a single-node development deployment, not replicated HA. Changing bootstrap credentials does not rotate an existing RabbitMQ volume's credentials. Production needs its own private deployment, permissions, backups and TLS when crossing hosts.
+For production or direct `docker compose` startup, run `sh scripts/ensure-rabbitmq-env.sh deploy/.env` (or `.env` locally) first, with Docker running. It only prepares credentials; it does not start services. For an existing or external broker, supply its actual `RABBITMQ_USER`, `RABBITMQ_PASSWORD` and `RABBITMQ_URL` instead; URL-encode credentials in the URL. Keep the generated environment file backed up securely with the broker data. Do not delete the broker volume to recover a missing password.
 
-For host-run development, install `uv sync --locked --all-extras` in `backend`, use a reachable broker URL, set `EVENT_TRANSPORT=rabbitmq` consistently on producers and the messaging process, and run `uv run --extra messaging python -m app.messaging_runner` separately. Normal PostgreSQL mode does not import or connect to the RabbitMQ client.
+Use `execution` or `full` instead when native execution is configured. Only the messaging process receives the broker URL; no broker ports are published to the host. Broker data uses a persistent volume. These Compose definitions are single-node deployments, not replicated HA. Changing bootstrap credentials does not rotate an existing RabbitMQ volume's credentials. Production requires protected volumes, appropriate permissions and TLS when crossing hosts.
 
-Inspect `docker compose -f compose.yaml -f deploy/compose.messaging.yaml logs messaging`. Connection failures are logged without exception bodies; publication failures retain their outbox rows and retry with backoff. The minute-level status log includes pending count, oldest age, empty polls and publications. Authenticated `/metrics` exposes `aew_notification_outbox_pending` and `aew_notification_outbox_oldest_seconds`; the controller's metrics also include scheduler claim counts/duration. Queue and dead-letter counts come from RabbitMQ monitoring, not the application's task backlog.
+For host-run development, install `uv sync --locked --all-extras` in `backend`, use a reachable broker URL, and run `uv run python -m app.messaging_runner` alongside the API and activity process. The client is a normal backend dependency, not a package extra. Compose remains the single-command way to start the complete system.
 
-Rollback: stop the `messaging` service, then recreate API/worker without the messaging overlay (`EVENT_TRANSPORT=postgres`). Keep the normal `activity` service running. No task-state migration is needed. Pending outbox rows remain available if RabbitMQ is re-enabled; confirmed rows are retained for seven days and then pruned in bounded batches. Never prune unpublished rows. Database reconciliation, not replay of confirmed messages, repairs missed activity notifications.
+Inspect `docker compose logs messaging rabbitmq`. Connection failures are logged without exception bodies; publication failures retain their outbox rows and retry with backoff. The minute-level status log includes pending count, oldest age, empty polls and publications. Authenticated `/metrics` exposes `aew_notification_outbox_pending` and `aew_notification_outbox_oldest_seconds`; the controller's metrics also include scheduler claim counts/duration. Queue and dead-letter counts come from RabbitMQ monitoring, not the application's task backlog.
 
-Tests use `TEST_DATABASE_URL` for an isolated migrated PostgreSQL database and `TEST_RABBITMQ_URL` for a dedicated RabbitMQ test vhost. The broker tests purge/unbind their test queue, so never point them at a real deployment. CI provisions both services. Run `uv run --extra messaging pytest -q tests/integration/test_notification_outbox.py tests/integration/test_rabbitmq_transport.py` from `backend` with those variables set.
+During a broker outage, task transitions retain notifications in the database and messaging reconnects automatically. Restore the broker rather than switching transport modes. Confirmed rows are retained for seven days and then pruned in bounded batches; unpublished rows are never pruned. Database reconciliation repairs missed activity notifications without replaying paid work. Back up application state and broker data; do not delete volumes as a recovery shortcut.
+
+Tests use `TEST_DATABASE_URL` for an isolated migrated PostgreSQL database and `TEST_RABBITMQ_URL` for a dedicated RabbitMQ test vhost. The broker tests purge/unbind their test queue, so never point them at a real deployment. CI provisions both services. Run `uv run pytest -q tests/integration/test_notification_outbox.py tests/integration/test_rabbitmq_transport.py` from `backend` with those variables set.
 
 ## Development servers
 

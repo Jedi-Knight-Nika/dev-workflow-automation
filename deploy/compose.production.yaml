@@ -1,6 +1,45 @@
 name: autonomous-engineering-worker
 
 services:
+  rabbitmq:
+    image: rabbitmq:4.3
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:?Set RABBITMQ_USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD}
+      RABBITMQ_DEFAULT_VHOST: aew
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ['CMD', 'rabbitmq-diagnostics', '-q', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    mem_limit: 512m
+    cpus: 1.0
+
+  messaging:
+    build:
+      context: ../backend
+      target: api
+    command: [.venv/bin/python, -m, app.messaging_runner]
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL with URL-encoded credentials}
+      RABBITMQ_URL: ${RABBITMQ_URL:?Set RABBITMQ_URL with URL-encoded credentials and /aew vhost}
+      ACTIVITY_ENABLED: ${ACTIVITY_ENABLED:-true}
+    depends_on:
+      backend:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    init: true
+    restart: unless-stopped
+    read_only: true
+    tmpfs: [/tmp]
+    pids_limit: 32
+    mem_limit: 256m
+    cpus: 0.5
+
   proxy:
     image: caddy:2.10-alpine
     environment:
@@ -202,6 +241,7 @@ services:
     entrypoint: ['.venv/bin/python', '-m', 'app.platform.security.credential_rotation']
 
 volumes:
+  rabbitmq_data:
   postgres_data:
   workspaces:
   caddy_data:

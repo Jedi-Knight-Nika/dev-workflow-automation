@@ -7,7 +7,6 @@ from sqlalchemy import delete, select, update
 
 from app.engineering.domain.lifecycle import Action
 from app.engineering.infrastructure.lifecycle import record_transition
-from app.platform.configuration.settings import get_settings
 from app.platform.messaging.infrastructure.outbox import (
     NotificationOutbox,
     SqlEventOutbox,
@@ -17,9 +16,8 @@ from app.platform.persistence.registry import Task
 
 
 @pytest_asyncio.fixture
-async def notification_store(postgres_session_factory, monkeypatch):
+async def notification_store(postgres_session_factory):
     factory = postgres_session_factory
-    monkeypatch.setattr(get_settings(), "event_transport", "rabbitmq")
     async with factory.begin() as session:
         await session.execute(delete(NotificationOutbox))
     try:
@@ -29,12 +27,13 @@ async def notification_store(postgres_session_factory, monkeypatch):
             await session.execute(delete(NotificationOutbox))
 
 
-async def test_default_transport_does_not_create_extra_queue(notification_store, monkeypatch):
+async def test_notifications_are_always_enqueued(notification_store):
     factory, outbox = notification_store
-    monkeypatch.setattr(get_settings(), "event_transport", "postgres")
+    task_id = uuid4()
     async with factory.begin() as session:
-        enqueue_task_wakeup(session, uuid4(), 1)
-    assert await outbox.claim() is None
+        enqueue_task_wakeup(session, task_id, 1)
+    claim = await outbox.claim()
+    assert claim.event.task_id == task_id and claim.event.revision == 1
 
 
 async def test_lifecycle_and_notification_commit_or_rollback_together(notification_store):

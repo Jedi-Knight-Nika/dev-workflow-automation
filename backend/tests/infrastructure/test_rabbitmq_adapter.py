@@ -12,7 +12,6 @@ from app.platform.messaging.application.ports import PublicationFailed, TaskWake
 
 @pytest.fixture
 def rabbit():
-    pytest.importorskip("aio_pika")
     return importlib.import_module("app.platform.messaging.infrastructure.rabbitmq")
 
 

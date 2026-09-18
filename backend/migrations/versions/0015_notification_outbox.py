@@ -1,4 +1,4 @@
-"""Optional notification transport; task state remains authoritative."""
+"""Transactional notification transport; task state remains authoritative."""
 
 import sqlalchemy as sa
 from alembic import op

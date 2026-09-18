@@ -35,6 +35,7 @@ cd "$(dirname "$0")/.."
   echo "Configure .env first. See docs/guide.md." >&2
   exit 1
 }
+sh scripts/ensure-rabbitmq-env.sh .env
 set -- docker compose --env-file .env -p autonomous-engineering-worker -f compose.yaml
 if [ "$mode" != console ]; then
   set -- "$@" -f deploy/compose.execution.yaml

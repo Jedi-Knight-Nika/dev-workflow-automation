@@ -1,4 +1,4 @@
-"""Optional AMQP adapter. No task execution, database access or provider credentials."""
+"""AMQP adapter. No task execution, database access or provider credentials."""
 
 import json
 from collections.abc import AsyncIterator, Awaitable, Callable
@@ -57,23 +57,20 @@ class RabbitActivityTransport:
 
     async def publish(self, event: TaskWakeup) -> None:
         try:
-            await self._publish(event)
+            confirmation = await self.exchange.publish(
+                Message(
+                    body=encode(event),
+                    content_type="application/json",
+                    delivery_mode=DeliveryMode.PERSISTENT,
+                    message_id=str(event.event_id),
+                    type=ROUTING_KEY,
+                ),
+                routing_key=ROUTING_KEY,
+                mandatory=True,
+                timeout=5,
+            )
         except CONNECTION_EXCEPTIONS as exc:
             raise PublicationFailed(type(exc).__name__) from exc
-
-    async def _publish(self, event: TaskWakeup) -> None:
-        confirmation = await self.exchange.publish(
-            Message(
-                body=encode(event),
-                content_type="application/json",
-                delivery_mode=DeliveryMode.PERSISTENT,
-                message_id=str(event.event_id),
-                type=ROUTING_KEY,
-            ),
-            routing_key=ROUTING_KEY,
-            mandatory=True,
-            timeout=5,
-        )
         if not isinstance(confirmation, Basic.Ack):
             raise PublicationFailed("Notification was not confirmed")
 

@@ -24,10 +24,6 @@ CMD ["sh", "-c", ".venv/bin/alembic upgrade head && exec .venv/bin/uvicorn app.m
 
 FROM node:22-slim AS node-runtime
 
-FROM api AS messaging
-RUN uv sync --frozen --extra dev --extra messaging
-CMD [".venv/bin/python", "-m", "app.messaging_runner"]
-
 FROM base AS worker-system
 COPY --from=node-runtime /usr/local/ /usr/local/
 RUN apt-get update \

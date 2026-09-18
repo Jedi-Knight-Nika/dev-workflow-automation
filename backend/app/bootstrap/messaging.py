@@ -1,9 +1,10 @@
-"""Optional activity notification process; PostgreSQL polling remains the recovery path."""
+"""Activity notification process; database reconciliation remains the recovery path."""
 
 import asyncio
 from time import monotonic
 
 import structlog
+from aio_pika.exceptions import AMQPException
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.bootstrap.activity import activity_sessions, create_activity_projector
@@ -11,17 +12,12 @@ from app.platform.configuration.settings import Settings
 from app.platform.messaging.application.dispatch import DispatchOutbox, DispatchResult
 from app.platform.messaging.application.ports import PublicationFailed, TaskWakeup
 from app.platform.messaging.infrastructure.outbox import SqlEventOutbox
+from app.platform.messaging.infrastructure.rabbitmq import activity_transport
 
 
 async def run_messaging(settings: Settings) -> None:
-    if settings.event_transport != "rabbitmq":
-        await asyncio.Event().wait()
-        return
     if not settings.rabbitmq_url:
         raise ValueError("RABBITMQ_URL is required for RabbitMQ transport")
-    from aio_pika.exceptions import AMQPException
-
-    from app.platform.messaging.infrastructure.rabbitmq import activity_transport
 
     log = structlog.get_logger()
     outbox = SqlEventOutbox(activity_sessions())
@@ -60,6 +56,15 @@ async def run_messaging(settings: Settings) -> None:
                 async with asyncio.TaskGroup() as workers:
                     workers.create_task(dispatch(DispatchOutbox(outbox, transport)))
                     workers.create_task(transport.consume(project))
-        except (ExceptionGroup, AMQPException, SQLAlchemyError, OSError, TimeoutError) as exc:
-            log.warning("notification_transport_delayed", error_type=type(exc).__name__)
+        except* (
+            PublicationFailed,
+            AMQPException,
+            SQLAlchemyError,
+            OSError,
+            TimeoutError,
+        ) as errors:
+            log.warning(
+                "notification_transport_delayed",
+                error_types=sorted({type(error).__name__ for error in errors.exceptions}),
+            )
             await asyncio.sleep(5)

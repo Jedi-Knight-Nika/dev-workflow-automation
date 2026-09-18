@@ -101,6 +101,8 @@ async def phase_jobs_contract(postgres_session_factory):
 
 @pytest_asyncio.fixture
 async def outbox_contract(postgres_session_factory):
+    async with postgres_session_factory.begin() as session:
+        await session.execute(delete(NotificationOutbox))
     harness = PostgresOutbox(postgres_session_factory)
     try:
         yield harness

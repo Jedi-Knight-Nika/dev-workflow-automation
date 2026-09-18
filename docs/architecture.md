@@ -45,35 +45,35 @@ Reusable storage behavior tests live in `backend/tests/contracts`. Assertions de
 
 Remaining cross-module persistence coordination is intentionally not hidden behind forwarding-only repositories. Atomic task/Team/admission operations and projections that read several modules still share database transactions. Replacing that storage requires equivalent transactional adapters; moving those calls to RabbitMQ would weaken their guarantees rather than make them portable.
 
-### Optional activity notification transport
+### Built-in activity notification transport
 
-Default `EVENT_TRANSPORT=postgres` preserves database polling and adds no notification writes. With `rabbitmq`, the SQL lifecycle adapter inserts a small `notification_outbox` row in the **same transaction** as a task transition. This reviewed infrastructure-to-platform dependency does not expose storage types to business logic. There are no ORM hooks, dynamic event routing or duplicate task queues.
+RabbitMQ and the messaging process are standard services in both local and production Compose. There is no transport mode switch. The SQL lifecycle adapter always inserts a small `notification_outbox` row in the **same transaction** as a task transition. This reviewed infrastructure-to-platform dependency does not expose storage types to business logic. There are no ORM hooks, dynamic event routing or duplicate task queues.
 
 The only initial message is version 1 `engineering.lifecycle.changed`: event ID, task ID, lifecycle revision and timestamp. An independently running dispatcher claims a row with a 60-second token-fenced lease and commits before publishing. Publication is bounded to 10 seconds; failures retry with capped exponential backoff. A crash after broker confirmation but before the delivery commit may duplicate a message, intentionally. Expired owners cannot complete another worker's claim.
 
-The optional `aio-pika` adapter declares durable `aew.events` / `aew.activity` topology, publishes persistent messages with publisher confirms and mandatory-return handling, and consumes with prefetch 1. The consumer projects committed database records before ACK. Malformed/unsupported envelopes go to `aew.activity.dead`; transient failures close the connection and retry after a delay, leaving unacknowledged messages recoverable. No model calls, paid execution or lifecycle authorization come from broker messages.
+The `aio-pika` adapter is a normal backend dependency. It declares durable `aew.events` / `aew.activity` topology, publishes persistent messages with publisher confirms and mandatory-return handling, and consumes with prefetch 1. The consumer projects committed database records before ACK. Malformed/unsupported envelopes go to `aew.activity.dead`; transient failures close the connection and retry after a delay, leaving unacknowledged messages recoverable. No model calls, paid execution or lifecycle authorization come from broker messages.
 
-The normal activity process still periodically scans committed source records and performs maintenance. It catches up after missing notifications, broker outages, queue loss or enabling/disabling the transport. Other activity sources currently rely on this periodic path. Projection retains its existing deduplication and activity-only locking. Notifications do not contain visualization data, source code, prompts or credentials.
+The normal activity process still periodically scans committed source records and performs maintenance. It catches up after missing notifications, broker outages or queue loss. This is reconciliation, not a selectable alternative transport. Other activity sources currently rely on this periodic path. Projection retains its existing deduplication and activity-only locking. Notifications do not contain visualization data, source code, prompts or credentials.
 
-RabbitMQ is not enabled for Coordinator or engineering dispatch in this increment. Extending it requires measured need and equivalent claim/recovery tests, not a second scheduler. No Kafka, generic event platform or MySQL adapter is introduced. See [optional transport setup and rollback](guide.md#optional-rabbitmq-notifications).
+RabbitMQ currently carries activity notifications, not Coordinator or engineering dispatch. Extending its scope requires equivalent claim/recovery tests, not a second scheduler. No Kafka, generic event platform or MySQL adapter is introduced. See [messaging setup and recovery](guide.md#rabbitmq-messaging).
 
 ### Backend
 
-| Technology                             | Role in this repository                                                                                                          |
-| -------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| Python 3.12+                           | Application, domain rules, controller processes, and runner implementation.                                                      |
-| FastAPI and Uvicorn                    | HTTP routing, request validation integration, OpenAPI, and ASGI serving.                                                         |
-| Pydantic / pydantic-settings           | Request/configuration models, bounds, and environment parsing.                                                                   |
-| SQLAlchemy 2 async                     | Database adapters, transaction ownership, queries, row/advisory locking.                                                         |
-| PostgreSQL                             | Durable task state, jobs/leases, receipts, configuration, histories, and projections. Compose targets PostgreSQL 16.             |
-| asyncpg / psycopg                      | Async application access and synchronous database/migration access respectively.                                                 |
-| Alembic                                | Ordered schema migrations, including `0014_task_creation_requests` and optional transport storage in `0015_notification_outbox`. |
-| asyncio / AnyIO / HTTPX                | Bounded background work, cancellation, HTTP integrations, and Docker API transport.                                              |
-| cryptography                           | Integration-credential encryption support.                                                                                       |
-| structlog / prometheus-client / psutil | Structured logging, metrics, and host/resource observations.                                                                     |
-| tree-sitter grammars                   | Source structure analysis used by repository/context tooling.                                                                    |
-| Native harness extras                  | Locked Codex and Claude SDK dependencies for runner images; not required as API-process model executors.                         |
-| uv, Ruff, mypy, pytest                 | Locked dependency installation, lint/format, strict type checks, and tests.                                                      |
+| Technology                             | Role in this repository                                                                                                           |
+| -------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| Python 3.12+                           | Application, domain rules, controller processes, and runner implementation.                                                       |
+| FastAPI and Uvicorn                    | HTTP routing, request validation integration, OpenAPI, and ASGI serving.                                                          |
+| Pydantic / pydantic-settings           | Request/configuration models, bounds, and environment parsing.                                                                    |
+| SQLAlchemy 2 async                     | Database adapters, transaction ownership, queries, row/advisory locking.                                                          |
+| PostgreSQL                             | Durable task state, jobs/leases, receipts, configuration, histories, and projections. Compose targets PostgreSQL 16.              |
+| asyncpg / psycopg                      | Async application access and synchronous database/migration access respectively.                                                  |
+| Alembic                                | Ordered schema migrations, including `0014_task_creation_requests` and notification outbox storage in `0015_notification_outbox`. |
+| asyncio / AnyIO / HTTPX                | Bounded background work, cancellation, HTTP integrations, and Docker API transport.                                               |
+| cryptography                           | Integration-credential encryption support.                                                                                        |
+| structlog / prometheus-client / psutil | Structured logging, metrics, and host/resource observations.                                                                      |
+| tree-sitter grammars                   | Source structure analysis used by repository/context tooling.                                                                     |
+| Native harness extras                  | Locked Codex and Claude SDK dependencies for runner images; not required as API-process model executors.                          |
+| uv, Ruff, mypy, pytest                 | Locked dependency installation, lint/format, strict type checks, and tests.                                                       |
 
 Declared dependency ranges live in `backend/pyproject.toml`; the reproducible dependency resolution lives in `backend/uv.lock`. Do not treat a range in the manifest as the exact installed version. The Python package version and HTTP app version currently differ (`0.1.0` versus `2.2.0`); neither is a database migration number or an `/api/vN` prefix.
 
@@ -120,6 +120,8 @@ Declared dependency ranges live in `backend/pyproject.toml`; the reproducible de
 **Execution controller — `backend/app/scheduler_runner.py`:** starts the scheduler when enabled and runs supporting observability, Observer, and Coordinator controllers. When the scheduler is disabled, it waits rather than repeatedly exiting/restarting. Supporting controllers have their own configuration gates; disabling phase scheduling is not a universal shutdown of every background feature.
 
 **Activity projector — `backend/app/activity_runner.py`:** maintains activity read models independently of the paid execution loop. The execution overlay gives it read-only workspace access for permitted file evidence. Its API/query pool is deliberately small and has short query/lock timeouts.
+
+**Messaging — `backend/app/messaging_runner.py`:** starts with the normal backend stack, after the API migrations and broker health check. It publishes committed lifecycle notifications and consumes them for activity projection. RabbitMQ is a persistent, private service; only messaging receives its connection credentials. Outages retain pending notifications for retry rather than switching transports.
 
 **Ephemeral runners:** Developer, validator and Git-transport containers are launched for specific operations. They are not normal always-running frontend/API services. The `developer-image` Compose service is an image-building facility, not a permanently active coding agent.
 

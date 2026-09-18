@@ -31,6 +31,7 @@ dev-frontend:
 	cd frontend && API_URL=$${API_URL:-http://localhost:8000} npm run dev
 
 up:
+	sh scripts/ensure-rabbitmq-env.sh .env
 	docker compose up --build
 
 down:

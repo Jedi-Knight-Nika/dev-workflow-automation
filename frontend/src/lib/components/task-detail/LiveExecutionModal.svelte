@@ -22,11 +22,14 @@
   } | null = null;
 
   const stamp = () => new Date().toLocaleTimeString([], { hour12: false });
-  const push = async (message: string) => {
+  // Synchronous: poll() can log several lines per cycle and should flush the DOM once, not per line.
+  const push = (message: string) => {
     lines = [...lines.slice(-199), `[${stamp()}] ${message}`];
+  };
+  async function scrollToBottom() {
     await tick();
     if (terminal) terminal.scrollTop = terminal.scrollHeight;
-  };
+  }
 
   function number(value: number | null | undefined) {
     return value === null || value === undefined ? 'unavailable' : value.toLocaleString();
@@ -36,52 +39,54 @@
     try {
       const run = await getLiveExecution(taskId);
       if (!run) {
-        if (!connected) await push('No AI execution receipt is available yet.');
+        if (!connected) push('No AI execution receipt is available yet.');
         connected = true;
         return;
       }
       if (!activeRun || activeRun.id !== run.id) {
         activeRun = run;
         previous = null;
-        await push(`Attached read-only · ${run.provider}/${run.model} · ${run.harness || 'API'}`);
+        push(`Attached read-only · ${run.provider}/${run.model} · ${run.harness || 'API'}`);
       }
       const next = run.telemetry;
       if (next) {
         if (next.execution_mode && next.execution_mode !== previous?.execution_mode)
-          await push(`Execution mode → ${next.execution_mode.replaceAll('_', ' ').toLowerCase()}`);
+          push(`Execution mode → ${next.execution_mode.replaceAll('_', ' ').toLowerCase()}`);
         if (next.execution_phase && next.execution_phase !== previous?.execution_phase)
-          await push(`Work → ${next.execution_phase.replaceAll('_', ' ').toLowerCase()}`);
+          push(`Work → ${next.execution_phase.replaceAll('_', ' ').toLowerCase()}`);
         if (next.total_work_units && next.completed_work_units !== previous?.completed_work_units)
-          await push(
+          push(
             `Implementation steps · ${next.completed_work_units ?? 0}/${next.total_work_units} complete`
           );
         if (next.phase_label && next.phase_label !== previous?.phase_label)
-          await push(`Phase → ${next.phase_label.replaceAll('_', ' ').toLowerCase()}`);
+          push(`Phase → ${next.phase_label.replaceAll('_', ' ').toLowerCase()}`);
         if ((next.source_read_count ?? 0) > (previous?.source_read_count ?? 0))
-          await push(`Source inspection · ${next.source_read_count} bounded reads total`);
+          push(`Source inspection · ${next.source_read_count} bounded reads total`);
         if ((next.tool_call_count ?? 0) > (previous?.tool_call_count ?? 0))
-          await push(`Tool completed · ${next.tool_call_count} calls total`);
+          push(`Tool completed · ${next.tool_call_count} calls total`);
         if ((next.diff_changes ?? 0) > (previous?.diff_changes ?? 0))
-          await push(`Workspace diff advanced · ${next.diff_changes} useful changes observed`);
+          push(`Workspace diff advanced · ${next.diff_changes} useful changes observed`);
         if ((next.targeted_check_improvements ?? 0) > (previous?.targeted_check_improvements ?? 0))
-          await push('Targeted check improved');
+          push('Targeted check improved');
         for (const warning of next.warnings ?? []) {
-          if (!previous?.warnings?.includes(warning)) await push(`Policy signal · ${warning}`);
+          if (!previous?.warnings?.includes(warning)) push(`Policy signal · ${warning}`);
         }
         if (next.stop_reason && next.stop_reason !== previous?.stop_reason)
-          await push(`Execution stopped safely · ${next.stop_reason}`);
+          push(`Execution stopped safely · ${next.stop_reason}`);
         if (next.input_tokens_observed !== previous?.input_tokens_observed)
-          await push(
+          push(
             `Usage observed · ${number(next.input_tokens_observed)} input · ${number(next.active_context_estimate)} active context`
           );
       }
-      if (run.status !== activeRun.status) await push(`Run status → ${run.status.toLowerCase()}`);
+      if (run.status !== activeRun.status) push(`Run status → ${run.status.toLowerCase()}`);
       activeRun = run;
       previous = next ? structuredClone(next) : null;
       connected = true;
     } catch {
-      if (connected) await push('Telemetry connection interrupted · retrying');
+      if (connected) push('Telemetry connection interrupted · retrying');
       connected = false;
+    } finally {
+      await scrollToBottom();
     }
   }
 
@@ -185,7 +190,7 @@
       layout = fitInViewport({ x: rect.left, y: rect.top, width: rect.width, height: rect.height });
     });
     window.addEventListener('resize', fitWindowInViewport);
-    void push('Opening bounded execution telemetry…');
+    push('Opening bounded execution telemetry…');
     void poll();
     const timer = setInterval(() => {
       if (!document.hidden) void poll();

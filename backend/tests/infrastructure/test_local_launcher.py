@@ -19,11 +19,15 @@ def test_launcher_selects_explicit_modes_without_starting_docker(tmp_path, mode,
     scripts.mkdir()
     launcher = scripts / "start-local.sh"
     shutil.copyfile(Path(__file__).parents[3] / "scripts/start-local.sh", launcher)
+    shutil.copyfile(
+        Path(__file__).parents[3] / "scripts/ensure-rabbitmq-env.sh",
+        scripts / "ensure-rabbitmq-env.sh",
+    )
     (tmp_path / ".env").write_text("")
     binaries = tmp_path / "bin"
     binaries.mkdir()
     docker = binaries / "docker"
-    docker.write_text('#!/bin/sh\nprintf "%s\\n" "$@"\n')
+    docker.write_text('#!/bin/sh\n[ "$1" = volume ] && exit 0\nprintf "%s\\n" "$@"\n')
     docker.chmod(0o755)
     result = subprocess.run(
         ["sh", str(launcher), "--mode", mode, "--no-build"],

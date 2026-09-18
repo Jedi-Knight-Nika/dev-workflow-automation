@@ -2,7 +2,7 @@
 
 A self-hosted system that takes authorized engineering tasks through code changes, validation, pull requests and guarded merges.
 
-Built with Python/FastAPI, PostgreSQL and SvelteKit, with isolated Docker runners and an optional desktop launcher.
+Built with Python/FastAPI, PostgreSQL, RabbitMQ and SvelteKit, with isolated Docker runners and an optional desktop launcher.
 
 ## Run locally
 
