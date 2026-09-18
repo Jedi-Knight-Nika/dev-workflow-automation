@@ -22,6 +22,13 @@ _ENUM_FACTS: dict[str, frozenset[str]] = {
     "action": frozenset(Action) | frozenset(Directive),
 }
 
+_EVENT_KINDS = {
+    "TASK_LIFECYCLE_CHANGED": "TASK_STATE_CHANGED",
+    "ENGINEERING_MERGE_CONFIRMED": "MERGE_COMPLETED",
+    "HUMAN_INPUT_REQUIRED": "HUMAN_REQUIRED",
+    "HUMAN_INPUT_RESOLVED": "HUMAN_RESPONDED",
+}
+
 
 @dataclass(frozen=True)
 class Activity:
@@ -117,27 +124,11 @@ def task_activity(
         public["dependency_ids"] = [
             str(id) for value in payload["dependency_ids"][:32] if (id := identifier(value))
         ]
-    if kind == "TASK_LIFECYCLE_CHANGED":
-        kind = "TASK_STATE_CHANGED"
-    elif kind == "VALIDATION_BATCH_COMPLETED":
+    if kind == "VALIDATION_BATCH_COMPLETED":
         kind = "VALIDATION_PASSED" if payload.get("passed") is True else "VALIDATION_FAILED"
-    elif kind == "ENGINEERING_MERGE_CONFIRMED":
-        kind = "MERGE_COMPLETED"
-    elif kind == "HUMAN_INPUT_REQUIRED":
-        kind = "HUMAN_REQUIRED"
-    elif kind == "HUMAN_INPUT_RESOLVED":
-        kind = "HUMAN_RESPONDED"
-    actor_type = "human" if source in {"user", "dashboard", "api"} else "system"
-    actor = "Human" if actor_type == "human" else "Engineering"
-    lifecycle_actor = payload.get("actor") if kind == "TASK_STATE_CHANGED" else None
-    if isinstance(lifecycle_actor, str) and lifecycle_actor.startswith("user:"):
-        actor_type, actor = "human", "Human"
-    if source in {"github", "trello", "linear", "slack"}:
-        actor_type, actor = "integration", source.title()
-    if kind.startswith("COORDINATOR_") or lifecycle_actor == "coordinator":
-        actor_type, actor = "agent", "Coordinator"
-    if kind == "WORK_PLAN_UPDATED":
-        actor_type, actor = "agent", "Developer"
+    else:
+        kind = _EVENT_KINDS.get(kind, kind)
+    actor_type, actor = activity_actor(kind, source, payload.get("actor"))
     return Activity(
         "task_event",
         str(event_id),
@@ -159,6 +150,22 @@ def task_activity(
         identifier(payload.get("run_id") or payload.get("job_id")),
         public,
     )
+
+
+def activity_actor(kind: str, source: str, lifecycle_actor: object) -> tuple[str, str]:
+    if kind == "WORK_PLAN_UPDATED":
+        return "agent", "Developer"
+    if kind != "TASK_STATE_CHANGED":
+        lifecycle_actor = None
+    if kind.startswith("COORDINATOR_") or lifecycle_actor == "coordinator":
+        return "agent", "Coordinator"
+    if source in {"github", "trello", "linear", "slack"}:
+        return "integration", source.title()
+    if source in {"user", "dashboard", "api"} or (
+        isinstance(lifecycle_actor, str) and lifecycle_actor.startswith("user:")
+    ):
+        return "human", "Human"
+    return "system", "Engineering"
 
 
 def check_kind(command: object) -> str:

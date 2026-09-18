@@ -1,23 +1,10 @@
 import asyncio
 import os
 import signal
-from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-
-@dataclass(frozen=True)
-class CheckResult:
-    command: tuple[str, ...]
-    exit_code: int | None
-    output_tail: str
-    timed_out: bool = False
-    started_at: str | None = None
-    finished_at: str | None = None
-
-    @property
-    def passed(self) -> bool:
-        return self.exit_code == 0 and not self.timed_out
+from app.engineering.domain.validation import CheckResult
 
 
 async def run_check(

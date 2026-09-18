@@ -1,11 +1,10 @@
 """Lossless experimental wire codecs. Canonical state is always retained separately."""
 
 import json
-from dataclasses import asdict
 from typing import Any, Literal
 from uuid import UUID
 
-from app.agent_runtime.domain.envelope import AgentEnvelope
+from app.agent_runtime.domain.envelope import AgentEnvelope, canonical
 from app.agent_runtime.infrastructure.structural_compression import compress, decompress
 
 Codec = Literal["JSON_VERBOSE", "JSON_COMPACT", "DSL_V1", "COMPRESSED_V1"]
@@ -18,13 +17,6 @@ KEYS = {
     "payload": "p",
     "evidence_refs": "e",
 }
-
-
-def canonical(packet: AgentEnvelope) -> dict[str, Any]:
-    data = asdict(packet)
-    data["task_id"] = str(packet.task_id)
-    data["evidence_refs"] = list(packet.evidence_refs)
-    return data
 
 
 def encode(packet: AgentEnvelope, codec: Codec) -> str:

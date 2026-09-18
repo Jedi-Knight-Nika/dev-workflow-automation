@@ -71,26 +71,25 @@ class SqlAlchemyTaskQueries:
                     .ilike(pattern),
                 )
             )
-        for key, value in (("team", filters.team), ("project", filters.project)):
-            if value:
-                if key == "project":
-                    statement = statement.where(
-                        or_(
-                            Task.project_name.ilike(f"%{value.strip()}%"),
-                            exists().where(
-                                ExternalTaskSnapshot.task_id == Task.id,
-                                ExternalTaskSnapshot.raw_payload[key]["name"]
-                                .as_string()
-                                .ilike(f"%{value.strip()}%"),
-                            ),
-                        )
-                    )
-                    continue
-                snapshot_filters.append(
-                    ExternalTaskSnapshot.raw_payload[key]["name"]
-                    .as_string()
-                    .ilike(f"%{value.strip()}%")
+        if filters.team:
+            snapshot_filters.append(
+                ExternalTaskSnapshot.raw_payload["team"]["name"]
+                .as_string()
+                .ilike(f"%{filters.team.strip()}%")
+            )
+        if filters.project:
+            pattern = f"%{filters.project.strip()}%"
+            statement = statement.where(
+                or_(
+                    Task.project_name.ilike(pattern),
+                    exists().where(
+                        ExternalTaskSnapshot.task_id == Task.id,
+                        ExternalTaskSnapshot.raw_payload["project"]["name"]
+                        .as_string()
+                        .ilike(pattern),
+                    ),
                 )
+            )
         if filters.provider_state:
             snapshot_filters.append(
                 or_(

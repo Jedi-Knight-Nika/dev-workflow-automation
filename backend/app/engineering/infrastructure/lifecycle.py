@@ -16,6 +16,7 @@ from app.engineering.domain.lifecycle import (
 )
 from app.engineering.infrastructure.models import TaskPhaseRun
 from app.engineering.infrastructure.task_models import Task, TaskEvent
+from app.platform.messaging.infrastructure.outbox import enqueue_task_wakeup
 from app.teams.infrastructure.team_models import TaskAssignment
 
 
@@ -101,6 +102,7 @@ async def record_transition(
             )
             assignment.completed_at = now
     task.lifecycle_version += 1
+    enqueue_task_wakeup(session, task_id, task.lifecycle_version)
     await enqueue_status(
         session, task_id, task.lifecycle_version, after.status.value, after.stage.value
     )

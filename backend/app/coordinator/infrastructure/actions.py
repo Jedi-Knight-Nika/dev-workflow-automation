@@ -1,18 +1,16 @@
 """Apply a decision atomically, then deliver its message through a durable outbox."""
 
-import asyncio
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.agent_runtime.domain.envelope import AgentEnvelope
-from app.agent_runtime.infrastructure.agent_codec import canonical
+from app.agent_runtime.domain.envelope import AgentEnvelope, canonical
 from app.agent_runtime.infrastructure.models import AIRun, DeveloperSession
 from app.agent_runtime.infrastructure.reservations import consumed_cost
-from app.coordinator.application.ports import ConversationGateway
-from app.coordinator.domain.protocol import Directive, validate_effect
+from app.coordinator.application.ports import DeliveryClaim, OutboundDelivery
+from app.coordinator.domain.protocol import Decision, Directive, validate_effect
 from app.coordinator.infrastructure.authority import authorized, coordination_mode
 from app.coordinator.infrastructure.models import (
     CoordinatorAction,
@@ -45,14 +43,9 @@ class EngineeringBusy(ValueError):
     """An in-flight paid generation owns the workspace until its receipt settles."""
 
 
-DELIVERY_CHECK_TIMEOUT_SECONDS = 45
-
-
-class ActionExecutor:
-    def __init__(
-        self, sessions: async_sessionmaker[AsyncSession], conversations: ConversationGateway
-    ) -> None:
-        self.sessions, self.conversations = sessions, conversations
+class SqlCoordinationActions:
+    def __init__(self, sessions: async_sessionmaker[AsyncSession]) -> None:
+        self.sessions = sessions
 
     async def _apply(self, session: AsyncSession, action: CoordinatorAction, task: Task) -> None:
         run = await session.get(CoordinatorRun, action.run_id)
@@ -78,7 +71,6 @@ class ActionExecutor:
             ):
                 raise ValueError("Authority changed for a coalesced event")
         decision = parse_decision(action.arguments["decision"])
-        message = "" if decision.action == Directive.WAIT else decision.message
         provider = str(event.context.get("reply_provider", event.provider))
         if coordination_mode(provider) != "active":
             raise ValueError("Active coordination was disabled for this provider")
@@ -158,128 +150,159 @@ class ActionExecutor:
         actor = "coordinator"
         cause = TransitionCause(action_id=action.id)
         if decision.action == Directive.ASK_HUMAN:
-            if human:
-                human.status = "CANCELLED"
-            await control_task(
-                session,
-                task,
-                Action.BLOCK,
-                actor=actor,
-                wait_reason=WaitReason.MISSING_REQUIREMENT,
-                cause=cause,
-            )
-            session.add(
-                HumanRequest(
-                    task_id=task.id,
-                    run_id=run.id,
-                    question=decision.message,
-                    reason=decision.reason,
-                    choices=decision.choices,
-                    requirement_revision=task.requirement_version,
-                    lifecycle_revision=task.lifecycle_version,
-                )
-            )
-            session.add(
-                TaskEvent(
-                    task_id=task.id,
-                    source=actor,
-                    event_type="HUMAN_INPUT_REQUIRED",
-                    payload={"run_id": str(run.id)},
-                )
-            )
+            await self._ask_human(session, action, task, decision, human)
         elif decision.action in {Directive.IMPLEMENT, Directive.REPAIR}:
-            policy = await read_policy(session, team.id)
-            repository = (
-                await session.get(Repository, task.repository_id) if task.repository_id else None
-            )
-            if repository and (
-                not repository.enabled
-                or repository.archived_at
-                or not policy.enrollment_enabled
-                or repository.id not in policy.repository_ids
-            ):
-                raise ValueError("Repository or Team execution scope was revoked")
-            # Do not cancel a paid generation only to discover that its usage is unknown.
-            if await session.scalar(
-                select(AIRun.id).where(AIRun.task_id == task.id, AIRun.status == "RUNNING").limit(1)
-            ):
-                raise EngineeringBusy("Waiting for the current Developer generation to settle")
-            if await consumed_cost(session, task.id) is None:
-                raise ValueError(
-                    "Reconcile active or unknown AI usage before changing engineering work"
-                )
-            native = await session.scalar(
-                select(DeveloperSession)
-                .where(DeveloperSession.task_id == task.id)
-                .order_by(DeveloperSession.generation.desc())
-                .limit(1)
-                .with_for_update()
-            )
-            amendment = {
-                "request": decision.engineering_request,
-                "invariants": list(decision.checkpoint.invariants),
-            }
-            await current_requirement(session, task, addition=amendment)
-            if native:
-                await control_task(session, task, Action.PAUSE, actor=actor, cause=cause)
-                await record_transition(
-                    session,
-                    task.id,
-                    Action.REVISE_REQUIREMENT,
-                    expected_version=task.lifecycle_version,
-                    actor=actor,
-                    cause=cause,
-                )
-                native.checkpoint = {
-                    **native.checkpoint,
-                    "next_feedback": decision.engineering_request,
-                    "coordinator_guidance": canonical(
-                        AgentEnvelope(
-                            1,
-                            "repair" if decision.action == Directive.REPAIR else "work",
-                            task.id,
-                            task.requirement_version,
-                            task.current_revision,
-                            {
-                                "request": decision.engineering_request,
-                                "invariants": list(decision.checkpoint.invariants),
-                            },
-                            (str(run.id),),
-                        )
-                    ),
-                }
-                await control_task(session, task, Action.RESUME, actor=actor, cause=cause)
-            else:
-                task.requirement_version += 1
-                await request_execution(session, task, actor=actor, cause=cause)
-            session.add(
-                TaskEvent(
-                    task_id=task.id,
-                    source=actor,
-                    event_type=ACCEPTED_REQUIREMENT,
-                    payload={
-                        **amendment,
-                        "requirement_revision": task.requirement_version,
-                        "action_id": str(action.id),
-                    },
-                )
-            )
+            await self._request_engineering(session, action, task, team, decision)
         elif decision.action in {Directive.PAUSE, Directive.CANCEL}:
             await control_task(
                 session, task, Action(decision.action.value), actor=actor, cause=cause
             )
+        await self._record_effect(session, action, task, run, event, decision)
+
+    async def _ask_human(
+        self,
+        session: AsyncSession,
+        action: CoordinatorAction,
+        task: Task,
+        decision: Decision,
+        human: HumanRequest | None,
+    ) -> None:
+        actor = "coordinator"
+        cause = TransitionCause(action_id=action.id)
+        if human:
+            human.status = "CANCELLED"
+        await control_task(
+            session,
+            task,
+            Action.BLOCK,
+            actor=actor,
+            wait_reason=WaitReason.MISSING_REQUIREMENT,
+            cause=cause,
+        )
+        session.add(
+            HumanRequest(
+                task_id=task.id,
+                run_id=action.run_id,
+                question=decision.message,
+                reason=decision.reason,
+                choices=decision.choices,
+                requirement_revision=task.requirement_version,
+                lifecycle_revision=task.lifecycle_version,
+            )
+        )
+        session.add(
+            TaskEvent(
+                task_id=task.id,
+                source=actor,
+                event_type="HUMAN_INPUT_REQUIRED",
+                payload={"run_id": str(action.run_id)},
+            )
+        )
+
+    async def _request_engineering(
+        self,
+        session: AsyncSession,
+        action: CoordinatorAction,
+        task: Task,
+        team: Team,
+        decision: Decision,
+    ) -> None:
+        actor = "coordinator"
+        cause = TransitionCause(action_id=action.id)
+        policy = await read_policy(session, team.id)
+        repository = (
+            await session.get(Repository, task.repository_id) if task.repository_id else None
+        )
+        if repository and (
+            not repository.enabled
+            or repository.archived_at
+            or not policy.enrollment_enabled
+            or repository.id not in policy.repository_ids
+        ):
+            raise ValueError("Repository or Team execution scope was revoked")
+        # Do not cancel a paid generation only to discover that its usage is unknown.
+        if await session.scalar(
+            select(AIRun.id).where(AIRun.task_id == task.id, AIRun.status == "RUNNING").limit(1)
+        ):
+            raise EngineeringBusy("Waiting for the current Developer generation to settle")
+        if await consumed_cost(session, task.id) is None:
+            raise ValueError(
+                "Reconcile active or unknown AI usage before changing engineering work"
+            )
+        native = await session.scalar(
+            select(DeveloperSession)
+            .where(DeveloperSession.task_id == task.id)
+            .order_by(DeveloperSession.generation.desc())
+            .limit(1)
+            .with_for_update()
+        )
+        amendment = {
+            "request": decision.engineering_request,
+            "invariants": list(decision.checkpoint.invariants),
+        }
+        await current_requirement(session, task, addition=amendment)
+        if native:
+            await control_task(session, task, Action.PAUSE, actor=actor, cause=cause)
+            await record_transition(
+                session,
+                task.id,
+                Action.REVISE_REQUIREMENT,
+                expected_version=task.lifecycle_version,
+                actor=actor,
+                cause=cause,
+            )
+            native.checkpoint = {
+                **native.checkpoint,
+                "next_feedback": decision.engineering_request,
+                "coordinator_guidance": canonical(
+                    AgentEnvelope(
+                        1,
+                        "repair" if decision.action == Directive.REPAIR else "work",
+                        task.id,
+                        task.requirement_version,
+                        task.current_revision,
+                        {
+                            "request": decision.engineering_request,
+                            "invariants": list(decision.checkpoint.invariants),
+                        },
+                        (str(action.run_id),),
+                    )
+                ),
+            }
+            await control_task(session, task, Action.RESUME, actor=actor, cause=cause)
+        else:
+            task.requirement_version += 1
+            await request_execution(session, task, actor=actor, cause=cause)
+        session.add(
+            TaskEvent(
+                task_id=task.id,
+                source=actor,
+                event_type=ACCEPTED_REQUIREMENT,
+                payload={
+                    **amendment,
+                    "requirement_revision": task.requirement_version,
+                    "action_id": str(action.id),
+                },
+            )
+        )
+
+    async def _record_effect(
+        self,
+        session: AsyncSession,
+        action: CoordinatorAction,
+        task: Task,
+        run: CoordinatorRun,
+        event: CoordinatorEvent,
+        decision: Decision,
+    ) -> None:
+        actor = "coordinator"
+        message = decision.outbound_message
         if event.context.get("review_cycle_id"):
             cycle = await session.get(
                 ReviewCycle, UUID(str(event.context["review_cycle_id"])), with_for_update=True
             )
             if cycle:
-                cycle.decision = (
-                    "FEEDBACK_APPLIED"
-                    if decision.action == Directive.REPAIR
-                    else "IGNORED"
-                    if decision.action in {Directive.REPLY, Directive.WAIT}
-                    else "NEEDS_CLASSIFICATION"
-                )
+                cycle.decision = decision.review_disposition
         if message:
             session.add(
                 TaskMessage(
@@ -287,7 +310,7 @@ class ActionExecutor:
                     author_type="COORDINATOR",
                     author_name="Coordinator",
                     author_role="COORDINATOR",
-                    kind="QUESTION" if decision.action == Directive.ASK_HUMAN else "UPDATE",
+                    kind=decision.message_kind,
                     body=message,
                     context={"action_id": str(action.id), "provider": event.provider},
                 )
@@ -299,11 +322,7 @@ class ActionExecutor:
             "requirement_revision": task.requirement_version,
             "lifecycle_revision": task.lifecycle_version,
         }
-        action.status = (
-            "DELIVERY_PENDING"
-            if message or decision.action == Directive.REQUEST_REVIEW
-            else "EXECUTED"
-        )
+        action.status = decision.delivery_status
         run.status = "COMPLETED"
         session.add(
             TaskEvent(
@@ -381,7 +400,7 @@ class ActionExecutor:
                     run.status = "REJECTED"
         return True
 
-    async def deliver_one(self) -> bool:
+    async def claim_delivery(self) -> DeliveryClaim:
         async with self.sessions.begin() as session:
             action = await session.scalar(
                 select(CoordinatorAction)
@@ -391,7 +410,7 @@ class ActionExecutor:
                 .limit(1)
             )
             if not action:
-                return False
+                return DeliveryClaim(False)
             task = await session.get(Task, action.task_id)
             event = await session.get(CoordinatorEvent, UUID(str(action.arguments["event_id"])))
             team = await session.get(Team, task.team_id) if task and task.team_id else None
@@ -416,44 +435,44 @@ class ActionExecutor:
                     "REJECTED",
                     "Task changed or reply authority was revoked",
                 )
-                return True
+                return DeliveryClaim(True)
             action.status, action.attempted_at = "SENDING", datetime.now(UTC)
             kind = action.kind
             if kind == "REQUEST_REVIEW" and coordination_mode("github") != "active":
                 action.status, action.error = "REJECTED", "GitHub coordination was disabled"
-                return True
-            identifier, task_id, provider, message = (
-                action.id,
-                action.task_id,
-                str(action.arguments["provider"]),
-                str(action.arguments["message"]),
-            )
-        try:
-            async with asyncio.timeout(45):
-                reference = (
-                    await self.conversations.request_review(task_id, identifier)
-                    if kind == "REQUEST_REVIEW"
-                    else await self.conversations.reply(task_id, provider, message, identifier)
-                )
-        except Exception as exc:  # noqa: BLE001 -- persist a sanitized failure at the worker/effect boundary
-            async with self.sessions.begin() as session:
-                row = await session.get(CoordinatorAction, identifier, with_for_update=True)
-                assert row
-                if row.status == "EXECUTED":
-                    return True  # An authenticated echo already confirmed the effect.
-                row.arguments = {**row.arguments, "reconcile_requested": kind != "REQUEST_REVIEW"}
-                row.status, row.error = (
-                    "UNKNOWN",
-                    f"Delivery not confirmed ({type(exc).__name__}); inspect the original conversation before retrying",
-                )
-        else:
-            async with self.sessions.begin() as session:
-                row = await session.get(CoordinatorAction, identifier, with_for_update=True)
-                assert row
-                row.status, row.provider_effect_ref, row.error = "EXECUTED", reference, None
-        return True
+                return DeliveryClaim(True)
+            return DeliveryClaim(True, self._delivery(action))
 
-    async def reconcile_one(self) -> bool:
+    @staticmethod
+    def _delivery(action: CoordinatorAction) -> OutboundDelivery:
+        assert action.attempted_at is not None
+        return OutboundDelivery(
+            action.id,
+            action.task_id,
+            str(action.arguments["provider"]),
+            str(action.arguments["message"]),
+            action.kind,
+            action.attempted_at,
+        )
+
+    async def fail_delivery(
+        self, delivery: OutboundDelivery, reason: str, *, reconcile: bool
+    ) -> None:
+        async with self.sessions.begin() as session:
+            row = await session.get(CoordinatorAction, delivery.action_id, with_for_update=True)
+            assert row
+            if row.status == "EXECUTED":
+                return
+            row.arguments = {**row.arguments, "reconcile_requested": reconcile}
+            row.status, row.error = "UNKNOWN", reason
+
+    async def complete_delivery(self, delivery: OutboundDelivery, reference: str) -> None:
+        async with self.sessions.begin() as session:
+            row = await session.get(CoordinatorAction, delivery.action_id, with_for_update=True)
+            assert row
+            row.status, row.provider_effect_ref, row.error = "EXECUTED", reference, None
+
+    async def claim_reconciliation(self) -> OutboundDelivery | None:
         async with self.sessions.begin() as session:
             action = await session.scalar(
                 select(CoordinatorAction)
@@ -466,50 +485,33 @@ class ActionExecutor:
                 .limit(1)
             )
             if not action or not action.attempted_at:
-                return False
+                return None
             action.status = "RECONCILING"
             action.arguments = {
                 **action.arguments,
                 "reconcile_requested": False,
                 "reconcile_started_at": datetime.now(UTC).isoformat(),
             }
-            identifier, task_id, attempted, kind, arguments = (
-                action.id,
-                action.task_id,
-                action.attempted_at,
-                action.kind,
-                dict(action.arguments),
-            )
-        error = "Delivery still uncertain; bounded provider history did not identify a unique matching message. No resend occurred."
-        reference = None
-        try:
-            async with asyncio.timeout(DELIVERY_CHECK_TIMEOUT_SECONDS):
-                reference = await self.conversations.reconcile(
-                    task_id,
-                    str(arguments["provider"]),
-                    str(arguments["message"]),
-                    identifier,
-                    attempted,
-                    kind,
-                )
-        except Exception as exc:  # noqa: BLE001 -- sanitize provider errors at the effect boundary
-            error = f"Delivery verification unavailable ({type(exc).__name__}); no resend occurred"
+            return self._delivery(action)
+
+    async def complete_reconciliation(
+        self, delivery: OutboundDelivery, reference: str | None, error: str
+    ) -> None:
         async with self.sessions.begin() as session:
-            row = await session.get(CoordinatorAction, identifier, with_for_update=True)
+            row = await session.get(CoordinatorAction, delivery.action_id, with_for_update=True)
             assert row
             if row.status == "EXECUTED":
-                return True
+                return
             row.status = "EXECUTED" if reference else "UNKNOWN"
             row.provider_effect_ref, row.error = reference, None if reference else error
             session.add(
                 TaskEvent(
-                    task_id=task_id,
+                    task_id=delivery.task_id,
                     source="coordinator",
                     event_type="DELIVERY_RECONCILED",
-                    payload={"action_id": str(identifier), "status": row.status},
+                    payload={"action_id": str(delivery.action_id), "status": row.status},
                 )
             )
-        return True
 
     async def recover(self) -> None:
         async with self.sessions.begin() as session:

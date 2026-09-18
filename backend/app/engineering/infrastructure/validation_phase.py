@@ -1,6 +1,5 @@
 """Deterministic validation phase and evidence persistence; no Developer execution."""
 
-import json
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -12,9 +11,11 @@ from app.agent_runtime.infrastructure.container_job import run_container_job
 from app.agent_runtime.infrastructure.control_files import atomic_json
 from app.agent_runtime.infrastructure.models import DeveloperSession
 from app.agent_runtime.infrastructure.phase_mounts import phase_mounts
+from app.engineering.application.complete_validation import complete_validation
 from app.engineering.application.jobs import PhaseBlocked, PhaseLease
 from app.engineering.domain.lifecycle import Action, WaitReason
 from app.engineering.domain.publication_title import publication_title
+from app.engineering.domain.validation import CheckResult, ValidationResult
 from app.engineering.infrastructure.consultation import consult, save_consultation_feedback
 from app.engineering.infrastructure.models import ValidationRun
 from app.engineering.infrastructure.task_models import Task, TaskEvent
@@ -75,22 +76,39 @@ async def validate_phase(
     )
     spec["Labels"]["job_id"] = str(lease.job_id)
     validation_started = datetime.now(UTC)
-    result = await run_container_job(
+    payload = await run_container_job(
         client,
         f"validation-{lease.job_id}-{lease.token}",
         spec,
         settings.developer_turn_timeout_seconds,
+    )
+    result = ValidationResult(
+        passed=payload.get("passed") is True,
+        head_sha=payload["head_sha"],
+        fingerprint=payload["fingerprint"],
+        checks=tuple(
+            CheckResult(
+                command=tuple(check["command"]),
+                exit_code=check["exit_code"],
+                output_tail=check["output_tail"],
+                timed_out=check["timed_out"],
+                started_at=check.get("started_at"),
+                finished_at=check.get("finished_at"),
+            )
+            for check in payload["checks"]
+        ),
+        change_context=payload.get("change_context", ""),
     )
     async with sessions.begin() as session:
         current = await session.get(Task, task.id, with_for_update=True)
         state = await session.get(DeveloperSession, native.id, with_for_update=True)
         if current is None or state is None or current.lifecycle_version != lease.lifecycle_version:
             raise ValueError("Task changed while validating")
-        passed = result.get("passed") is True
+        passed = result.passed
         if passed:
             state.checkpoint = {
                 **state.checkpoint,
-                "publication_change_context": result.get("change_context", ""),
+                "publication_change_context": result.change_context,
                 "publication_checks": commands,
             }
         if passed and runtime:
@@ -113,66 +131,45 @@ async def validate_phase(
                 event_type="VALIDATION_BATCH_COMPLETED",
                 payload={
                     "passed": passed,
-                    "head_sha": result["head_sha"],
+                    "head_sha": result.head_sha,
                     "requirement_version": task.requirement_version,
                     "job_id": str(lease.job_id),
                 },
             )
         )
-        for check in result["checks"]:
+        for check in result.checks:
             session.add(
                 ValidationRun(
                     task_id=task.id,
-                    head_sha=result["head_sha"],
+                    head_sha=result.head_sha,
                     requirement_version=task.requirement_version,
-                    command=check["command"],
-                    exit_code=check["exit_code"],
-                    status="PASSED"
-                    if check["exit_code"] == 0 and not check["timed_out"]
-                    else "FAILED",
-                    output_tail=check["output_tail"][-8000:],
-                    started_at=datetime.fromisoformat(check["started_at"])
-                    if check.get("started_at")
+                    command=list(check.command),
+                    exit_code=check.exit_code,
+                    status="PASSED" if check.passed else "FAILED",
+                    output_tail=check.output_tail[-8000:],
+                    started_at=datetime.fromisoformat(check.started_at)
+                    if check.started_at
                     else validation_started,
-                    finished_at=datetime.fromisoformat(check["finished_at"])
-                    if check.get("finished_at")
+                    finished_at=datetime.fromisoformat(check.finished_at)
+                    if check.finished_at
                     else datetime.now(UTC),
                 )
             )
-        current.current_revision = result["head_sha"]
+        current.current_revision = result.head_sha
         previous = current.progress_fingerprint or {}
-        fingerprint = result["fingerprint"]
-        current.no_progress_count = (
-            current.no_progress_count + 1
-            if not passed and previous.get("validation") == fingerprint
-            else 0
+        current.no_progress_count = result.progress_count(
+            previous.get("validation"), current.no_progress_count
         )
-        current.progress_fingerprint = {"validation": fingerprint}
+        current.progress_fingerprint = {"validation": result.fingerprint}
         if not passed:
             state.checkpoint = {
                 **state.checkpoint,
-                "next_feedback": "Fix these deterministic validation failures. Full logs remain in validation evidence:\n"
-                + json.dumps(
-                    [
-                        {
-                            "command": c["command"],
-                            "exit_code": c["exit_code"],
-                            "timed_out": c["timed_out"],
-                            "output_tail": c["output_tail"][-1000:],
-                        }
-                        for c in result["checks"]
-                        if c["exit_code"] != 0 or c["timed_out"]
-                    ]
-                )[:8000],
+                "next_feedback": result.repair_feedback(),
             }
-        stop_loop = current.no_progress_count >= 2
-    if stop_loop:
-        raise PhaseBlocked(
-            WaitReason.MISSING_REQUIREMENT,
-            "Repeated validation failure without workspace progress; inspect before another paid turn",
-        )
-    if passed:
-        task.current_revision = result["head_sha"]
+        no_progress_count = current.no_progress_count
+
+    async def review_changes() -> bool:
+        task.current_revision = result.head_sha
         review = await consult(
             sessions,
             settings,
@@ -181,9 +178,13 @@ async def validate_phase(
             task,
             native,
             "REVIEWER",
-            change_context=str(result.get("change_context") or ""),
+            change_context=str(result.change_context or ""),
         )
         if review and review[0] == "REVIEW_CHANGES":
             await save_consultation_feedback(sessions, lease, native, *review)
-            return Action.VALIDATION_FAILED
-    return Action.VALIDATION_PASSED if passed else Action.VALIDATION_FAILED
+            return True
+        return False
+
+    return await complete_validation(
+        passed=passed, no_progress_count=no_progress_count, review_changes=review_changes
+    )

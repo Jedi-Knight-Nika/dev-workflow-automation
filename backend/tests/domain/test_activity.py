@@ -61,3 +61,62 @@ def test_actor_and_coordinator_action_use_existing_domain_facts():
     )
     assert paused.actor_type == "human"
     assert "actor" not in paused.payload
+
+
+@pytest.mark.parametrize(
+    "kind,source,lifecycle_actor,expected",
+    [
+        ("TASK_CREATED", "engineering", None, ("system", "Engineering")),
+        ("TASK_CREATED", "api", None, ("human", "Human")),
+        ("TASK_CREATED", "user", None, ("human", "Human")),
+        ("TASK_CREATED", "dashboard", None, ("human", "Human")),
+        ("TASK_LIFECYCLE_CHANGED", "engineering", "user:control", ("human", "Human")),
+        ("TASK_STATE_CHANGED", "engineering", "user:control", ("human", "Human")),
+        ("TASK_LIFECYCLE_CHANGED", "github", "user:control", ("integration", "Github")),
+        ("TASK_LIFECYCLE_CHANGED", "linear", "coordinator", ("agent", "Coordinator")),
+        ("TASK_LIFECYCLE_CHANGED", "user", "coordinator", ("agent", "Coordinator")),
+        ("TASK_CREATED", "engineering", "coordinator", ("system", "Engineering")),
+        ("TASK_CREATED", "engineering", "user:control", ("system", "Engineering")),
+        ("TASK_CREATED", "trello", None, ("integration", "Trello")),
+        ("TASK_CREATED", "slack", None, ("integration", "Slack")),
+        ("COORDINATOR_DECIDED", "github", None, ("agent", "Coordinator")),
+        ("COORDINATOR_DECIDED", "user", "user:control", ("agent", "Coordinator")),
+        ("WORK_PLAN_UPDATED", "github", "coordinator", ("agent", "Developer")),
+        ("WORK_PLAN_UPDATED", "user", "user:control", ("agent", "Developer")),
+    ],
+)
+def test_actor_precedence_does_not_expose_or_trust_unrelated_payload_actors(
+    kind, source, lifecycle_actor, expected
+):
+    event = task_activity(1, uuid4(), kind, {"actor": lifecycle_actor}, datetime.now(UTC), source)
+    assert (event.actor_type, event.actor) == expected
+    assert "actor" not in event.payload
+
+
+@pytest.mark.parametrize(
+    "source_kind,public_kind",
+    [
+        ("TASK_LIFECYCLE_CHANGED", "TASK_STATE_CHANGED"),
+        ("ENGINEERING_MERGE_CONFIRMED", "MERGE_COMPLETED"),
+        ("HUMAN_INPUT_REQUIRED", "HUMAN_REQUIRED"),
+        ("HUMAN_INPUT_RESOLVED", "HUMAN_RESPONDED"),
+        ("UNKNOWN_EVENT", "UNKNOWN_EVENT"),
+    ],
+)
+def test_event_aliases_preserve_detail_levels(source_kind, public_kind):
+    event = task_activity(1, uuid4(), source_kind, {}, datetime.now(UTC), "engineering")
+    assert event.kind == public_kind
+    assert event.detail_level == (2 if source_kind == "UNKNOWN_EVENT" else 1)
+
+
+@pytest.mark.parametrize("passed", [True, False, 1, "true", None])
+def test_validation_activity_requires_explicit_boolean_success(passed):
+    event = task_activity(
+        1,
+        uuid4(),
+        "VALIDATION_BATCH_COMPLETED",
+        {"passed": passed},
+        datetime.now(UTC),
+        "engineering",
+    )
+    assert event.kind == ("VALIDATION_PASSED" if passed is True else "VALIDATION_FAILED")

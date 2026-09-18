@@ -5,7 +5,17 @@ from uuid import uuid4
 import httpx
 import pytest
 
+from app.coordinator.application.ports import ConversationUnavailable
 from app.platform.integrations.infrastructure.conversations import ProviderConversations
+
+
+async def test_provider_read_failure_is_translated_at_adapter_boundary(monkeypatch):
+    gateway = ProviderConversations(AsyncMock())
+    monkeypatch.setattr(
+        gateway, "_read", AsyncMock(side_effect=httpx.ReadTimeout("authorization=secret"))
+    )
+    with pytest.raises(ConversationUnavailable, match="^ReadTimeout$"):
+        await gateway.read(uuid4(), "github", "READ_TASK")
 
 
 @pytest.mark.parametrize("provider", ["github", "trello", "linear", "slack"])

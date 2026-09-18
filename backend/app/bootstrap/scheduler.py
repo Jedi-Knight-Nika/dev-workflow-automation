@@ -5,9 +5,14 @@ Native harnesses own model turns; the scheduler owns deterministic phase leases.
 
 import os
 import socket
+from functools import partial
 
 from app.agent_runtime.infrastructure.orphans import reap_orphans
+from app.delivery.infrastructure.rechecks import recheck_review
+from app.delivery.infrastructure.status_sync import process_status_sync
+from app.engineering.application.development_control import DevelopmentControl
 from app.engineering.application.jobs import RunEngineeringJob
+from app.engineering.infrastructure.development_recovery import SqlDevelopmentRecovery
 from app.engineering.infrastructure.executor import SqlPhaseExecutor
 from app.engineering.infrastructure.jobs import SqlPhaseJobs
 from app.intake.application.process_deliveries import ProcessDeliveries
@@ -16,6 +21,7 @@ from app.intake.infrastructure.delivery_processing import SqlAlchemyDeliveryProc
 from app.intake.infrastructure.linear_reconciliation import SqlAlchemyLinearTaskReconciliation
 from app.intake.infrastructure.reconciliation import CompositeTaskReconciliation
 from app.intake.infrastructure.trello_reconciliation import SqlAlchemyTrelloTaskReconciliation
+from app.observability.infrastructure.instrumentation import instrumentation
 from app.platform.configuration.settings import Settings
 from app.platform.persistence.session import SessionLocal
 from app.platform.scheduling.manage_worker_presence import ManageWorkerPresence
@@ -34,17 +40,29 @@ def create_scheduler(settings: Settings) -> Scheduler:
         orphan_cleanup=lambda: reap_orphans(SessionLocal, settings),
     )
     return Scheduler(
+        observe_claim=instrumentation.observe_claim,
         settings=settings,
         worker_id=worker_id,
         jobs=jobs,
         worker=RunEngineeringJob(
             jobs,
-            SqlPhaseExecutor(SessionLocal, settings),
+            SqlPhaseExecutor(
+                SessionLocal,
+                settings,
+                DevelopmentControl(
+                    SqlDevelopmentRecovery(SessionLocal),
+                    compact_before_feedback_tokens=settings.developer_compact_before_feedback_tokens,
+                ),
+            ),
             heartbeat_seconds=min(
                 settings.worker_heartbeat_seconds, settings.worker_lease_seconds / 3
             ),
         ),
-        deliveries=ProcessDeliveries(SqlAlchemyDeliveryProcessor(SessionLocal)),
+        deliveries=ProcessDeliveries(
+            SqlAlchemyDeliveryProcessor(SessionLocal, settings),
+            sync_status=partial(process_status_sync, SessionLocal),
+            recheck_review=partial(recheck_review, SessionLocal),
+        ),
         presence=ManageWorkerPresence(SqlAlchemyWorkerPresence(SessionLocal, worker_id)),
         reconciler=ReconcileExternalTasks(
             CompositeTaskReconciliation(

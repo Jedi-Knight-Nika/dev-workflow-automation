@@ -1,3 +1,4 @@
+import json
 from dataclasses import asdict
 from decimal import Decimal
 from types import SimpleNamespace
@@ -13,11 +14,12 @@ from app.agent_runtime.domain.token_efficiency_policy import TokenEfficiencyPoli
 from app.agent_runtime.domain.usage import Usage
 from app.agent_runtime.infrastructure.agent_codec import encode
 from app.agent_runtime.infrastructure.models import DeveloperSession
+from app.engineering.application.developer_failures import block_failed_turn
 from app.engineering.application.jobs import PhaseBlocked, PhaseLease
 from app.engineering.domain.lifecycle import Action, WaitReason
-from app.engineering.infrastructure.developer_failures import block_failed_turn
 from app.engineering.infrastructure.developer_request import build_developer_request
-from app.engineering.infrastructure.executor import SqlPhaseExecutor
+from app.engineering.infrastructure.development_recovery import SqlDevelopmentRecovery
+from app.engineering.infrastructure.executor import SqlPhaseExecutor, development_session
 from app.engineering.infrastructure.phase_context import load_phase_context
 from app.engineering.infrastructure.task_models import Task
 from app.platform.configuration.settings import Settings
@@ -116,8 +118,6 @@ def test_repair_evidence_and_stale_checkpoint_guards_are_preserved():
 
 
 def test_coordinator_delta_retains_invariants_and_rejects_stale_handoffs():
-    import json
-
     task, native = request_context()
     packet = work_packet(task.id, 1, None, "Authorized delta", invariants=("Keep the API",))
     native.checkpoint = {"coordinator_guidance": json.loads(encode(packet, "JSON_VERBOSE"))}
@@ -126,6 +126,37 @@ def test_coordinator_delta_retains_invariants_and_rejects_stale_handoffs():
     task.requirement_version = 2
     with pytest.raises(PhaseBlocked, match="Coordinator handoff is stale"):
         build_developer_request(task, native, "Requirement")
+
+
+@pytest.mark.parametrize("resumed", [False, True])
+@pytest.mark.parametrize("supervision", ["", "\nSupervisor guidance"])
+@pytest.mark.parametrize("compaction", [False, True])
+@pytest.mark.parametrize("includes_delta", [False, True])
+def test_prompt_is_assembled_once_without_replaying_or_duplicating_guidance(
+    resumed, supervision, compaction, includes_delta
+):
+    delta = "Authorized delta"
+    requirement = delta if includes_delta else "Original requirement"
+    feedback = delta if includes_delta else "Current repair"
+    task, native = request_context({"next_feedback": feedback}, resumed=resumed)
+    packet = work_packet(task.id, 1, None, delta, invariants=("Keep the API",))
+    native.checkpoint["coordinator_guidance"] = json.loads(encode(packet, "JSON_VERBOSE"))
+    prepared = build_developer_request(
+        task, native, requirement, supervisor_guidance=supervision, compaction=compaction
+    )
+    expected = (feedback if resumed else requirement) + supervision
+    if not compaction:
+        if not includes_delta:
+            expected += "\nCurrent authorized change request:\n" + delta
+        expected += '\nRequired invariants:\n["Keep the API"]'
+    assert prepared.prompt == expected
+    assert prepared.request == (requirement if resumed else expected)
+    assert prepared.feedback == (expected if resumed else None)
+    if compaction:
+        assert prepared.work is None
+    else:
+        assert prepared.work.payload["request"] == expected
+        assert prepared.work.payload["invariants"] == ["Keep the API"]
 
 
 @pytest.mark.parametrize("mode", ["compaction", "continuity"])
@@ -167,7 +198,73 @@ async def test_merge_dispatch_does_not_load_a_native_context(monkeypatch):
     monkeypatch.setattr("app.engineering.infrastructure.executor.load_phase_context", load)
     sessions = AsyncMock()
     lease = PhaseLease(uuid4(), uuid4(), uuid4(), "MERGE_PR", 1)
-    executor = SqlPhaseExecutor(sessions, Settings())
+    executor = SqlPhaseExecutor(sessions, Settings(), AsyncMock())
     assert await executor.execute(lease) == Action.MERGED
     merge.assert_awaited_once_with(sessions, lease)
     load.assert_not_called()
+
+
+def test_development_snapshot_does_not_expose_orm_records():
+    task, native = request_context({"next_feedback": "Fix it"}, resumed=True)
+    native.harness = "codex"
+    state = development_session(task, native)
+    assert state.session_id == native.id and state.requirement_version == task.requirement_version
+    assert state.native_session_id == "session" and state.harness == "codex"
+    assert state.checkpoint == native.checkpoint and state.checkpoint is not native.checkpoint
+    assert not hasattr(state, "_sa_instance_state")
+
+
+@pytest.mark.parametrize("stage,allow_repair", [("DEVELOPING", True), ("FIXING", False)])
+async def test_recovered_candidate_does_not_start_paid_development(stage, allow_repair):
+    task, native = request_context()
+    task.stage = stage
+    context = SimpleNamespace(task=task, native=native, token_policy=TokenEfficiencyPolicy())
+    development = AsyncMock(recover_candidate=AsyncMock(return_value=Action.VALIDATE_CANDIDATE))
+    sessions = AsyncMock()
+    executor = SqlPhaseExecutor(sessions, Settings(), development)
+    lease = PhaseLease(uuid4(), task.id, uuid4(), "DEVELOPER_TURN", 1)
+    result = await executor._develop(
+        AsyncMock(), lease, context, compaction=False, compacted=False, continuity=False
+    )
+    assert result == Action.VALIDATE_CANDIDATE
+    development.recover_candidate.assert_awaited_once_with(
+        lease, native.id, allow_repair=allow_repair
+    )
+    sessions.assert_not_called()
+
+
+async def test_rollover_adapter_preserves_requirement_and_lease_fences(monkeypatch):
+    session = AsyncMock()
+    sessions = Mock()
+    sessions.return_value.__aenter__ = AsyncMock(return_value=session)
+    sessions.return_value.__aexit__ = AsyncMock(return_value=False)
+    store = AsyncMock()
+    create_store = Mock(return_value=store)
+    monkeypatch.setattr(
+        "app.engineering.infrastructure.development_recovery.SqlTokenEfficiency", create_store
+    )
+    lease = PhaseLease(uuid4(), uuid4(), uuid4(), "DEVELOPER_TURN", 7)
+    await SqlDevelopmentRecovery(sessions).rollover(lease, 3, "Evidence")
+    create_store.assert_called_once_with(session)
+    store.rollover.assert_awaited_once_with(
+        lease.task_id, 3, "Evidence", job_id=lease.job_id, lease_token=lease.token
+    )
+
+
+@pytest.mark.parametrize(
+    "operation,target",
+    [
+        ("repair", "schedule_bounded_repair"),
+        ("validate_candidate", "schedule_candidate_validation"),
+    ],
+)
+async def test_recovery_adapter_keeps_existing_transactional_operations(
+    monkeypatch, operation, target
+):
+    delegated = AsyncMock(return_value=True)
+    monkeypatch.setattr("app.engineering.infrastructure.development_recovery." + target, delegated)
+    sessions = AsyncMock()
+    lease = PhaseLease(uuid4(), uuid4(), uuid4(), "DEVELOPER_TURN", 1)
+    session_id = uuid4()
+    assert await getattr(SqlDevelopmentRecovery(sessions), operation)(lease, session_id)
+    delegated.assert_awaited_once_with(sessions, lease, session_id)

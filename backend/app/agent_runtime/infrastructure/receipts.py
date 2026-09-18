@@ -3,8 +3,8 @@
 from datetime import UTC, datetime
 
 from app.agent_runtime.application.harness import TurnReceipt
+from app.agent_runtime.domain.envelope import canonical
 from app.agent_runtime.domain.usage import Pricing
-from app.agent_runtime.infrastructure.agent_codec import canonical
 from app.agent_runtime.infrastructure.models import AIRun, PricingCatalog
 
 

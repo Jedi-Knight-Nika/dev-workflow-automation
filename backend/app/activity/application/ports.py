@@ -3,6 +3,15 @@ from datetime import datetime
 from typing import Any, Protocol
 
 
+class ActivityProjection(Protocol):
+    async def project(self) -> int: ...
+
+
+class ActivityMaintenance(Protocol):
+    async def collect(self) -> None: ...
+    async def expire(self) -> None: ...
+
+
 @dataclass(frozen=True)
 class ActivityScope:
     kind: str = "workspace"

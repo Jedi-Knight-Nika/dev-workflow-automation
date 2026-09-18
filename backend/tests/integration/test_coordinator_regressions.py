@@ -10,7 +10,9 @@ from app.agent_runtime.application.harness import TurnReceipt
 from app.agent_runtime.domain.usage import Usage
 from app.agent_runtime.infrastructure.accounting import SqlDevelopmentStore
 from app.agent_runtime.infrastructure.models import AIRun, DeveloperSession
-from app.coordinator.infrastructure.actions import ActionExecutor
+from app.bootstrap.coordinator import create_action_executor as ActionExecutor
+from app.bootstrap.coordinator import create_coordinator_processor as CoordinatorProcessor
+from app.coordinator.infrastructure.actions import SqlCoordinationActions
 from app.coordinator.infrastructure.administration import CoordinationAdministration
 from app.coordinator.infrastructure.inbox import enqueue, notify_engineering
 from app.coordinator.infrastructure.models import (
@@ -19,19 +21,80 @@ from app.coordinator.infrastructure.models import (
     CoordinatorRun,
     HumanRequest,
 )
-from app.coordinator.infrastructure.processor import CoordinatorProcessor
 from app.engineering.application.develop import DevelopmentBlocked
 from app.engineering.domain.lifecycle import Action
 from app.engineering.infrastructure.jobs import SqlPhaseJobs
 from app.engineering.infrastructure.message_models import TaskMessage
 from app.engineering.infrastructure.requirements import current_requirement
-from app.engineering.infrastructure.task_models import Task
+from app.engineering.infrastructure.task_models import Job, Task, TaskEvent
 from app.intake.infrastructure.engineering_events import requirements_changed
 from tests.integration import test_coordinator as coordinator_fixtures
 from tests.integration.test_coordinator import choice, send
 from tests.integration.test_enrollment_and_costs import scenario
 
 active = coordinator_fixtures.active
+
+
+@pytest.mark.parametrize("directive", ["ASK_HUMAN", "IMPLEMENT", "REPAIR"])
+async def test_action_effects_roll_back_together_if_final_recording_fails(
+    postgres_session_factory, tmp_path, active, monkeypatch, directive
+):
+    factory = postgres_session_factory
+    async with scenario(factory, tmp_path) as (_, _, task_id, _):
+        await send(factory, task_id)
+        model, gateway = AsyncMock(), AsyncMock()
+        model.decide.return_value = choice(directive)
+        assert await CoordinatorProcessor(factory, active, model, gateway).process_one()
+
+        async def snapshot():
+            async with factory() as session:
+                task = await session.get(Task, task_id)
+                native = await session.scalar(
+                    select(DeveloperSession).where(DeveloperSession.task_id == task_id)
+                )
+                jobs = list(
+                    await session.execute(
+                        select(Job.id, Job.state).where(Job.task_id == task_id).order_by(Job.id)
+                    )
+                )
+                event_ids = list(
+                    await session.scalars(
+                        select(TaskEvent.id)
+                        .where(TaskEvent.task_id == task_id)
+                        .order_by(TaskEvent.id)
+                    )
+                )
+                return (
+                    task.status,
+                    task.stage,
+                    task.lifecycle_version,
+                    task.requirement_version,
+                    dict(native.checkpoint),
+                    jobs,
+                    event_ids,
+                )
+
+        before = await snapshot()
+        record = AsyncMock(side_effect=ValueError("Cannot record action"))
+        monkeypatch.setattr(SqlCoordinationActions, "_record_effect", record)
+        executor = ActionExecutor(factory, gateway)
+        assert await executor.execute_one()
+        record.assert_awaited_once()
+        assert await snapshot() == before
+        async with factory() as session:
+            action = await session.scalar(
+                select(CoordinatorAction).where(CoordinatorAction.task_id == task_id)
+            )
+            assert action.status == "REJECTED" and action.error == "Cannot record action"
+            assert (await session.get(CoordinatorRun, action.run_id)).status == "REJECTED"
+            assert not await session.scalar(
+                select(HumanRequest.id).where(HumanRequest.task_id == task_id)
+            )
+            assert not await session.scalar(
+                select(TaskMessage.id).where(TaskMessage.task_id == task_id)
+            )
+        assert not await executor.deliver_one()
+        gateway.reply.assert_not_awaited()
 
 
 async def test_coalesced_old_review_cannot_change_current_work(

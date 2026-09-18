@@ -6,14 +6,30 @@ from contextlib import asynccontextmanager
 from time import monotonic
 
 import structlog
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.coordinator.application.ports import CoordinationAdministration
-from app.coordinator.infrastructure.actions import ActionExecutor
+from app.coordinator.application.actions import ExecuteCoordinatorActions
+from app.coordinator.application.ports import (
+    ConversationGateway,
+    CoordinationAdministration,
+    DecisionModel,
+)
+from app.coordinator.application.process import ProcessCoordinator
+from app.coordinator.infrastructure.actions import SqlCoordinationActions
 from app.coordinator.infrastructure.model import MeteredDecisionModel
-from app.coordinator.infrastructure.processor import CoordinatorProcessor
-from app.platform.configuration.settings import get_settings
+from app.coordinator.infrastructure.processor import SqlCoordinationRuns
+from app.platform.configuration.settings import Settings, get_settings
 from app.platform.integrations.infrastructure.conversations import ProviderConversations
 from app.platform.persistence.session import SessionLocal
+
+
+def create_coordinator_processor(
+    sessions: async_sessionmaker[AsyncSession],
+    settings: Settings,
+    model: DecisionModel,
+    conversations: ConversationGateway,
+) -> ProcessCoordinator:
+    return ProcessCoordinator(SqlCoordinationRuns(sessions, settings), model, conversations)
 
 
 @asynccontextmanager
@@ -23,10 +39,10 @@ async def coordinator_controller() -> AsyncIterator[None]:
         yield
         return
     gateway = ProviderConversations(SessionLocal)
-    processor = CoordinatorProcessor(
+    processor = create_coordinator_processor(
         SessionLocal, settings, MeteredDecisionModel(SessionLocal, settings), gateway
     )
-    executor = ActionExecutor(SessionLocal, gateway)
+    executor = create_action_executor(SessionLocal, gateway)
 
     async def run(*, decisions: bool) -> None:
         recovered = 0.0
@@ -61,6 +77,12 @@ async def coordinator_controller() -> AsyncIterator[None]:
         for worker in workers:
             worker.cancel()
         await asyncio.gather(*workers, return_exceptions=True)
+
+
+def create_action_executor(
+    sessions: async_sessionmaker[AsyncSession], conversations: ConversationGateway
+) -> ExecuteCoordinatorActions:
+    return ExecuteCoordinatorActions(SqlCoordinationActions(sessions), conversations)
 
 
 def coordination_administration() -> "CoordinationAdministration":

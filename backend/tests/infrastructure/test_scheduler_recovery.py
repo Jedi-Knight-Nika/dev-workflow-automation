@@ -1,6 +1,6 @@
 import asyncio
 from typing import Any, cast
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
 
 import pytest
@@ -29,6 +29,19 @@ def controller() -> Scheduler:
 
 def lease() -> PhaseLease:
     return PhaseLease(uuid4(), uuid4(), uuid4(), "DEVELOPER_TURN", 1)
+
+
+async def test_scheduler_reports_empty_polls_without_storage_types():
+    scheduler = controller()
+    observed = Mock()
+    scheduler.observe_claim = observed
+    await scheduler.start()
+    try:
+        await asyncio.sleep(0.03)
+        assert observed.call_count > 0
+        assert all(not call.args[0] and call.args[1] >= 0 for call in observed.call_args_list)
+    finally:
+        await scheduler.stop()
 
 
 @pytest.mark.asyncio

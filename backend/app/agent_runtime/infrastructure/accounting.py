@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.agent_runtime.application.harness import TurnReceipt
-from app.agent_runtime.infrastructure.agent_codec import canonical
+from app.agent_runtime.domain.envelope import canonical
 from app.agent_runtime.infrastructure.models import (
     AIRun,
     DeveloperSession,

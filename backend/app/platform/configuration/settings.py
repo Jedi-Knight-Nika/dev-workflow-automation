@@ -28,6 +28,8 @@ class Settings(BaseSettings):
     app_secret_key: str = Field(default="development-only-secret-change-me", min_length=16)
     workspace_root: Path = Path("./workspaces")
     scheduler_enabled: bool = False
+    event_transport: Literal["postgres", "rabbitmq"] = "postgres"
+    rabbitmq_url: str = Field(default="", repr=False)
     scheduler_poll_seconds: float = 1.0
     scheduler_max_concurrent_jobs: int = Field(default=2, ge=1, le=32)
     account_monthly_budget_usd: Decimal | None = Field(

@@ -4,7 +4,8 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import func, select
 
-from app.coordinator.infrastructure.actions import ActionExecutor
+from app.bootstrap.coordinator import create_action_executor as ActionExecutor
+from app.bootstrap.coordinator import create_coordinator_processor as CoordinatorProcessor
 from app.coordinator.infrastructure.administration import CoordinationAdministration
 from app.coordinator.infrastructure.inbox import enqueue
 from app.coordinator.infrastructure.models import (
@@ -13,7 +14,6 @@ from app.coordinator.infrastructure.models import (
     CoordinatorRun,
     HumanRequest,
 )
-from app.coordinator.infrastructure.processor import CoordinatorProcessor
 from app.coordinator.infrastructure.schemas import parse_decision
 from app.engineering.infrastructure.task_models import Job, Task
 from app.platform.configuration.settings import get_settings

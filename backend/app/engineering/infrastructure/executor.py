@@ -1,27 +1,27 @@
 """Concrete phase controller. Never instantiate native SDKs in this process."""
 
-from dataclasses import replace
 from pathlib import Path
 
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.agent_runtime.application.harness import WorkspaceUnavailable
-from app.agent_runtime.domain.handoffs import WorkOutcome
-from app.agent_runtime.domain.token_efficiency_policy import TokenEfficiencyPolicy
 from app.agent_runtime.infrastructure.docker_harness import DockerHarness
 from app.agent_runtime.infrastructure.models import DeveloperSession
 from app.agent_runtime.infrastructure.phase_mounts import phase_mounts
-from app.agent_runtime.infrastructure.token_efficiency import SqlTokenEfficiency
 from app.delivery.infrastructure.git_runner import GitManifest
 from app.delivery.infrastructure.git_transport import github_token, run_git
 from app.delivery.infrastructure.publication import publish_phase
 from app.delivery.infrastructure.workflow import merge_phase
 from app.engineering.application.develop import DevelopmentBlocked, DevelopTask, SessionContext
+from app.engineering.application.development_control import (
+    DevelopmentControl,
+    DevelopmentSession,
+    bounded_repair_policy,
+)
 from app.engineering.application.jobs import PhaseBlocked, PhaseLease
 from app.engineering.domain.lifecycle import Action, WaitReason
 from app.engineering.infrastructure.consultation import consult, save_consultation_feedback
-from app.engineering.infrastructure.developer_failures import block_failed_turn
 from app.engineering.infrastructure.developer_request import build_developer_request
 from app.engineering.infrastructure.development_setup import (
     admit_development,
@@ -36,9 +36,25 @@ from app.platform.configuration.settings import Settings
 from app.repositories.infrastructure.models import Repository, RepositoryRuntimeProfile
 
 
+def development_session(task: Task, native: DeveloperSession) -> DevelopmentSession:
+    return DevelopmentSession(
+        native.id,
+        task.requirement_version,
+        native.native_session_id,
+        native.harness,
+        dict(native.checkpoint),
+    )
+
+
 class SqlPhaseExecutor:
-    def __init__(self, sessions: async_sessionmaker[AsyncSession], settings: Settings) -> None:
+    def __init__(
+        self,
+        sessions: async_sessionmaker[AsyncSession],
+        settings: Settings,
+        development: DevelopmentControl,
+    ) -> None:
         self.sessions, self.settings = sessions, settings
+        self.development = development
 
     async def runtime_profile(self, task: Task) -> RepositoryRuntimeProfile | None:
         async with self.sessions() as session:
@@ -114,17 +130,11 @@ class SqlPhaseExecutor:
     ) -> Action:
         task, native = context.task, context.native
         token_policy = context.token_policy
-        from app.agent_runtime.infrastructure.bounded_recovery import (
-            schedule_bounded_repair,
-            schedule_candidate_validation,
+        recovered = await self.development.recover_candidate(
+            lease, native.id, allow_repair=task.stage == "DEVELOPING"
         )
-
-        if await schedule_candidate_validation(self.sessions, lease, native.id):
-            return Action.VALIDATE_CANDIDATE
-        if task.stage == "DEVELOPING" and await schedule_bounded_repair(
-            self.sessions, lease, native.id
-        ):
-            return Action.BOUNDED_REPAIR
+        if recovered is not None:
+            return recovered
         if (
             task.stage == "FIXING"
             and native.checkpoint.get("next_feedback")
@@ -136,16 +146,7 @@ class SqlPhaseExecutor:
             native = await prepare_repair(self.sessions, lease, native)
         bounded_repair = native.checkpoint.get("bounded_repair_job_id") == str(lease.job_id)
         if bounded_repair:
-            token_policy = replace(
-                token_policy,
-                mode="ENFORCE",
-                reasoning_effort="low",
-                first_edit_warning_tokens=20000,
-                exploration_hard_tokens=50000,
-                no_progress_tokens=20000,
-                max_turn_input_tokens=80000,
-                automatic_rollover=False,
-            )
+            token_policy = bounded_repair_policy(token_policy)
         supervisor_guidance = ""
         from app.agent_runtime.infrastructure.patch_recovery import (
             can_resume_patch,
@@ -173,10 +174,10 @@ class SqlPhaseExecutor:
             if decision.action == "WAIT_HUMAN":
                 raise PhaseBlocked(WaitReason.MISSING_REQUIREMENT, decision.assessment)
             supervisor_guidance = decision.developer_guidance()
-        continued = await self._continue_session(
+        continued = await self.development.continue_session(
             lease,
-            task,
-            native,
+            development_session(task, native),
+            self,
             token_policy,
             compaction=compaction,
             compacted=compacted,
@@ -277,127 +278,9 @@ class SqlPhaseExecutor:
             raise PhaseBlocked(WaitReason.BUDGET_EXHAUSTED, str(exc)) from exc
         except WorkspaceUnavailable as exc:
             raise PhaseBlocked(WaitReason.MISSING_CONFIGURATION, str(exc)) from exc
-        if receipt.status != "completed":
-            if receipt.failure_code == "TURN_INPUT_LIMIT" and await schedule_candidate_validation(
-                self.sessions, lease, native.id
-            ):
-                return Action.VALIDATE_CANDIDATE
-            if receipt.failure_code == "TURN_INPUT_LIMIT" and await schedule_bounded_repair(
-                self.sessions, lease, native.id
-            ):
-                return Action.BOUNDED_REPAIR
-            block_failed_turn(receipt, native.harness)
-        outcome = WorkOutcome(receipt.result.payload["outcome"]) if receipt.result else None
-        if outcome == WorkOutcome.NEEDS_HUMAN:
-            raise PhaseBlocked(WaitReason.MISSING_REQUIREMENT, receipt.summary[-1000:])
-        if outcome == WorkOutcome.FAILED:
-            raise PhaseBlocked(WaitReason.RUNTIME_FAILURE, "Developer reported a failed result")
-        if (
-            outcome == WorkOutcome.MILESTONE_COMPLETE
-            or outcome is None
-            and receipt.summary.startswith("MILESTONE_COMPLETE\n")
-        ):
-            if not token_policy.automatic_rollover or token_policy.mode != "ENFORCE":
-                raise PhaseBlocked(
-                    WaitReason.MISSING_REQUIREMENT,
-                    "Milestone complete; approve a checkpoint before continuing",
-                )
-            try:
-                async with self.sessions() as session:
-                    await SqlTokenEfficiency(session).rollover(
-                        task.id,
-                        task.requirement_version,
-                        receipt.summary[len("MILESTONE_COMPLETE\n") :][:1800],
-                        job_id=lease.job_id,
-                        lease_token=lease.token,
-                    )
-            except (ValueError, RuntimeError, OSError) as exc:
-                raise PhaseBlocked(
-                    WaitReason.MISSING_REQUIREMENT,
-                    "Milestone checkpoint blocked; retained native context",
-                ) from exc
-            return await self.execute(lease)
-        if (
-            outcome == WorkOutcome.NEEDS_PLAN
-            or outcome is None
-            and receipt.summary.strip().split("\n", 1)[0].strip() == "NEEDS_PLAN"
-        ):
-            return Action.NEEDS_PLAN
-        return Action.IMPLEMENTED
-
-    async def _continue_session(
-        self,
-        lease: PhaseLease,
-        task: Task,
-        native: DeveloperSession,
-        token_policy: TokenEfficiencyPolicy,
-        *,
-        compaction: bool,
-        compacted: bool,
-        continuity: bool,
-    ) -> Action | None:
-        checkpoint_digest = native.checkpoint.get("rollover_digest")
-        if (
-            checkpoint_digest
-            and native.checkpoint.get("continuity_acknowledged") != checkpoint_digest
-            and not continuity
-        ):
-            if native.native_session_id:
-                raise PhaseBlocked(
-                    WaitReason.MISSING_REQUIREMENT,
-                    "Checkpoint acknowledgement failed; no automatic paid retry",
-                )
-            await self.execute(lease, continuity=True)
-            return await self.execute(lease)
-        threshold = self.settings.developer_compact_before_feedback_tokens
-        active_context = (native.checkpoint.get("token_efficiency") or {}).get(
-            "active_context_estimate"
+        return await self.development.finish(
+            lease, development_session(task, native), self, token_policy, receipt
         )
-        if (
-            not compaction
-            and not continuity
-            and native.native_session_id
-            and native.checkpoint.get("next_feedback")
-            and token_policy.automatic_rollover
-            and native.harness not in {"responses", "patch"}
-            and token_policy.mode == "ENFORCE"
-            and active_context is not None
-            and active_context >= token_policy.active_context_soft_tokens
-        ):
-            try:
-                async with self.sessions() as session:
-                    await SqlTokenEfficiency(session).rollover(
-                        task.id,
-                        task.requirement_version,
-                        str(
-                            native.checkpoint.get("summary")
-                            or "Continue from current validated code and pending review feedback."
-                        )[:1800],
-                        job_id=lease.job_id,
-                        lease_token=lease.token,
-                    )
-            except (ValueError, RuntimeError, OSError) as exc:
-                raise PhaseBlocked(
-                    WaitReason.MISSING_REQUIREMENT,
-                    "CHECKPOINT_PERSISTENCE_FAILED; retained native context",
-                ) from exc
-            return await self.execute(lease)
-        if (
-            not compaction
-            and not compacted
-            and threshold
-            and native.harness not in {"responses", "patch"}
-            and native.native_session_id
-            and active_context is not None
-            and active_context >= threshold
-            and int(native.checkpoint.get("compaction_count", 0)) < token_policy.max_compactions
-            and native.checkpoint.get("next_feedback")
-        ):
-            # Two separately metered runs, one native session. The next
-            # call reloads usage and cannot reuse the compaction reserve.
-            await self.execute(lease, compaction=True)
-            return await self.execute(lease, compacted=True)
-        return None
 
     async def _prepare(
         self,

@@ -1,6 +1,6 @@
 """Canonical handoff state independent of any model's wire encoding."""
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from typing import Any, Literal
 from uuid import UUID
 
@@ -36,3 +36,10 @@ class AgentEnvelope:
             raise ValueError("Invalid handoff revision or evidence references")
         if self.type in {"work", "repair"} and not str(self.payload.get("request") or "").strip():
             raise ValueError("Work and repair packets require an explicit request")
+
+
+def canonical(packet: AgentEnvelope) -> dict[str, Any]:
+    data = asdict(packet)
+    data["task_id"] = str(packet.task_id)
+    data["evidence_refs"] = list(packet.evidence_refs)
+    return data

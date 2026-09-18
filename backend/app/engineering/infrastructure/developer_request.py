@@ -82,12 +82,7 @@ def build_developer_request(
             "A resumed session needs new feedback; do not replay the old task",
         )
     prompt = feedback if feedback is not None else request
-    if supervisor_guidance:
-        if feedback is not None:
-            feedback += supervisor_guidance
-        else:
-            request += supervisor_guidance
-        prompt = feedback if feedback is not None else request
+    prompt += supervisor_guidance
     invariants: tuple[str, ...] = ()
     guidance = native.checkpoint.get("coordinator_guidance")
     if guidance and not compaction and not continuity:
@@ -107,10 +102,10 @@ def build_developer_request(
             if invariants
             else ""
         )
-        if feedback is not None:
-            feedback = prompt
-        else:
-            request = prompt
+    if feedback is not None:
+        feedback = prompt
+    else:
+        request = prompt
     work = (
         work_packet(
             task.id,

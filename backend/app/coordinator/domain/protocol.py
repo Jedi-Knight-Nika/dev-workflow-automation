@@ -36,6 +36,28 @@ class Decision:
     read_tools: tuple[str, ...]
     checkpoint: Checkpoint
 
+    @property
+    def outbound_message(self) -> str:
+        return "" if self.action == Directive.WAIT else self.message
+
+    @property
+    def message_kind(self) -> str:
+        return "QUESTION" if self.action == Directive.ASK_HUMAN else "UPDATE"
+
+    @property
+    def review_disposition(self) -> str:
+        if self.action == Directive.REPAIR:
+            return "FEEDBACK_APPLIED"
+        if self.action in {Directive.REPLY, Directive.WAIT}:
+            return "IGNORED"
+        return "NEEDS_CLASSIFICATION"
+
+    @property
+    def delivery_status(self) -> str:
+        if self.outbound_message or self.action == Directive.REQUEST_REVIEW:
+            return "DELIVERY_PENDING"
+        return "EXECUTED"
+
 
 def validate_effect(
     decision: Decision,

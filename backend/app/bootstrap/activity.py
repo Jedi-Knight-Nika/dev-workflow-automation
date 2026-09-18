@@ -7,7 +7,10 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.activity.application.ports import ActivityMonitor, ActivityQueries
+from app.activity.application.project import ProjectActivity
+from app.activity.infrastructure.maintenance import SqlActivityMaintenance
 from app.activity.infrastructure.monitoring import activity_monitoring
+from app.activity.infrastructure.projector import ActivityProjector
 from app.activity.infrastructure.queries import SqlActivityQueries
 from app.platform.configuration.settings import get_settings
 
@@ -38,6 +41,20 @@ def get_activity_queries() -> ActivityQueries:
 
 def get_activity_monitor() -> ActivityMonitor:
     return activity_monitoring
+
+
+def create_activity_projector() -> ProjectActivity:
+    settings = get_settings()
+    sessions = activity_sessions()
+    return ProjectActivity(
+        ActivityProjector(sessions),
+        SqlActivityMaintenance(
+            sessions,
+            settings.workspace_root,
+            collect_files_enabled=settings.activity_collect_files,
+            retention_days=settings.activity_file_retention_days,
+        ),
+    )
 
 
 async def render_activity_metrics() -> bytes:

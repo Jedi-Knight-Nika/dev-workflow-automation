@@ -24,23 +24,56 @@ This avoids the operational overhead of microservices while retaining module bou
 
 ## 2. Technology stack and layout
 
+### Infrastructure boundaries and portability
+
+Domain/application code depends on capability contracts, not database sessions, SQL statements or broker client types. Architecture tests discover these layers across all modules, including nested platform modules, and reject imports of persistence/configuration adapters, PostgreSQL drivers and AMQP clients. Bootstrap modules select concrete implementations.
+
+- Engineering execution already uses `PhaseJobs` and `PhaseExecutor`; their atomic claim, heartbeat, admission and recovery guarantees remain unchanged. Scheduler configuration is now a structural contract rather than the Pydantic settings class.
+- `DevelopmentControl` owns checkpoint continuation, compaction, bounded-repair policy and receipt outcomes using plain session snapshots. `DevelopmentRecovery` isolates candidate validation, repair scheduling and checkpoint persistence; its SQL adapter retains the existing transactional operations and lease fences. Continuations still re-enter the phase executor to reload state and repeat admission checks. This separation adds no automatic paid retries or extra model calls.
+- `ProcessCoordinator` owns bounded model calls, evidence expansion, cancellation and timeout handling. `CoordinationRuns` owns the storage contract; `SqlCoordinationRuns` implements transactional claims/results, current-authority checks and recovery. Provider-specific read failures are translated at the conversation adapter boundary.
+- `ExecuteCoordinatorActions` owns external sends and read-only reconciliation through `ConversationGateway`. `CoordinationActions` exposes atomic application/claim/result operations; its SQL adapter returns immutable delivery data, not ORM rows. An uncertain send becomes `UNKNOWN`, not an automatic resend. Cancellation leaves a durable claim for recovery; authenticated echoes remain authoritative when a delayed failure arrives.
+- Coordinator decisions own message suppression, message kind, review disposition and delivery-pending rules. The SQL action adapter separates human questions, engineering amendments and effect recording into named operations inside the same transaction/savepoint. Authority checks, paid-work protection and rollback still cover the whole action.
+- Deterministic validation uses shared domain check results for both container execution and evidence classification. Domain rules generate bounded repair feedback and track repeated failures; `complete_validation` decides whether to block, request review or advance, only after evidence commits. Container execution, SQL writes and consultation remain adapters; publication and merge gates are unchanged.
+- Intake's `ProcessDeliveries` owns polling order. Bootstrap binds tracker-status synchronization and review rechecks as callbacks; the intake SQL adapter no longer imports delivery adapters or loads global settings itself. Source/Linear work, status sync, GitHub events, review interpretation and review rechecks retain their original order and transaction boundaries.
+- Canonical agent-envelope data lives in the domain; optional wire codecs consume that representation rather than owning it.
+- `ProjectActivity` depends on projection and maintenance ports. PostgreSQL projection queries, serialization locks, file collection and retention remain in adapters selected by the activity bootstrap.
+- `DispatchOutbox` depends on `EventOutbox` and `EventPublisher`. It knows neither SQLAlchemy nor RabbitMQ. A confirmed publication precedes marking delivery; failures keep the notification durable.
+
+This is **dependency isolation, not drop-in database portability**. PostgreSQL remains the supported production database. A MySQL implementation would require adapters and migrations providing equivalent transaction, locking, JSON/query and recovery semantics, then passing the same behavioral contracts and concurrency tests. Other cross-module infrastructure dependencies still exist; this change does not pretend that the whole persistence layer has been rewritten.
+
+Reusable storage behavior tests live in `backend/tests/contracts`. Assertions depend only on `PhaseJobs`, `EventOutbox` and adapter-neutral test setup hooks. The PostgreSQL-specific setup is confined to `conftest.py`; a new adapter supplies those same harness hooks and runs the unchanged tests. They cover competing claims, token fencing, idempotent completion, atomic lifecycle handoff, authority revocation, retry identity/backoff and recovery without automatically replaying paid work. Existing database integration tests still verify transaction rollback, schema constraints, admission limits and authenticated-echo races.
+
+Remaining cross-module persistence coordination is intentionally not hidden behind forwarding-only repositories. Atomic task/Team/admission operations and projections that read several modules still share database transactions. Replacing that storage requires equivalent transactional adapters; moving those calls to RabbitMQ would weaken their guarantees rather than make them portable.
+
+### Optional activity notification transport
+
+Default `EVENT_TRANSPORT=postgres` preserves database polling and adds no notification writes. With `rabbitmq`, the SQL lifecycle adapter inserts a small `notification_outbox` row in the **same transaction** as a task transition. This reviewed infrastructure-to-platform dependency does not expose storage types to business logic. There are no ORM hooks, dynamic event routing or duplicate task queues.
+
+The only initial message is version 1 `engineering.lifecycle.changed`: event ID, task ID, lifecycle revision and timestamp. An independently running dispatcher claims a row with a 60-second token-fenced lease and commits before publishing. Publication is bounded to 10 seconds; failures retry with capped exponential backoff. A crash after broker confirmation but before the delivery commit may duplicate a message, intentionally. Expired owners cannot complete another worker's claim.
+
+The optional `aio-pika` adapter declares durable `aew.events` / `aew.activity` topology, publishes persistent messages with publisher confirms and mandatory-return handling, and consumes with prefetch 1. The consumer projects committed database records before ACK. Malformed/unsupported envelopes go to `aew.activity.dead`; transient failures close the connection and retry after a delay, leaving unacknowledged messages recoverable. No model calls, paid execution or lifecycle authorization come from broker messages.
+
+The normal activity process still periodically scans committed source records and performs maintenance. It catches up after missing notifications, broker outages, queue loss or enabling/disabling the transport. Other activity sources currently rely on this periodic path. Projection retains its existing deduplication and activity-only locking. Notifications do not contain visualization data, source code, prompts or credentials.
+
+RabbitMQ is not enabled for Coordinator or engineering dispatch in this increment. Extending it requires measured need and equivalent claim/recovery tests, not a second scheduler. No Kafka, generic event platform or MySQL adapter is introduced. See [optional transport setup and rollback](guide.md#optional-rabbitmq-notifications).
+
 ### Backend
 
-| Technology                             | Role in this repository                                                                                              |
-| -------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| Python 3.12+                           | Application, domain rules, controller processes, and runner implementation.                                          |
-| FastAPI and Uvicorn                    | HTTP routing, request validation integration, OpenAPI, and ASGI serving.                                             |
-| Pydantic / pydantic-settings           | Request/configuration models, bounds, and environment parsing.                                                       |
-| SQLAlchemy 2 async                     | Database adapters, transaction ownership, queries, row/advisory locking.                                             |
-| PostgreSQL                             | Durable task state, jobs/leases, receipts, configuration, histories, and projections. Compose targets PostgreSQL 16. |
-| asyncpg / psycopg                      | Async application access and synchronous database/migration access respectively.                                     |
-| Alembic                                | Ordered schema migrations. The current patch adds revision `0014_task_creation_requests`.                            |
-| asyncio / AnyIO / HTTPX                | Bounded background work, cancellation, HTTP integrations, and Docker API transport.                                  |
-| cryptography                           | Integration-credential encryption support.                                                                           |
-| structlog / prometheus-client / psutil | Structured logging, metrics, and host/resource observations.                                                         |
-| tree-sitter grammars                   | Source structure analysis used by repository/context tooling.                                                        |
-| Native harness extras                  | Locked Codex and Claude SDK dependencies for runner images; not required as API-process model executors.             |
-| uv, Ruff, mypy, pytest                 | Locked dependency installation, lint/format, strict type checks, and tests.                                          |
+| Technology                             | Role in this repository                                                                                                          |
+| -------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| Python 3.12+                           | Application, domain rules, controller processes, and runner implementation.                                                      |
+| FastAPI and Uvicorn                    | HTTP routing, request validation integration, OpenAPI, and ASGI serving.                                                         |
+| Pydantic / pydantic-settings           | Request/configuration models, bounds, and environment parsing.                                                                   |
+| SQLAlchemy 2 async                     | Database adapters, transaction ownership, queries, row/advisory locking.                                                         |
+| PostgreSQL                             | Durable task state, jobs/leases, receipts, configuration, histories, and projections. Compose targets PostgreSQL 16.             |
+| asyncpg / psycopg                      | Async application access and synchronous database/migration access respectively.                                                 |
+| Alembic                                | Ordered schema migrations, including `0014_task_creation_requests` and optional transport storage in `0015_notification_outbox`. |
+| asyncio / AnyIO / HTTPX                | Bounded background work, cancellation, HTTP integrations, and Docker API transport.                                              |
+| cryptography                           | Integration-credential encryption support.                                                                                       |
+| structlog / prometheus-client / psutil | Structured logging, metrics, and host/resource observations.                                                                     |
+| tree-sitter grammars                   | Source structure analysis used by repository/context tooling.                                                                    |
+| Native harness extras                  | Locked Codex and Claude SDK dependencies for runner images; not required as API-process model executors.                         |
+| uv, Ruff, mypy, pytest                 | Locked dependency installation, lint/format, strict type checks, and tests.                                                      |
 
 Declared dependency ranges live in `backend/pyproject.toml`; the reproducible dependency resolution lives in `backend/uv.lock`. Do not treat a range in the manifest as the exact installed version. The Python package version and HTTP app version currently differ (`0.1.0` versus `2.2.0`); neither is a database migration number or an `/api/vN` prefix.
 

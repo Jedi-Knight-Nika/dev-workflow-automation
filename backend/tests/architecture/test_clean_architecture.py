@@ -122,26 +122,11 @@ async def test_create_task_use_case_rolls_back_as_one_transaction() -> None:
     assert unit_of_work.rollbacks == 1
 
 
-@pytest.mark.parametrize(
-    "context",
-    [
-        "engineering",
-        "agent_runtime",
-        "delivery",
-        "teams",
-        "intake",
-        "repositories",
-        "observability",
-        "analytics",
-        "supervisor",
-        "coordinator",
-        "activity",
-    ],
-)
 @pytest.mark.parametrize("layer", ["domain", "application"])
-def test_inner_layers_are_framework_independent(context: str, layer: str) -> None:
-    root = BACKEND_ROOT / "app" / context / layer
-    for path in root.rglob("*.py"):
+def test_inner_layers_are_framework_independent(layer: str) -> None:
+    for path in (BACKEND_ROOT / "app").rglob("*.py"):
+        if layer not in path.relative_to(BACKEND_ROOT / "app").parts:
+            continue
         for imported in imported_modules(path):
             assert imported.split(".")[0] not in {
                 "fastapi",
@@ -150,10 +135,19 @@ def test_inner_layers_are_framework_independent(context: str, layer: str) -> Non
                 "pydantic",
                 "openai_codex",
                 "claude_agent_sdk",
+                "asyncpg",
+                "psycopg",
+                "aio_pika",
+                "aiormq",
+                "pamqp",
+                "pydantic_settings",
             }, path
             assert not any(
                 part in imported.split(".")
                 for part in ("infrastructure", "interfaces", "bootstrap")
+            ), path
+            assert not imported.startswith(
+                ("app.platform.persistence", "app.platform.configuration.settings", "app.db")
             ), path
             if layer == "domain":
                 assert ".application" not in imported, path
@@ -171,6 +165,51 @@ def test_adapters_never_import_http_contracts():
         if "infrastructure" not in path.parts:
             continue
         assert not any("app.interfaces" in name for name in imported_modules(path)), path
+
+
+def test_intake_polling_does_not_orchestrate_another_modules_adapters():
+    path = BACKEND_ROOT / "app/intake/infrastructure/delivery_processing.py"
+    assert not any(name.startswith("app.delivery") for name in imported_modules(path))
+
+
+def test_coordinator_persistence_does_not_run_provider_calls():
+    for filename in ("actions.py", "processor.py"):
+        path = BACKEND_ROOT / "app/coordinator/infrastructure" / filename
+        assert not any(
+            name == "asyncio" or name.startswith(("httpx", "aio_pika"))
+            for name in imported_modules(path)
+        ), path
+        tree = ast.parse(path.read_text())
+        assert not any(
+            isinstance(node, ast.Attribute)
+            and isinstance(node.value, ast.Name)
+            and node.value.id == "self"
+            and node.attr in {"conversations", "model"}
+            for node in ast.walk(tree)
+        ), path
+
+
+def test_storage_contract_assertions_are_adapter_independent():
+    for path in (BACKEND_ROOT / "tests/contracts").glob("test_*.py"):
+        for imported in imported_modules(path):
+            assert imported.split(".")[0] not in {"sqlalchemy", "asyncpg", "psycopg"}, path
+            assert "infrastructure" not in imported.split("."), path
+
+
+def test_phase_adapter_does_not_own_continuation_or_receipt_policy():
+    path = BACKEND_ROOT / "app/engineering/infrastructure/executor.py"
+    tree = ast.parse(path.read_text())
+    attributes = {node.attr for node in ast.walk(tree) if isinstance(node, ast.Attribute)}
+    assert not {"automatic_rollover", "max_compactions", "active_context_soft_tokens"} & attributes
+    assert not any(
+        name.startswith(
+            (
+                "app.agent_runtime.infrastructure.token_efficiency",
+                "app.agent_runtime.infrastructure.bounded_recovery",
+            )
+        )
+        for name in imported_modules(path)
+    )
 
 
 def test_engineering_execution_never_depends_on_activity_projection():
@@ -299,7 +338,11 @@ def test_new_modules_cannot_introduce_unreviewed_private_dependencies():
                 and target[1] != owner
                 and "infrastructure" in target
             ):
-                assert target[1] in existing.get(owner, set()), (
+                notification_adapter = owner == "engineering" and (
+                    imported == "app.platform.messaging.infrastructure.outbox"
+                    or imported.startswith("app.platform.messaging.infrastructure.outbox.")
+                )
+                assert notification_adapter or target[1] in existing.get(owner, set()), (
                     path,
                     imported,
                     "Use the owning module's application contract or review the dependency",

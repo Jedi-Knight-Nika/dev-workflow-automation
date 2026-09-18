@@ -1,0 +1,46 @@
+services:
+  rabbitmq:
+    image: rabbitmq:4.3
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:?Set RABBITMQ_USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD}
+      RABBITMQ_DEFAULT_VHOST: aew
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ['CMD', 'rabbitmq-diagnostics', '-q', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    environment:
+      EVENT_TRANSPORT: rabbitmq
+
+  worker:
+    environment:
+      EVENT_TRANSPORT: rabbitmq
+
+  messaging:
+    build:
+      context: ./backend
+      target: messaging
+    environment:
+      EVENT_TRANSPORT: rabbitmq
+      RABBITMQ_URL: ${RABBITMQ_URL:?Set RABBITMQ_URL with URL-encoded credentials and /aew vhost}
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://engineering_worker:change-me@postgres:5432/engineering_worker}
+      ACTIVITY_ENABLED: ${ACTIVITY_ENABLED:-true}
+    depends_on:
+      backend:
+        condition: service_healthy
+    init: true
+    restart: unless-stopped
+    read_only: true
+    tmpfs: [/tmp]
+    pids_limit: 32
+    mem_limit: 256m
+    cpus: 0.5
+
+volumes:
+  rabbitmq_data:

@@ -44,6 +44,7 @@ from app.observability.observer.models import (
 )
 from app.platform.configuration.models import AccountSettings, SettingsAuditEvent
 from app.platform.integrations.models import Integration
+from app.platform.messaging.infrastructure.outbox import NotificationOutbox
 from app.platform.scheduling.models import WorkerNode
 from app.platform.scheduling.states import IntegrationStatus, JobState
 from app.repositories.infrastructure.models import Repository
@@ -71,6 +72,7 @@ __all__ = [
     "Job",
     "JobState",
     "LocalModelRun",
+    "NotificationOutbox",
     "ObserverConversation",
     "ObserverEvent",
     "ObserverMessage",

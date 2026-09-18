@@ -9,6 +9,7 @@ import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.coordinator.application.ports import ConversationUnavailable
 from app.delivery.infrastructure.git_transport import github_token
 from app.engineering.infrastructure.task_models import Task
 from app.intake.infrastructure.task_snapshot import ExternalTaskSnapshot
@@ -204,6 +205,12 @@ class ProviderConversations:
         return {"identity_id": str(data["user_id"]), "workspace_id": str(data["team_id"])}
 
     async def read(self, task_id: UUID, provider: str, tool: str) -> dict[str, Any]:
+        try:
+            return await self._read(task_id, provider, tool)
+        except httpx.HTTPError as exc:
+            raise ConversationUnavailable(type(exc).__name__) from exc
+
+    async def _read(self, task_id: UUID, provider: str, tool: str) -> dict[str, Any]:
         if tool not in {
             "READ_PR",
             "READ_DISCUSSION",

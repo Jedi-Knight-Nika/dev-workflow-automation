@@ -27,6 +27,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+messaging = ["aio-pika>=9.6,<10"]
 dev = [
   "mypy>=1.15,<2",
   "pytest>=8.3,<9",

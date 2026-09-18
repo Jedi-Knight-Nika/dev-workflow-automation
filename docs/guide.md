@@ -19,6 +19,26 @@ UI: `http://localhost:3000`. API: `http://localhost:8000/api`.
 
 Choose `console`, `execution` or `full` explicitly. Execution adds native workers; full also adds monitoring/alerts. The shell default is **full**, not console. Execution modes can resume authorized queued work and require prepared repository images, validation commands, provider credentials, verified prices, Team enrollment, budgets and reviewer policy. Console does not stop separately running workers. `--no-build` reuses existing images and does not deploy source changes.
 
+## Optional RabbitMQ notifications
+
+The default stack needs no broker. The optional adapter currently accelerates **activity projection after task lifecycle changes only**; it does not dispatch paid work or replace the engineering scheduler. Keep the normal `activity` service running for periodic reconciliation and file maintenance.
+
+After backing up your database, deploy the backend with migrations through `0015_notification_outbox`. Set `RABBITMQ_USER`, a strong `RABBITMQ_PASSWORD`, and `RABBITMQ_URL=amqp://USER:URL_ENCODED_PASSWORD@rabbitmq:5672/aew` in `.env`. Credentials in the URL must match the broker credentials. Then, from the repository root:
+
+```sh
+docker compose -f compose.yaml -f deploy/compose.messaging.yaml up -d --build
+```
+
+When using native execution, include `-f deploy/compose.execution.yaml` **before** the messaging overlay. The overlay enables notification writes in the API/worker and adds an isolated messaging process. Only that process receives the broker URL; no broker ports are published to the host. This is a single-node development deployment, not replicated HA. Changing bootstrap credentials does not rotate an existing RabbitMQ volume's credentials. Production needs its own private deployment, permissions, backups and TLS when crossing hosts.
+
+For host-run development, install `uv sync --locked --all-extras` in `backend`, use a reachable broker URL, set `EVENT_TRANSPORT=rabbitmq` consistently on producers and the messaging process, and run `uv run --extra messaging python -m app.messaging_runner` separately. Normal PostgreSQL mode does not import or connect to the RabbitMQ client.
+
+Inspect `docker compose -f compose.yaml -f deploy/compose.messaging.yaml logs messaging`. Connection failures are logged without exception bodies; publication failures retain their outbox rows and retry with backoff. The minute-level status log includes pending count, oldest age, empty polls and publications. Authenticated `/metrics` exposes `aew_notification_outbox_pending` and `aew_notification_outbox_oldest_seconds`; the controller's metrics also include scheduler claim counts/duration. Queue and dead-letter counts come from RabbitMQ monitoring, not the application's task backlog.
+
+Rollback: stop the `messaging` service, then recreate API/worker without the messaging overlay (`EVENT_TRANSPORT=postgres`). Keep the normal `activity` service running. No task-state migration is needed. Pending outbox rows remain available if RabbitMQ is re-enabled; confirmed rows are retained for seven days and then pruned in bounded batches. Never prune unpublished rows. Database reconciliation, not replay of confirmed messages, repairs missed activity notifications.
+
+Tests use `TEST_DATABASE_URL` for an isolated migrated PostgreSQL database and `TEST_RABBITMQ_URL` for a dedicated RabbitMQ test vhost. The broker tests purge/unbind their test queue, so never point them at a real deployment. CI provisions both services. Run `uv run --extra messaging pytest -q tests/integration/test_notification_outbox.py tests/integration/test_rabbitmq_transport.py` from `backend` with those variables set.
+
 ## Development servers
 
 Install the prerequisites below, then run `make setup`. Use `make dev-backend` and `make dev-frontend` in separate terminals. The frontend proxies `/api` to `http://localhost:8000` unless `API_URL` overrides it.
@@ -26,6 +46,8 @@ Install the prerequisites below, then run `make setup`. Use `make dev-backend` a
 Host-run servers need reachable development database URLs, not the Compose-only `postgres` hostname. Apply migrations with `make migrate` against that configured database. Keep scheduling off unless execution is intentionally configured.
 
 ## Code quality
+
+To validate a database adapter, set `TEST_DATABASE_URL` to a migrated **isolated test database** and run `uv run pytest -q tests/contracts` from `backend`. Contract assertions use application ports only; adapter-specific setup lives in `tests/contracts/conftest.py`. A future adapter must run those same tests, plus its transaction/migration tests and the existing domain/application suite. Passing SQLite mocks is not evidence that locking or concurrent claims work on a production database.
 
 Use Node.js 22.13+ (or a supported newer LTS), Python 3.12+, uv, and Rust with the `rustfmt` and `clippy` components. The desktop check also needs the platform's Tauri build dependencies. On macOS, install shell tools with `brew install shellcheck shfmt`; other platforms can use the upstream binaries or their package manager. Run `make setup` to install the locked Python and frontend dependencies. Desktop JavaScript reuses the frontend tooling; there is no second linter dependency tree.
 

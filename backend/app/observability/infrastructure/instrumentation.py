@@ -38,9 +38,24 @@ class Instrumentation:
             registry=self.registry,
         )
         self.mirror = OperationalCollector()
+        self.claims = Counter(
+            "aew_scheduler_claims_total",
+            "Scheduler polls by whether eligible work was claimed",
+            ("result",),
+            registry=self.registry,
+        )
+        self.claim_seconds = Histogram(
+            "aew_scheduler_claim_seconds",
+            "Time spent claiming eligible work",
+            registry=self.registry,
+        )
         self.registry.register(self.mirror)
         self.lock = asyncio.Lock()
         self.refreshed = 0.0
+
+    def observe_claim(self, claimed: bool, seconds: float) -> None:
+        self.claims.labels("claimed" if claimed else "empty").inc()
+        self.claim_seconds.observe(seconds)
 
     def observe(self, path: str, method: str, status: int, seconds: float) -> None:
         if path == "/metrics":
@@ -98,6 +113,14 @@ class Instrumentation:
                             (
                                 "aew_scheduler_queue_depth",
                                 "SELECT count(*) FROM jobs WHERE state='QUEUED'",
+                            ),
+                            (
+                                "aew_notification_outbox_pending",
+                                "SELECT count(*) FROM notification_outbox WHERE published_at IS NULL",
+                            ),
+                            (
+                                "aew_notification_outbox_oldest_seconds",
+                                "SELECT coalesce(extract(epoch from now()-min(created_at)),0) FROM notification_outbox WHERE published_at IS NULL",
                             ),
                             (
                                 "aew_scheduler_oldest_queued_seconds",

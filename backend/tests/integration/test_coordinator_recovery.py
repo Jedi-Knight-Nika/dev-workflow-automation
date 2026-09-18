@@ -7,7 +7,8 @@ import pytest
 from sqlalchemy import select
 
 from app.agent_runtime.infrastructure.models import AIRun
-from app.coordinator.infrastructure.actions import ActionExecutor
+from app.bootstrap.coordinator import create_action_executor as ActionExecutor
+from app.bootstrap.coordinator import create_coordinator_processor as CoordinatorProcessor
 from app.coordinator.infrastructure.inbox import enqueue
 from app.coordinator.infrastructure.models import (
     CoordinatorAction,
@@ -15,7 +16,6 @@ from app.coordinator.infrastructure.models import (
     CoordinatorRun,
     HumanRequest,
 )
-from app.coordinator.infrastructure.processor import CoordinatorProcessor
 from app.engineering.domain.lifecycle import Action
 from app.engineering.infrastructure.jobs import SqlPhaseJobs
 from app.engineering.infrastructure.models import ValidationRun
@@ -140,7 +140,7 @@ async def test_delivery_check_has_total_deadline_and_never_resends(
 
         gateway.reconcile.side_effect = hanging_read
         monkeypatch.setattr(
-            "app.coordinator.infrastructure.actions.DELIVERY_CHECK_TIMEOUT_SECONDS", 0.01
+            "app.coordinator.application.actions.DELIVERY_CHECK_TIMEOUT_SECONDS", 0.01
         )
         await send(factory, task_id)
         await CoordinatorProcessor(factory, active, model, gateway).process_one()

@@ -17,6 +17,19 @@ jobs:
     name: Backend
     runs-on: ubuntu-latest
     services:
+      rabbitmq:
+        image: rabbitmq:4.3
+        env:
+          RABBITMQ_DEFAULT_USER: ci
+          RABBITMQ_DEFAULT_PASS: ci-password
+          RABBITMQ_DEFAULT_VHOST: aew_test
+        ports:
+          - 5672:5672
+        options: >-
+          --health-cmd "rabbitmq-diagnostics -q ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
       postgres:
         image: postgres:16
         env:
@@ -54,6 +67,7 @@ jobs:
       - name: Test
         env:
           SCHEDULER_ENABLED: 'false'
+          TEST_RABBITMQ_URL: amqp://ci:ci-password@localhost:5672/aew_test
         run: uv run pytest -q
 
   frontend:

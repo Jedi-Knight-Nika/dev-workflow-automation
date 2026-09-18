@@ -14,11 +14,14 @@ from app.engineering.infrastructure.task_models import Task, TaskEvent
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("outcome", ["passed", "failed", "repeated", "review_changes"])
+@pytest.mark.parametrize(
+    "outcome",
+    ["passed", "failed", "repeated", "review_changes", "stale", "commit_failure", "truthy"],
+)
 async def test_validation_preserves_evidence_feedback_and_review_order(
     tmp_path, monkeypatch, outcome
 ):
-    passed = outcome in {"passed", "review_changes"}
+    passed = outcome in {"passed", "review_changes", "stale", "commit_failure"}
     sha = "a" * 40
     task = SimpleNamespace(
         id=uuid4(),
@@ -26,7 +29,7 @@ async def test_validation_preserves_evidence_feedback_and_review_order(
         branch_name=f"agent/task-{uuid4()}",
         title="Fix panel",
         requirement_version=1,
-        lifecycle_version=1,
+        lifecycle_version=2 if outcome == "stale" else 1,
         no_progress_count=1 if outcome == "repeated" else 0,
         progress_fingerprint={"validation": "same"},
         current_revision=None,
@@ -47,6 +50,8 @@ async def test_validation_preserves_evidence_feedback_and_review_order(
     @asynccontextmanager
     async def transaction():
         yield session
+        if outcome == "commit_failure":
+            raise RuntimeError("Evidence commit failed")
         events.append("persisted")
 
     sessions = Mock(side_effect=read)
@@ -61,7 +66,7 @@ async def test_validation_preserves_evidence_feedback_and_review_order(
     async def run(*args):
         events.append("validate")
         return {
-            "passed": passed,
+            "passed": "true" if outcome == "truthy" else passed,
             "head_sha": sha,
             "fingerprint": "same",
             "checks": [
@@ -94,6 +99,15 @@ async def test_validation_preserves_evidence_feedback_and_review_order(
     save_review = AsyncMock()
     monkeypatch.setattr(validation_phase, "save_consultation_feedback", save_review)
     args = (sessions, settings, None, lease, task, native, SimpleNamespace(name="Team"))
+    if outcome in {"stale", "commit_failure"}:
+        error = ValueError if outcome == "stale" else RuntimeError
+        with pytest.raises(error):
+            await validation_phase.validate_phase(*args)
+        assert events == ["validate"]
+        save_review.assert_not_awaited()
+        if outcome == "stale":
+            assert evidence == [] and native.checkpoint == {"base_sha": sha}
+        return
     if outcome == "repeated":
         with pytest.raises(PhaseBlocked, match="Repeated validation failure"):
             await validation_phase.validate_phase(*args)
