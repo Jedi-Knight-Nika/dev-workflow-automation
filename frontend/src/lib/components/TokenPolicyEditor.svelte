@@ -183,8 +183,7 @@
         class="mt-3 w-full rounded border border-line bg-panel p-3 font-mono text-xs"
         rows="15"
         bind:value={advanced}
-        disabled={profile !== 'CUSTOM'}
-      ></textarea>
+        disabled={profile !== 'CUSTOM'}></textarea>
     </details>
     <button
       class="accent-action rounded bg-accent px-4 py-2 text-sm text-on-accent disabled:opacity-50"

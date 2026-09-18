@@ -8,22 +8,13 @@ from app.agent_runtime.infrastructure.models import AIRun, DeveloperSession
 from app.engineering.application.jobs import PhaseLease
 from app.engineering.domain.causality import TransitionCause
 from app.engineering.domain.lifecycle import Action, Stage, TaskStatus, WaitReason
+from app.engineering.domain.phases import PHASE_ACTIONS, PHASE_RESULTS
 from app.engineering.infrastructure.job_queue import claim_next_job
 from app.engineering.infrastructure.lifecycle import record_transition, state_of
 from app.engineering.infrastructure.models import ReviewCycle
 from app.engineering.infrastructure.task_models import Job, Task, TaskEvent
 from app.platform.scheduling.states import JobState
 from app.teams.infrastructure.team_models import Team
-
-PHASE_ACTIONS = {
-    Stage.INTAKE: "INTERPRET_EVENT",
-    Stage.PLANNING: "THINKER_TURN",
-    Stage.DEVELOPING: "DEVELOPER_TURN",
-    Stage.FIXING: "DEVELOPER_TURN",
-    Stage.VALIDATING: "RUN_VALIDATION",
-    Stage.PUBLISHING: "PUBLISH_PR",
-    Stage.MERGING: "MERGE_PR",
-}
 
 
 async def enqueue_phase(
@@ -178,20 +169,7 @@ class SqlPhaseJobs:
             ):
                 return
             # Validate which step is allowed to advance; a model cannot return MERGED.
-            allowed = {
-                "INTERPRET_EVENT": {Action.START},
-                "DEVELOPER_TURN": {
-                    Action.IMPLEMENTED,
-                    Action.NEEDS_PLAN,
-                    Action.BOUNDED_REPAIR,
-                    Action.VALIDATE_CANDIDATE,
-                },
-                "THINKER_TURN": {Action.PLAN_READY},
-                "RUN_VALIDATION": {Action.VALIDATION_PASSED, Action.VALIDATION_FAILED},
-                "PUBLISH_PR": {Action.PUBLISHED},
-                "MERGE_PR": {Action.MERGED, Action.MERGE_RECHECK},
-            }
-            if action not in allowed.get(lease.action, set()):
+            if action not in PHASE_RESULTS.get(lease.action, frozenset()):
                 raise ValueError("Phase result does not match its execution unit")
             await record_transition(
                 session,

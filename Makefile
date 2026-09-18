@@ -1,4 +1,6 @@
-.PHONY: setup dev-backend dev-frontend up down logs validate-real backup-production restore-production rotate-credentials operational-check backend-lint backend-typecheck backend-test frontend-lint frontend-typecheck frontend-build frontend-e2e test lint typecheck format format-check check migrate lock
+.PHONY: setup dev-backend dev-frontend up down logs validate-real backup-production restore-production rotate-credentials operational-check backend-lint backend-typecheck backend-test frontend-lint frontend-typecheck frontend-build frontend-unit frontend-e2e test lint typecheck format format-check check migrate lock
+.PHONY: desktop-lint desktop-check desktop-format desktop-format-check shared-format shared-format-check
+.PHONY: shell-lint shell-format shell-format-check
 
 setup:
 	cd backend && uv sync --all-extras --locked
@@ -8,7 +10,7 @@ dev-backend:
 	cd backend && uv run uvicorn app.main:app --reload --port 8000
 
 dev-frontend:
-	cd frontend && npm run dev
+	cd frontend && API_URL=$${API_URL:-http://localhost:8000} npm run dev
 
 up:
 	docker compose up --build
@@ -24,7 +26,7 @@ validate-real:
 	python3 scripts/validate_real_workflow.py "$(TASK_KEY)" $(VALIDATE_ARGS)
 
 operational-check:
-	sh -n deploy/backup.sh deploy/restore.sh
+	@for script in deploy/*.sh scripts/*.sh; do sh -n "$$script" || exit; done
 	python3 -m py_compile scripts/validate_real_workflow.py scripts/rotate_credentials.py
 
 rotate-credentials:
@@ -40,10 +42,13 @@ restore-production:
 
 test:
 	$(MAKE) backend-test
+	$(MAKE) frontend-unit
 
 lint:
 	$(MAKE) backend-lint
 	$(MAKE) frontend-lint
+	$(MAKE) desktop-lint
+	$(MAKE) shell-lint
 
 typecheck:
 	$(MAKE) backend-typecheck
@@ -70,16 +75,51 @@ frontend-build:
 frontend-e2e:
 	cd frontend && npm run test:e2e
 
+frontend-unit:
+	cd frontend && npm run test:unit
+
 format:
 	$(MAKE) -C backend format
-	cd frontend && npm run format
+	$(MAKE) shared-format
+	$(MAKE) desktop-format
+	$(MAKE) shell-format
 
 format-check:
 	$(MAKE) -C backend format-check
-	cd frontend && npm run format:check
+	$(MAKE) shared-format-check
+	$(MAKE) desktop-format-check
+	$(MAKE) shell-format-check
+
+shared-format:
+	frontend/node_modules/.bin/prettier --ignore-path .gitignore --ignore-path .prettierignore --write .
+
+shared-format-check:
+	frontend/node_modules/.bin/prettier --ignore-path .gitignore --ignore-path .prettierignore --check .
+
+desktop-lint:
+	frontend/node_modules/.bin/eslint desktop/src eslint.config.mjs
+
+desktop-check:
+	cd desktop/src-tauri && cargo clippy --locked --all-targets -- -D warnings
+
+desktop-format:
+	cd desktop/src-tauri && cargo fmt --all
+
+desktop-format-check:
+	cd desktop/src-tauri && cargo fmt --all -- --check
+
+shell-lint:
+	shellcheck scripts/*.sh deploy/*.sh
+
+shell-format:
+	shfmt -i 2 -ci -w scripts/*.sh deploy/*.sh
+
+shell-format-check:
+	shfmt -i 2 -ci -d scripts/*.sh deploy/*.sh
 
 check: lint format-check typecheck test operational-check
 	$(MAKE) frontend-build
+	$(MAKE) desktop-check
 
 migrate:
 	cd backend && uv run alembic upgrade head

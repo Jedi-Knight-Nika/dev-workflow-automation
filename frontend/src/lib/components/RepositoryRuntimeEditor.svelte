@@ -61,8 +61,7 @@
         >Validation commands · JSON argument arrays<textarea
           bind:value={commands}
           rows="5"
-          spellcheck="false"
-        ></textarea></label
+          spellcheck="false"></textarea></label
       >
       <p>
         Use prebuilt images with repository tooling. Validators run without network access. Pin

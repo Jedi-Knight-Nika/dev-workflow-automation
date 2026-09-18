@@ -30,6 +30,7 @@ class TaskListFilters:
     unassigned: bool = False
     sort: Literal["priority", "created", "updated", "due"] = "priority"
     direction: Literal["asc", "desc"] = "asc"
+    cursor: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

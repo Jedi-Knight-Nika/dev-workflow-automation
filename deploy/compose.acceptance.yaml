@@ -8,7 +8,7 @@ services:
       POSTGRES_USER: acceptance
       POSTGRES_PASSWORD: acceptance-only
     healthcheck:
-      test: ["CMD", "pg_isready", "-U", "acceptance", "-d", "acceptance"]
+      test: ['CMD', 'pg_isready', '-U', 'acceptance', '-d', 'acceptance']
       interval: 2s
       timeout: 2s
       retries: 30
@@ -23,14 +23,20 @@ services:
       DATABASE_URL: postgresql+asyncpg://acceptance:acceptance-only@postgres:5432/acceptance
       DATABASE_URL_SYNC: postgresql+psycopg://acceptance:acceptance-only@postgres:5432/acceptance
       APP_SECRET_KEY: isolated-acceptance-only-secret
-      SCHEDULER_ENABLED: "false"
-      COORDINATOR_MODE: "off"
-      OBSERVER_ENABLED: "false"
+      SCHEDULER_ENABLED: 'false'
+      COORDINATOR_MODE: 'off'
+      OBSERVER_ENABLED: 'false'
     depends_on:
       postgres:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/ready')"]
+      test:
+        [
+          'CMD',
+          'python',
+          '-c',
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/ready')"
+        ]
       interval: 2s
       timeout: 3s
       retries: 30

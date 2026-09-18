@@ -128,7 +128,7 @@ async def test_dashboard_reuses_task_metrics_without_changing_agent_participatio
                     started_at=now - timedelta(minutes=2),
                     finished_at=now - timedelta(minutes=1),
                 )
-                for profile in ("first", "second")
+                for profile in ("first", "first", "second")
             ],
         )
     ]
@@ -140,6 +140,6 @@ async def test_dashboard_reuses_task_metrics_without_changing_agent_participatio
     assert result["merged_tasks"] == 1
     assert len(result["agents"]) == 2
     assert all(agent["tasks_merged"] == 1 for agent in result["agents"])
-    assert all(agent["median_cost_usd"] == 2 for agent in result["agents"])
+    assert all(agent["median_cost_usd"] == 3 for agent in result["agents"])
     await dashboard.dashboard(30)
     assert measured.call_count == 2  # Recomputed for each fresh request.

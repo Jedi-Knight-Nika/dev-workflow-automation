@@ -136,8 +136,7 @@
           class="mt-1 w-full rounded border border-line bg-panel p-2"
           rows="4"
           maxlength="2000"
-          bind:value={note}
-        ></textarea></label
+          bind:value={note}></textarea></label
       >
       <button
         class="mt-2 rounded border border-line px-3 py-2 text-sm disabled:opacity-50"

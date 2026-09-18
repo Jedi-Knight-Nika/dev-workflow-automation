@@ -18,12 +18,7 @@ body {
   margin: 0;
   min-width: 320px;
   background:
-    radial-gradient(
-      circle at 50% 42%,
-      rgba(124, 92, 255, 0.1),
-      transparent 28rem
-    ),
-    #f8f7ff;
+    radial-gradient(circle at 50% 42%, rgba(124, 92, 255, 0.1), transparent 28rem), #f8f7ff;
 }
 
 .container {
@@ -51,13 +46,9 @@ body {
   position: absolute;
   inset: -2rem;
   z-index: -1;
-  content: "";
+  content: '';
   border-radius: 50%;
-  background: radial-gradient(
-    circle,
-    rgba(124, 92, 255, 0.42),
-    rgba(124, 92, 255, 0) 68%
-  );
+  background: radial-gradient(circle, rgba(124, 92, 255, 0.42), rgba(124, 92, 255, 0) 68%);
   filter: blur(0.35rem);
   animation: glow-breathe 1.8s ease-in-out infinite;
 }
@@ -179,12 +170,7 @@ h1 {
 
   body {
     background:
-      radial-gradient(
-        circle at 50% 42%,
-        rgba(124, 92, 255, 0.2),
-        transparent 28rem
-      ),
-      #2f2f2f;
+      radial-gradient(circle at 50% 42%, rgba(124, 92, 255, 0.2), transparent 28rem), #2f2f2f;
   }
 
   .diamond--inner {

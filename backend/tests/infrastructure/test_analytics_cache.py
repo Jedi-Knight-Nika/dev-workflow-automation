@@ -11,9 +11,9 @@ from app.analytics.infrastructure.cache import CachedAnalyticsQueries
 @pytest.mark.asyncio
 async def test_fresh_cache_hit_does_not_wait_for_fill_lock():
     inner = AsyncMock()
-    cache = CachedAnalyticsQueries(inner)
+    cache = CachedAnalyticsQueries(inner, max_concurrent_fills=1)
     cache.cache[("dashboard", 30, None)] = monotonic(), {"ready": True}
-    async with cache.lock:
+    async with cache.capacity:
         result = await asyncio.wait_for(cache.dashboard(30), timeout=1)
     assert result == {"ready": True}
     inner.dashboard.assert_not_awaited()
@@ -57,3 +57,47 @@ async def test_concurrent_misses_share_one_fill_and_cache_none():
     finally:
         release.set()
         await first
+
+
+@pytest.mark.asyncio
+async def test_different_keys_fill_independently_and_cancelled_reader_does_not_cancel_shared_fill():
+    inner = AsyncMock()
+    started, release = asyncio.Event(), asyncio.Event()
+    blocked_id, other_id = uuid4(), uuid4()
+
+    async def fill(identifier):
+        if identifier == blocked_id:
+            started.set()
+            await release.wait()
+        return {"id": identifier}
+
+    inner.task.side_effect = fill
+    cache = CachedAnalyticsQueries(inner)
+    first = asyncio.create_task(cache.task(blocked_id))
+    second = None
+    try:
+        await asyncio.wait_for(started.wait(), timeout=1)
+        second = asyncio.create_task(cache.task(blocked_id))
+        assert await asyncio.wait_for(cache.task(other_id), timeout=1) == {"id": other_id}
+        first.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await first
+        release.set()
+        assert await second == {"id": blocked_id}
+        assert inner.task.await_count == 2
+        assert not cache.fills
+    finally:
+        release.set()
+        await asyncio.gather(first, *([second] if second else []), return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_failed_fill_is_not_cached_and_can_be_retried():
+    inner = AsyncMock()
+    inner.task.side_effect = [ValueError("Unavailable"), {"ready": True}]
+    cache = CachedAnalyticsQueries(inner)
+    task_id = uuid4()
+    with pytest.raises(ValueError, match="Unavailable"):
+        await cache.task(task_id)
+    assert not cache.fills
+    assert await cache.task(task_id) == {"ready": True}

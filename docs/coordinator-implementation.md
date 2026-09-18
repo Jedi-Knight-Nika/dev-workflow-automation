@@ -74,7 +74,6 @@ Automated coverage exercises real PostgreSQL migration/reflection, dedupe/coales
 
 Feedback arriving during a paid Developer generation retains a `WAITING_ENGINEER` action. After usage settles, it is applied if its state is still current, or the original event is reconsidered against the newly completed work. This is a progress-triggered decision, not an idle paid retry. Unknown settled usage still requires reconciliation.
 
-
 ## Historical replay and accepted outcomes
 
 Export real recorded situations using a read-only database transaction:
@@ -98,7 +97,6 @@ The read-only report includes actual per-request routed model identities, first 
 Prometheus now exposes retained event/run/action/human-request states, oldest pending event age, events per wake, Coordinator known cost/unknown usage, paid-slot occupancy/capacity, recent queue wait and waiting-Team count. Metrics reuse the existing 15-second cached scrape projection and contain no task IDs or message bodies in labels. Unknown costs remain separately visible instead of becoming zero-cost successes. Operator action assessments in the task activity drawer record the latest CORRECT/INCORRECT label per action; incorrect-action rate uses only labeled actions. Additional metrics cover clarification, explicit operator overrides, accepted terminal tasks, first full-validation batch pass rate, repair requests, manual takeover, time to PR/merge, and total terminal-workflow cost/tokens per accepted delivery. Unobserved rates are NaN, not fabricated zeroes; validation coverage is exposed because historical batch outcomes are not inferred from targeted checks.
 
 GitHub review requests are restricted to one to ten configured immutable human reviewer IDs; the current open, non-draft PR head is refreshed before the request. Existing requested reviewers are not requested again. Slack actor permissions are checked against the task's exact workspace/channel route.
-
 
 ## Verification of this implementation
 

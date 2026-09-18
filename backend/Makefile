@@ -7,14 +7,13 @@ dev:
 	uv run uvicorn app.main:app --reload --port 8000
 
 lint:
-	uv run ruff check app migrations tests ../scripts
+	uv run ruff check . ../scripts
 
 format:
-	uv run ruff check --fix app migrations tests ../scripts
-	uv run ruff format app migrations tests ../scripts
+	uv run ruff format . ../scripts
 
 format-check:
-	uv run ruff format --check app migrations tests ../scripts
+	uv run ruff format --check . ../scripts
 
 typecheck:
 	uv run mypy app ../scripts/validate_real_workflow.py ../scripts/rotate_credentials.py

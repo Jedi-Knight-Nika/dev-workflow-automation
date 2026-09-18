@@ -45,6 +45,10 @@
     return `${(value / 1024 ** index).toFixed(index ? 1 : 0)} ${units[index]}`;
   }
   const maxUsage = (items: DashboardUsageBucket[]) => Math.max(1, ...items.map(total));
+  const throughputPeak = $derived(
+    Math.max(1, ...(dashboard?.throughput.map((value) => value.completed + value.failed) ?? []))
+  );
+  const usagePeak = $derived(maxUsage(dashboard?.usage_by_role ?? []));
 
   async function load() {
     const current = requests.begin();
@@ -358,15 +362,12 @@
           >
         </header>
         <div class="bars">
-          {#each dashboard.throughput as point (point.period)}{@const peak = Math.max(
-              1,
-              ...dashboard.throughput.map((value) => value.completed + value.failed)
-            )}
+          {#each dashboard.throughput as point (point.period)}
             <div>
               <div>
-                <i class="failed" style={`height:${(point.failed / peak) * 100}%`}></i><i
+                <i class="failed" style={`height:${(point.failed / throughputPeak) * 100}%`}></i><i
                   class="done"
-                  style={`height:${(point.completed / peak) * 100}%`}
+                  style={`height:${(point.completed / throughputPeak) * 100}%`}
                 ></i>
               </div>
               <small>{point.period.slice(5)}</small>
@@ -390,7 +391,7 @@
           {#each dashboard.usage_by_role as item (item.key)}<div class="usage-row">
               <span>{item.key}</span>
               <div>
-                <i style={`width:${(total(item) / maxUsage(dashboard.usage_by_role)) * 100}%`}></i>
+                <i style={`width:${(total(item) / usagePeak) * 100}%`}></i>
               </div>
               <b>{compact.format(total(item))}</b>
             </div>{:else}<div class="empty">{t('cockpit.usageAppearsAfter')}</div>{/each}

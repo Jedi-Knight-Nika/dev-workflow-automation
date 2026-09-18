@@ -1,8 +1,9 @@
 <script lang="ts">
   import { onMount, tick, untrack } from 'svelte';
   import { activityApi } from './api';
+  import { subscribeActivity } from './live-stream';
   import { createRenderer } from './renderer';
-  import AggregateView from './AggregateView.svelte';
+  import PreflightForm from './PreflightForm.svelte';
   import ActivityInspector from './ActivityInspector.svelte';
   import GourceReplay from './GourceReplay.svelte';
   import WorkPlanHistory from './WorkPlanHistory.svelte';
@@ -13,7 +14,7 @@
   import ProcessSummary from './ProcessSummary.svelte';
   import FileHistoryNotice from './FileHistoryNotice.svelte';
   import { ViewerMonitor } from './monitor';
-  import { money, duration, title } from './format';
+  import { localDate, money, duration, title } from './format';
   import { compareActivity, gourceLog } from './replay';
   import type { ActivityEvent, Filters, Frame, Preflight, Scope, ViewMode } from './types';
 
@@ -34,8 +35,6 @@
       name: initialScope.type === 'workspace' ? 'Entire workspace' : `Current ${initialScope.type}`
     }
   ]);
-  const localDate = (date: Date) =>
-    new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, -1);
   let from = $state(localDate(new Date(Date.now() - 86400000))),
     to = $state('');
   let detail = $state(2),
@@ -51,8 +50,8 @@
   let events = $state<ActivityEvent[]>([]),
     generation = $state(0);
   let renderer: ReturnType<typeof createRenderer> | null = null;
-  let stream: EventSource | null = null,
-    resize: ResizeObserver | null = null;
+  let unsubscribe: (() => void) | null = null;
+  let resize: ResizeObserver | null = null;
   let flightRequest: AbortController | null = null,
     loadRequest: AbortController | null = null;
   let disposed = false,
@@ -114,8 +113,8 @@
     }
   }
   function stopStream() {
-    stream?.close();
-    stream = null;
+    unsubscribe?.();
+    unsubscribe = null;
     connected = false;
   }
   function stopView() {
@@ -132,95 +131,30 @@
   function connect() {
     stopStream();
     if (!live || !preflight || document.hidden || disposed || gourcePayload !== null) return;
-    const source = activityApi.stream(preflight, detail, cursor);
-    stream = source;
-    const current = () => !disposed && stream === source;
-    let opened = false;
-    source.onopen = () => {
-      if (current()) {
-        if (opened) monitor?.reconnect();
-        opened = true;
-        connected = true;
-      }
-    };
-    source.onerror = () => {
-      if (current()) connected = false;
-    };
-    source.addEventListener('status', (event) => {
-      if (!current() || !preflight) return;
-      try {
-        const status = JSON.parse(event.data);
-        if (
-          status.capacity &&
-          Array.isArray(status.capacity.teams) &&
-          status.capacity.through_sequence <= cursor
-        )
-          renderer?.send({ type: 'CAPACITY', evidence: status.capacity });
-        if (typeof status.delayed === 'boolean')
-          preflight = {
-            ...preflight,
-            delayed: status.delayed,
-            file_history: status.file_history ?? preflight.file_history
-          };
-      } catch {
-        /* A disconnect remains visible through the connection indicator. */
-      }
-    });
-    source.addEventListener('cursor', (event) => {
-      if (!current()) return;
-      try {
-        const next = JSON.parse(event.data).sequence;
-        if (Number.isSafeInteger(next)) cursor = Math.max(cursor, next);
-      } catch {
-        /* next activity reconciles cursor */
-      }
-    });
-    source.addEventListener('activity', (event) => {
-      if (!current()) return;
-      try {
-        const item: ActivityEvent = JSON.parse(event.data);
-        if (
-          !Number.isSafeInteger(item.sequence) ||
-          item.sequence <= cursor ||
-          typeof item.task_id !== 'string' ||
-          !Array.isArray(item.files)
-        )
-          return;
-        const next = [...events, item];
-        if (
-          next.length > (preflight?.max_events || 5000) ||
-          new Set(next.map((entry) => entry.task_id)).size > (preflight?.max_tasks || 200) ||
-          next.reduce((sum, entry) => sum + entry.files.length, 0) > (preflight?.max_files || 5000)
-        ) {
-          stopStream();
-          renderer?.send({ type: 'PAUSE' });
-          error = 'Live history reached its limit. Choose a shorter range to continue.';
-          return;
-        }
-        cursor = item.sequence;
-        events = next;
-        if (preflight)
-          preflight = {
-            ...preflight,
-            through_sequence: item.sequence,
-            to: new Date().toISOString()
-          };
+    unsubscribe = subscribeActivity({
+      preflight,
+      detail,
+      after: cursor,
+      events,
+      connection: (value) => {
+        connected = value;
+      },
+      reconnect: () => monitor?.reconnect(),
+      cursor: (value) => {
+        cursor = value;
+      },
+      status: (value) => {
+        preflight = value;
+      },
+      capacity: (evidence) => renderer?.send({ type: 'CAPACITY', evidence }),
+      append: (item, nextEvents, nextPreflight) => {
+        events = nextEvents;
+        preflight = nextPreflight;
         renderer?.send({ type: 'APPEND', events: [item] });
-      } catch {
-        error = 'A live event could not be read. Reload this view to reconcile history.';
-        stopStream();
-      }
-    });
-    source.addEventListener('reset', () => {
-      if (!current()) return;
-      stopStream();
-      renderer?.send({ type: 'PAUSE' });
-      error = 'Earlier activity has arrived. Reload the view to reconstruct its starting state.';
-    });
-    source.addEventListener('unavailable', () => {
-      if (current()) {
-        error = 'This activity scope is no longer available.';
-        stopStream();
+      },
+      error: (message, pause) => {
+        if (pause) renderer?.send({ type: 'PAUSE' });
+        error = message;
       }
     });
   }
@@ -289,11 +223,6 @@
     stopView();
     active = false;
     await check();
-  }
-  function preset(hours: number) {
-    from = localDate(new Date(Date.now() - hours * 3600000));
-    to = '';
-    void check();
   }
   function filter() {
     renderer?.send({ type: 'FILTER', filters: { ...filters } });
@@ -423,96 +352,21 @@
         {#if active}<button onclick={reload}>Reload view</button>{/if}
       </div>{/if}
     {#if !active}
-      <div class="preflight">
-        <p class="intro">
-          Follow tasks, agents, decisions and code changes through recorded history.
-        </p>
-        <label
-          >Scope<select bind:value={scopeChoice} onchange={check}
-            >{#each choices as choice (choice.value)}<option value={choice.value}
-                >{choice.name}</option
-              >{/each}</select
-          ></label
-        >
-        <div class="presets">
-          <span>Recent</span>{#each [1, 24, 168, 720] as hours (hours)}<button
-              onclick={() => preset(hours)}
-              >{hours < 48 ? `${hours}h` : `${hours / 24} days`}</button
-            >{/each}
-        </div>
-        <div class="columns">
-          <label
-            >From<input
-              type="datetime-local"
-              step="any"
-              bind:value={from}
-              onchange={check}
-            /></label
-          ><label
-            >Until <small>(blank means now)</small><input
-              type="datetime-local"
-              step="any"
-              bind:value={to}
-              onchange={check}
-            /></label
-          >
-        </div>
-        <div class="columns">
-          <label
-            >View<select bind:value={mode}
-              ><option value="flow">Task flow</option><option value="workspace"
-                >Workspace map</option
-              ><option value="code" disabled={detail === 1}>Code changes</option></select
-            ></label
-          ><label
-            >Detail<select bind:value={detail} onchange={check}
-              ><option value={1}>Major milestones</option><option value={2}
-                >Engineering detail</option
-              ></select
-            ></label
-          >
-        </div>
-        <label class="check"
-          ><input type="checkbox" bind:checked={live} disabled={!!to} /> Follow live activity</label
-        >
-        {#if preflight}
-          <div class="estimate">
-            <strong
-              >{preflight.estimated_events.toLocaleString()}{preflight.too_large ? '+' : ''}</strong
-            >
-            events <span>·</span> <strong>{preflight.tasks}</strong> tasks
-          </div>
-          <FileHistoryNotice history={preflight.file_history} />
-          {#each preflight.warnings as warning (warning)}<p class="notice">{warning}</p>{/each}
-          {#if preflight.too_large}<button onclick={() => (showAggregate = true)}
-              >Open range summary</button
-            >
-            <p class="notice">
-              Choose a smaller scope or time range. This view supports {preflight.max_events.toLocaleString()}
-              events, {preflight.max_tasks} tasks and {preflight.max_files.toLocaleString()} file changes.
-            </p>{/if}
-          {#if showAggregate}<AggregateView
-              flight={preflight}
-              {detail}
-              onrange={(start, end) => {
-                from = localDate(start);
-                to = localDate(end);
-                void check();
-              }}
-            />{/if}
-        {:else if busy}<p role="status">Checking activity history…</p>{/if}
-        <p class="hint">
-          Read-only history. No agents are started and no AI budget is used. Project groups follow
-          the project names already attached to tasks.
-        </p>
-        <footer>
-          <button onclick={onclose}>Cancel</button><button
-            class="primary"
-            disabled={busy || !preflight || preflight.too_large}
-            onclick={start}>{busy ? 'Loading…' : 'Start visualization'}</button
-          >
-        </footer>
-      </div>
+      <PreflightForm
+        bind:scopeChoice
+        {choices}
+        bind:from
+        bind:to
+        bind:detail
+        bind:mode
+        bind:live
+        bind:showAggregate
+        {preflight}
+        {busy}
+        oncheck={check}
+        onstart={start}
+        {onclose}
+      />
     {:else}
       {#if preflight?.delayed}<p class="notice">
           Activity history is catching up or the projector is unavailable. This view may be
@@ -748,15 +602,9 @@
     padding: 0;
   }
   header,
-  footer,
   .toolbar,
   .filters,
   .window-actions,
-  .presets {
-    display: flex;
-    align-items: center;
-    gap: 0.65rem;
-  }
   header {
     justify-content: space-between;
     padding: 1rem 1.25rem;
@@ -809,26 +657,12 @@
   .close {
     font-size: 1rem;
   }
-  .preflight {
-    padding: 1.25rem;
-    overflow: auto;
-  }
-  .intro {
-    margin-top: 0;
-    color: var(--color-muted);
-    font-size: 0.85rem;
-  }
   label {
     display: flex;
     flex-direction: column;
     gap: 0.4rem;
     margin: 0.85rem 0;
     font-size: 0.8rem;
-  }
-  .columns {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 1rem;
   }
   .check {
     display: inline-flex;
@@ -842,35 +676,9 @@
   input[type='checkbox'] {
     accent-color: var(--color-brand-2);
   }
-  .presets {
-    margin: 1rem 0 0.1rem;
-    font-size: 0.75rem;
-  }
-  .estimate {
-    border: 1px solid var(--color-line);
-    border-radius: 9px;
-    padding: 1rem;
-    margin: 1rem 0;
-    font-size: 0.85rem;
-  }
-  .estimate strong {
-    color: var(--color-brand-2);
-    font-size: 1.2rem;
-  }
-  .estimate span {
-    margin: 0 0.6rem;
-  }
-  .hint,
   small {
     color: var(--color-muted);
     font-size: 0.73rem;
-  }
-  .hint {
-    margin: 1rem 0;
-    line-height: 1.6;
-  }
-  .preflight footer {
-    justify-content: flex-end;
   }
   .notice {
     padding: 0.7rem 1rem;
@@ -1024,10 +832,6 @@
     .window-actions button:not(.close) {
       font-size: 0.65rem;
       padding: 0.3rem;
-    }
-    .columns {
-      grid-template-columns: 1fr;
-      gap: 0;
     }
     .details {
       grid-template-columns: 1fr;

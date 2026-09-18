@@ -30,6 +30,7 @@ class Task:
     labels: tuple[str, ...] = ()
     estimate: float | None = None
     due_at: datetime | None = None
+    team_id: uuid.UUID | None = None
 
     @classmethod
     def create(

@@ -80,8 +80,7 @@
       maxlength={8000}
       rows={3}
       class="w-full rounded-lg border border-line bg-panel-alt p-3 text-sm"
-      placeholder="Add context or a note…"
-    ></textarea>
+      placeholder="Add context or a note…"></textarea>
     {#if error}<p role="alert" class="text-sm text-danger">{error}</p>{/if}
     <Button type="submit" disabled={sending || submitting || !draft.trim()}
       >{sending || submitting

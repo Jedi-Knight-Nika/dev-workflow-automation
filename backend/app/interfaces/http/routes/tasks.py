@@ -3,7 +3,7 @@ from dataclasses import asdict
 from datetime import datetime
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
 from app.bootstrap.dependencies import (
     get_task_conversation_store,
@@ -14,7 +14,7 @@ from app.bootstrap.dependencies import (
     get_unit_of_work,
 )
 from app.engineering.application.change_lifecycle import ChangeTaskLifecycle, TaskNotFound
-from app.engineering.application.create_task import CreateTask, CreateTaskCommand
+from app.engineering.application.create_task import CreateTask, CreateTaskCommand, CreationConflict
 from app.engineering.application.manage_task_conversation import (
     AddTaskMessage,
     QueryTaskConversation,
@@ -29,6 +29,7 @@ from app.engineering.application.ports.task_queries import TaskListFilters, Task
 from app.engineering.application.ports.unit_of_work import UnitOfWork
 from app.engineering.application.query_history import QueryTaskHistory
 from app.engineering.application.query_tasks import GetTask, ListTasks
+from app.engineering.application.task_pagination import next_cursor
 from app.engineering.domain.controls import LifecycleAction
 from app.engineering.domain.lifecycle import InvalidTransition, TaskStatus
 from app.interfaces.http.errors import service_errors
@@ -45,6 +46,7 @@ from app.interfaces.http.schemas.tasks import (
     TaskRead,
 )
 from app.interfaces.http.schemas.workers import ValidationRead
+from app.teams.application.ports.team_management import TeamConflict, TeamNotFound
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
@@ -83,6 +85,7 @@ async def replace_dependencies(
 
 @router.get("", response_model=list[TaskRead])
 async def list_tasks(
+    response: Response,
     limit: int = Query(default=100, ge=1, le=500),
     search: str | None = Query(default=None, max_length=200),
     status: list[TaskStatus] = Query(default=[]),
@@ -104,6 +107,7 @@ async def list_tasks(
     unassigned: bool = False,
     sort: Literal["priority", "created", "updated", "due"] = "priority",
     direction: Literal["asc", "desc"] = "asc",
+    cursor: str | None = Query(default=None, max_length=2048),
     queries: TaskQueries = Depends(get_task_queries),
 ) -> list[TaskRead]:
     filters = TaskListFilters(
@@ -127,8 +131,14 @@ async def list_tasks(
         unassigned,
         sort,
         direction,
+        cursor,
     )
-    return [task_view_response(task) for task in await ListTasks(queries).execute(limit, filters)]
+    with service_errors(value_status=422):
+        tasks = await ListTasks(queries).execute(limit + 1, filters)
+    visible = tasks[:limit]
+    if len(tasks) > limit:
+        response.headers["X-Next-Cursor"] = next_cursor(visible[-1], filters)
+    return [task_view_response(task) for task in visible]
 
 
 @router.post("", response_model=TaskRead, status_code=status.HTTP_201_CREATED)
@@ -136,20 +146,28 @@ async def create_task(
     body: TaskCreate,
     unit_of_work: UnitOfWork = Depends(get_unit_of_work),
 ) -> TaskRead:
-    task = await CreateTask(unit_of_work).execute(
-        CreateTaskCommand(
-            external_key=body.external_key,
-            title=body.title,
-            description=body.description,
-            priority=body.priority,
-            repository_id=body.repository_id,
-            start_work=body.start_work,
-            project_name=body.project_name,
-            labels=tuple(body.labels),
-            estimate=body.estimate,
-            due_at=body.due_at,
-        )
+    command = CreateTaskCommand(
+        external_key=body.external_key,
+        title=body.title,
+        description=body.description,
+        priority=body.priority,
+        repository_id=body.repository_id,
+        start_work=body.start_work,
+        project_name=body.project_name,
+        labels=tuple(body.labels),
+        estimate=body.estimate,
+        due_at=body.due_at,
+        team_id=body.team_id,
+        request_id=body.request_id,
     )
+    try:
+        task = await CreateTask(unit_of_work).execute(command)
+    except TeamNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except (CreationConflict, TeamConflict) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     return TaskRead.model_validate(task)
 
 

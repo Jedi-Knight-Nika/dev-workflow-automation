@@ -129,7 +129,7 @@ class AdaptivePatchExecution:
             self.inference.usage_by_kind["fast_attempt"] = dict(prior_usage)
             self.inference.provider_seconds = provider_seconds
             self.inference.calls["patch"] = sum(
-                e.get("type") == "patch_request" for e in harness.history
+                event.get("type") == "patch_request" for event in harness.history
             )
         self.results: list[dict[str, Any]] = []
         self.allowed: set[str] = set()
@@ -140,8 +140,8 @@ class AdaptivePatchExecution:
         self.work_plans: list[dict[str, Any]] = []
 
     async def facts(self) -> dict[str, Any]:
-        h = self.harness
-        return await workspace_facts(h.settings.workspace, h.settings.workspace)
+        harness = self.harness
+        return await workspace_facts(harness.settings.workspace, harness.settings.workspace)
 
     def save(self, kind: str, value: dict[str, Any]) -> None:
         if kind == "work_unit_result" and self.work_plans:
@@ -525,18 +525,18 @@ class AdaptivePatchExecution:
                 baseline = await self.facts()
 
     async def run(self, prompt: str) -> TurnReceipt:
-        h = self.harness
+        harness = self.harness
         failure: str | None
         status, failure, summary = "failed", "PATCH_FAILED", "Adaptive patch did not finish"
         try:
-            async with asyncio.timeout(h.settings.timeout_seconds):
-                if h.client is None:
-                    await asyncio.to_thread(h._start_sandbox)
+            async with asyncio.timeout(harness.settings.timeout_seconds):
+                if harness.client is None:
+                    await asyncio.to_thread(harness._start_sandbox)
                 baseline = await self.facts()
-                h.governor.diff_fingerprint = baseline["diff_fingerprint"]
+                harness.governor.diff_fingerprint = baseline["diff_fingerprint"]
                 self.initial_changed = set(baseline["changed_files"])
                 self.progress("LOCALIZING")
-                survey = await h.operation(
+                survey = await harness.operation(
                     "survey", {"objective": prompt.split("Advisory Supervisor annotations", 1)[0]}
                 )
                 if survey.get("error") or not survey.get("repository_paths"):
@@ -618,7 +618,7 @@ class AdaptivePatchExecution:
             self.save("adaptive_result", {"status": status, "failure": failure, "summary": summary})
         usage = self.inference
         return TurnReceipt(
-            h.id,
+            harness.id,
             str(uuid4()),
             summary,
             status,
@@ -630,13 +630,13 @@ class AdaptivePatchExecution:
                     "usage_complete": not usage.uncertain,
                     **(
                         {"priced_requests": usage.priced_requests}
-                        if h.settings.routed_models
+                        if harness.settings.routed_models
                         else {}
                     ),
                 },
-                h.request_count,
+                harness.request_count,
             ),
             provider_duration_ms=None if usage.uncertain else int(usage.provider_seconds * 1000),
             failure_code=failure,
-            token_efficiency=h.efficiency_snapshot(),
+            token_efficiency=harness.efficiency_snapshot(),
         )

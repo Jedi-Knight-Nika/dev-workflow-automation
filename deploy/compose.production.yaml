@@ -8,9 +8,9 @@ services:
       OPERATOR_USER: ${OPERATOR_USER:?Set the console operator username}
       OPERATOR_PASSWORD_HASH: ${OPERATOR_PASSWORD_HASH:?Set a Caddy bcrypt password hash}
     ports:
-      - "80:80"
-      - "443:443"
-      - "443:443/udp"
+      - '80:80'
+      - '443:443'
+      - '443:443/udp'
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
@@ -29,7 +29,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-engineering_worker}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      test: ['CMD-SHELL', 'pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}']
       interval: 5s
       timeout: 5s
       retries: 10
@@ -50,7 +50,7 @@ services:
       GITHUB_APP_RETURN_URL: ${GITHUB_APP_RETURN_URL:?Set GITHUB_APP_RETURN_URL}
       LINEAR_WEBHOOK_SECRET: ${LINEAR_WEBHOOK_SECRET:?Set LINEAR_WEBHOOK_SECRET}
       WORKSPACE_ROOT: /data/workspaces
-      SCHEDULER_ENABLED: "false"
+      SCHEDULER_ENABLED: 'false'
       ACTIVITY_ENABLED: ${ACTIVITY_ENABLED:-true}
       ACTIVITY_COLLECT_FILES: ${ACTIVITY_COLLECT_FILES:-true}
       ACTIVITY_MAX_EVENTS: ${ACTIVITY_MAX_EVENTS:-5000}
@@ -71,9 +71,15 @@ services:
     volumes:
       - workspaces:/data/workspaces
     expose:
-      - "8000"
+      - '8000'
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/ready')"]
+      test:
+        [
+          'CMD',
+          'python',
+          '-c',
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/ready')"
+        ]
       interval: 10s
       timeout: 3s
       retries: 10
@@ -87,7 +93,7 @@ services:
     environment:
       <<: *backend-environment
       # Native execution is opt-in through compose.execution.yaml after configuration.
-      SCHEDULER_ENABLED: "false"
+      SCHEDULER_ENABLED: 'false'
       DOCKER_SOCKET: /var/run/docker.sock
     depends_on:
       backend:
@@ -113,7 +119,7 @@ services:
       backend:
         condition: service_healthy
     expose:
-      - "3000"
+      - '3000'
     restart: unless-stopped
 
   activity:
@@ -141,10 +147,9 @@ services:
     cpus: 0.25
     restart: unless-stopped
 
-
   backup:
     image: postgres:16-alpine
-    profiles: ["tools"]
+    profiles: ['tools']
     environment:
       PGHOST: postgres
       PGDATABASE: ${POSTGRES_DB:-engineering_worker}
@@ -158,11 +163,11 @@ services:
       - ${EXECUTION_DATA_ROOT:?Set EXECUTION_DATA_ROOT}:/engineering-data:ro
       - ${BACKUP_DIR:-./backups}:/backups
       - ./backup.sh:/usr/local/bin/backup:ro
-    entrypoint: ["/bin/sh", "/usr/local/bin/backup"]
+    entrypoint: ['/bin/sh', '/usr/local/bin/backup']
 
   restore:
     image: postgres:16-alpine
-    profiles: ["tools"]
+    profiles: ['tools']
     environment:
       PGHOST: postgres
       PGUSER: ${POSTGRES_USER:-engineering_worker}
@@ -178,23 +183,23 @@ services:
       - ${EXECUTION_DATA_ROOT:?Set EXECUTION_DATA_ROOT}:/engineering-data
       - ${BACKUP_DIR:-./backups}:/backups:ro
       - ./restore.sh:/usr/local/bin/restore:ro
-    entrypoint: ["/bin/sh", "/usr/local/bin/restore"]
+    entrypoint: ['/bin/sh', '/usr/local/bin/restore']
 
   rotate-credentials:
     build:
       context: ../backend
       target: api
-    profiles: ["tools"]
+    profiles: ['tools']
     environment:
       DATABASE_URL_SYNC: ${DATABASE_URL_SYNC:?Set DATABASE_URL_SYNC}
       APP_SECRET_KEY: ${APP_SECRET_KEY:?Set current APP_SECRET_KEY}
       NEW_APP_SECRET_KEY: ${NEW_APP_SECRET_KEY:-}
       CONFIRM_CREDENTIAL_ROTATION: ${CONFIRM_CREDENTIAL_ROTATION:-}
-      SCHEDULER_ENABLED: "false"
+      SCHEDULER_ENABLED: 'false'
     depends_on:
       postgres:
         condition: service_healthy
-    entrypoint: [".venv/bin/python", "-m", "app.platform.security.credential_rotation"]
+    entrypoint: ['.venv/bin/python', '-m', 'app.platform.security.credential_rotation']
 
 volumes:
   postgres_data:

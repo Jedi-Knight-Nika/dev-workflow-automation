@@ -9,7 +9,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-engineering_worker}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      test: ['CMD-SHELL', 'pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}']
       interval: 5s
       timeout: 5s
       retries: 10
@@ -33,7 +33,7 @@ services:
       GITHUB_APP_RETURN_URL: ${GITHUB_APP_RETURN_URL:-http://localhost:3000/repositories}
       LINEAR_WEBHOOK_SECRET: ${LINEAR_WEBHOOK_SECRET:-}
       WORKSPACE_ROOT: /data/workspaces
-      SCHEDULER_ENABLED: "false"
+      SCHEDULER_ENABLED: 'false'
       ACTIVITY_ENABLED: ${ACTIVITY_ENABLED:-true}
       ACTIVITY_COLLECT_FILES: ${ACTIVITY_COLLECT_FILES:-true}
       ACTIVITY_MAX_EVENTS: ${ACTIVITY_MAX_EVENTS:-5000}
@@ -55,9 +55,15 @@ services:
       - workspaces:/data/workspaces
       - ${GITHUB_APP_PRIVATE_KEY_FILE_HOST:-./github-app.private-key.pem}:/run/secrets/github_app_private_key:ro
     ports:
-      - "127.0.0.1:8000:8000"
+      - '127.0.0.1:8000:8000'
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/ready')"]
+      test:
+        [
+          'CMD',
+          'python',
+          '-c',
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/ready')"
+        ]
       interval: 10s
       timeout: 3s
       retries: 10
@@ -72,7 +78,7 @@ services:
       APP_SECRET_KEY: ${APP_SECRET_KEY:-development-only-secret-change-me}
       WORKSPACE_ROOT: /data/workspaces
       # Base Compose starts the UI/API only. Use the execution overlay for native runners.
-      SCHEDULER_ENABLED: "false"
+      SCHEDULER_ENABLED: 'false'
       OBSERVER_ENABLED: ${OBSERVER_ENABLED:-true}
       SCHEDULER_POLL_SECONDS: ${SCHEDULER_POLL_SECONDS:-1.0}
       SCHEDULER_MAX_CONCURRENT_JOBS: ${SCHEDULER_MAX_CONCURRENT_JOBS:-2}
@@ -103,7 +109,7 @@ services:
       backend:
         condition: service_healthy
     ports:
-      - "127.0.0.1:3000:3000"
+      - '127.0.0.1:3000:3000'
 
   activity:
     build:

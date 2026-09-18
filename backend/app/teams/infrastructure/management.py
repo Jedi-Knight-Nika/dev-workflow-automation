@@ -118,6 +118,12 @@ class SqlAlchemyTeamManagementWorkflow:
         await self._session.commit()
 
     async def assign(self, command: AssignTaskCommand) -> TaskAssignmentView:
+        assignment = await self.assign_in_transaction(command)
+        await self._session.commit()
+        await self._session.refresh(assignment)
+        return self._assignment_view(assignment)
+
+    async def assign_in_transaction(self, command: AssignTaskCommand) -> TaskAssignment:
         team = await self._session.get(Team, command.team_id)
         task = await self._session.get(Task, command.task_id, with_for_update=True)
         if team is None or team.archived_at or not team.enabled:
@@ -168,9 +174,7 @@ class SqlAlchemyTeamManagementWorkflow:
         await self._session.flush()
         if command.start_work and task.status == "NEW":
             await request_execution(self._session, task, actor="user:team-assignment")
-        await self._session.commit()
-        await self._session.refresh(assignment)
-        return self._assignment_view(assignment)
+        return assignment
 
     async def unassign(self, task_id: uuid.UUID) -> None:
         task = await self._session.get(Task, task_id, with_for_update=True)

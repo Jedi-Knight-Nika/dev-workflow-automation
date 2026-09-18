@@ -1,4 +1,4 @@
-import { api } from '$lib/api';
+import { api, apiPage } from '$lib/api';
 import type {
   Job,
   LiveExecution,
@@ -17,6 +17,8 @@ export type CreateTaskInput = {
   priority: number;
   repository_id?: string | null;
   start_work: boolean;
+  team_id?: string | null;
+  request_id?: string;
   external_key?: string | null;
   project_name?: string | null;
   labels?: string[];
@@ -45,14 +47,19 @@ export type TaskFilters = {
   direction?: 'asc' | 'desc';
 };
 export function listTasks(filters: TaskFilters = {}): Promise<Task[]> {
+  return listTaskPage(filters).then((page) => page.items);
+}
+
+export function listTaskPage(filters: TaskFilters = {}, cursor?: string) {
   const query = new URLSearchParams({ limit: '500' });
+  if (cursor) query.set('cursor', cursor);
   for (const [key, value] of Object.entries(filters)) {
     if (value === undefined || value === '' || (Array.isArray(value) && value.length === 0))
       continue;
     if (Array.isArray(value)) value.forEach((item) => query.append(key, String(item)));
     else query.set(key, String(value));
   }
-  return api<Task[]>('/tasks?' + query.toString());
+  return apiPage<Task>('/tasks?' + query.toString());
 }
 export const getTask = (id: string) => api<Task>('/tasks/' + id);
 export const createTask = (input: CreateTaskInput) =>

@@ -64,6 +64,7 @@ app.add_middleware(
     allow_origins=["http://localhost:3000"],
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["X-Next-Cursor", "X-Request-ID"],
 )
 app.include_router(health_router)
 app.include_router(dashboard_router, prefix="/api")

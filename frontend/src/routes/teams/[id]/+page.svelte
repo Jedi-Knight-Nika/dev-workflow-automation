@@ -147,7 +147,9 @@
         >
           <h3>{profile.role_kind}</h3>
           {#if profile.role_kind === 'THINKER' || profile.role_kind === 'REVIEWER'}
-            <p>Reserved profile. Optional paid dispatch is not connected.</p>
+            <p>
+              Optional paid consultation. Requires an enabled native harness and explicit budget.
+            </p>
           {/if}
           <label
             >Display name<input bind:value={profile.display_name} maxlength="120" required /></label
@@ -220,8 +222,7 @@
             >Team guidance<textarea
               bind:value={profile.supplemental_instructions}
               maxlength="8000"
-              rows="4"
-            ></textarea></label
+              rows="4"></textarea></label
           >
           <small
             >Harness: {profile.harness ?? 'classification only'} · prompt {profile.prompt_version} · version

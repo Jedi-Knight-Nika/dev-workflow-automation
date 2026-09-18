@@ -6,7 +6,10 @@ set -eu
   exit 1
 }
 for directory in workspaces native control; do
-  [ -d "/engineering-data/$directory" ] || { echo "Missing data directory: $directory" >&2; exit 1; }
+  [ -d "/engineering-data/$directory" ] || {
+    echo "Missing data directory: $directory" >&2
+    exit 1
+  }
 done
 umask 077
 temporary="$(mktemp -d /backups/incomplete.XXXXXXXX)"

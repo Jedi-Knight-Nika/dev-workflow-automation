@@ -95,7 +95,12 @@ services:
     <<: *monitor
     image: ${ALERTMANAGER_IMAGE:-prom/alertmanager@sha256:690c7b525f4367aa91f73e2f91c632206d32e97c6384bdbf2fb7a861b420340d}
     profiles: [alerts]
-    command: [--config.file=/etc/alertmanager/alertmanager.yml, --storage.path=/alertmanager, --cluster.listen-address=]
+    command:
+      [
+        --config.file=/etc/alertmanager/alertmanager.yml,
+        --storage.path=/alertmanager,
+        --cluster.listen-address=
+      ]
     volumes:
       - ${OBSERVABILITY_CONFIG_ROOT}/alertmanager:/etc/alertmanager:ro
       - alertmanager_data:/alertmanager

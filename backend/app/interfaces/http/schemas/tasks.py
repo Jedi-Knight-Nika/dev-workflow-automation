@@ -16,6 +16,8 @@ class TaskCreate(BaseModel):
     priority: int = Field(default=3, ge=0, le=5)
     external_key: str | None = Field(default=None, max_length=100)
     start_work: bool = False
+    team_id: uuid.UUID | None = None
+    request_id: uuid.UUID | None = None
     repository_id: uuid.UUID | None = None
     project_name: str | None = Field(default=None, max_length=255)
     labels: list[str] = Field(default_factory=list, max_length=50)

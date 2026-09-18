@@ -43,15 +43,16 @@ class SqlAnalyticsFacts:
                 raise ValueError("Analytics cohort exceeds 5000 tasks; select a smaller window")
             if not tasks:
                 return []
-            ids = [t.id for t in tasks]
-            team_ids = {t.team_id for t in tasks if t.team_id}
-            repository_ids = {t.repository_id for t in tasks if t.repository_id}
+            ids = [task.id for task in tasks]
+            team_ids = {task.team_id for task in tasks if task.team_id}
+            repository_ids = {task.repository_id for task in tasks if task.repository_id}
             teams = {
-                t.id: t for t in await session.scalars(select(Team).where(Team.id.in_(team_ids)))
+                task.id: task
+                for task in await session.scalars(select(Team).where(Team.id.in_(team_ids)))
             }
-            repos = {
-                r.id: r
-                for r in await session.scalars(
+            repositories = {
+                repository.id: repository
+                for repository in await session.scalars(
                     select(Repository).where(Repository.id.in_(repository_ids))
                 )
             }
@@ -67,66 +68,67 @@ class SqlAnalyticsFacts:
             if len(rows) > 50000:
                 raise ValueError("Analytics run cohort exceeds bound")
             runs: dict[UUID, list[RunFact]] = {}
-            for r, profile, profile_name in rows:
-                raw = r.raw_usage or {}
-                kind = (
-                    "DEVELOPER_COMPACTION"
-                    if raw.get("run_kind") == "DEVELOPER_COMPACTION"
-                    or "compact" in r.prompt_version.lower()
+            for run, profile_id, profile_name in rows:
+                raw = run.raw_usage or {}
+                if (
+                    raw.get("run_kind") == "DEVELOPER_COMPACTION"
+                    or "compact" in run.prompt_version.lower()
                     or raw.get("compaction")
-                    else "DEVELOPER_TURN"
-                    if r.role_kind == "DEVELOPER"
-                    else "INTERPRETER_CLOUD"
-                    if r.role_kind == "INTERPRETER"
-                    else r.role_kind
-                )
-                runs.setdefault(r.task_id, []).append(
+                ):
+                    kind = "DEVELOPER_COMPACTION"
+                elif run.role_kind == "DEVELOPER":
+                    kind = "DEVELOPER_TURN"
+                elif run.role_kind == "INTERPRETER":
+                    kind = "INTERPRETER_CLOUD"
+                else:
+                    kind = run.role_kind
+                runs.setdefault(run.task_id, []).append(
                     RunFact(
-                        str(r.id),
-                        str(r.task_id),
-                        str(profile) if profile else None,
-                        r.provider,
-                        r.model,
-                        r.harness,
-                        r.role_kind,
-                        kind,
-                        r.status,
-                        r.started_at,
-                        r.finished_at,
-                        r.provider_cost_usd
-                        if r.provider_cost_usd is not None
-                        else r.calculated_cost_usd,
-                        r.reserved_cost_usd,
-                        r.input_tokens,
-                        r.output_tokens,
-                        r.cache_read_tokens,
-                        r.cache_write_tokens,
-                        r.reasoning_tokens,
-                        r.usage_complete,
-                        r.provider_duration_ms,
-                        profile_name,
-                        raw.get("context_tokens")
+                        id=str(run.id),
+                        task_id=str(run.task_id),
+                        profile_id=str(profile_id) if profile_id else None,
+                        provider=run.provider,
+                        model=run.model,
+                        harness=run.harness,
+                        role=run.role_kind,
+                        run_kind=kind,
+                        status=run.status,
+                        started_at=run.started_at,
+                        finished_at=run.finished_at,
+                        cost=run.provider_cost_usd
+                        if run.provider_cost_usd is not None
+                        else run.calculated_cost_usd,
+                        reserved=run.reserved_cost_usd,
+                        input_tokens=run.input_tokens,
+                        output_tokens=run.output_tokens,
+                        cache_read_tokens=run.cache_read_tokens,
+                        cache_write_tokens=run.cache_write_tokens,
+                        reasoning_tokens=run.reasoning_tokens,
+                        usage_complete=run.usage_complete,
+                        provider_duration_ms=run.provider_duration_ms,
+                        profile_name=profile_name,
+                        context_tokens=raw.get("context_tokens")
                         if isinstance(raw.get("context_tokens"), int)
                         else None,
-                        None,
-                        r.failure_code,
-                        str(raw.get("context_tier", "")).lower()
+                        first_edit_at=None,
+                        failure_code=run.failure_code,
+                        long_context_tier=str(raw.get("context_tier", "")).lower()
                         in {"long", "long_context", "above_272k"},
                     )
                 )
             phases: dict[UUID, list[dict[str, Any]]] = {}
-            for p in await session.scalars(
+            for phase in await session.scalars(
                 select(TaskPhaseRun).where(TaskPhaseRun.task_id.in_(ids))
             ):
-                phases.setdefault(p.task_id, []).append(
+                phases.setdefault(phase.task_id, []).append(
                     {
-                        "stage": p.stage,
-                        "status": p.status,
-                        "wait_reason": p.wait_reason,
-                        "started_at": p.started_at.isoformat(),
-                        "finished_at": p.finished_at.isoformat() if p.finished_at else None,
-                        "seconds": (p.finished_at - p.started_at).total_seconds()
-                        if p.finished_at
+                        "stage": phase.stage,
+                        "status": phase.status,
+                        "wait_reason": phase.wait_reason,
+                        "started_at": phase.started_at.isoformat(),
+                        "finished_at": phase.finished_at.isoformat() if phase.finished_at else None,
+                        "seconds": (phase.finished_at - phase.started_at).total_seconds()
+                        if phase.finished_at
                         else None,
                     }
                 )
@@ -171,8 +173,8 @@ class SqlAnalyticsFacts:
                 if value is not None:
                     peaks[binding.task_id] = max(peaks.get(binding.task_id, 0), value)
             planned = {
-                p.team_id: p
-                for p in await session.scalars(
+                profile.team_id: profile
+                for profile in await session.scalars(
                     select(TeamAgentProfile).where(
                         TeamAgentProfile.team_id.in_(team_ids),
                         TeamAgentProfile.role_kind == "DEVELOPER",
@@ -180,48 +182,52 @@ class SqlAnalyticsFacts:
                 )
             }
             local: dict[UUID, list[dict[str, Any]]] = {}
-            for r in await session.scalars(
+            for run in await session.scalars(
                 select(LocalModelRun).where(LocalModelRun.task_id.in_(ids))
             ):
-                local.setdefault(r.task_id, []).append(
+                local.setdefault(run.task_id, []).append(
                     {
-                        "model": r.model,
-                        "status": r.status,
-                        "duration_ms": r.duration_ms,
-                        "input_tokens": r.input_tokens,
-                        "output_tokens": r.output_tokens,
-                        "started_at": r.started_at.isoformat(),
+                        "model": run.model,
+                        "status": run.status,
+                        "duration_ms": run.duration_ms,
+                        "input_tokens": run.input_tokens,
+                        "output_tokens": run.output_tokens,
+                        "started_at": run.started_at.isoformat(),
                         "run_kind": "INTERPRETER_LOCAL",
                     }
                 )
             return [
                 TaskFact(
-                    str(t.id),
-                    t.title,
-                    str(t.team_id) if t.team_id else None,
-                    str(t.repository_id) if t.repository_id else None,
-                    (t.external_key or "manual").split("-")[0].lower(),
-                    len(t.description or ""),
-                    t.status,
-                    t.created_at,
-                    t.completed_at,
-                    runs.get(t.id, []),
-                    phases.get(t.id, []),
-                    reviews.get(t.id, 0),
-                    failures.get(t.id, 0),
-                    peaks.get(t.id),
-                    planned[t.team_id].harness if t.team_id in planned else None,
-                    planned[t.team_id].model if t.team_id in planned else None,
-                    local.get(t.id, []),
-                    float(t.estimate) if t.estimate is not None else None,
-                    t.labels,
-                    f"{repos[t.repository_id].owner}/{repos[t.repository_id].name}"
-                    if t.repository_id in repos
+                    id=str(task.id),
+                    title=task.title,
+                    team_id=str(task.team_id) if task.team_id else None,
+                    repository_id=str(task.repository_id) if task.repository_id else None,
+                    source=(task.external_key or "manual").split("-")[0].lower(),
+                    description_length=len(task.description or ""),
+                    status=task.status,
+                    created_at=task.created_at,
+                    completed_at=task.completed_at,
+                    runs=runs.get(task.id, []),
+                    phases=phases.get(task.id, []),
+                    review_cycles=reviews.get(task.id, 0),
+                    validation_failures=failures.get(task.id, 0),
+                    peak_memory=peaks.get(task.id),
+                    planned_harness=planned[task.team_id].harness
+                    if task.team_id in planned
                     else None,
-                    teams[t.team_id].name if t.team_id in teams else None,
-                    teams[t.team_id].max_concurrent_tasks if t.team_id in teams else 1,
+                    planned_model=planned[task.team_id].model if task.team_id in planned else None,
+                    local_runs=local.get(task.id, []),
+                    estimate=float(task.estimate) if task.estimate is not None else None,
+                    labels=task.labels,
+                    repository_name=f"{repositories[task.repository_id].owner}/{repositories[task.repository_id].name}"
+                    if task.repository_id in repositories
+                    else None,
+                    team_name=teams[task.team_id].name if task.team_id in teams else None,
+                    concurrency=teams[task.team_id].max_concurrent_tasks
+                    if task.team_id in teams
+                    else 1,
                 )
-                for t in tasks
+                for task in tasks
             ]
 
     async def forecast_snapshots(self, task_id: UUID | None = None) -> list[dict[str, Any]]:

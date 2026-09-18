@@ -38,12 +38,16 @@ class BuildDashboard:
             name: defaultdict(list)
             for name in ("models", "agents", "daily", "run_kinds", "repositories")
         }
+        developer_tasks: dict[str, dict[str, TaskFact]] = defaultdict(dict)
         for task in tasks:
             for run in task.runs:
                 if not since <= run.started_at <= now:
                     continue
                 groups["models"][f"{run.provider}/{run.model}"].append(run)
-                groups["agents"][run.profile_id or f"{run.role}:unattributed"].append(run)
+                agent_key = run.profile_id or f"{run.role}:unattributed"
+                groups["agents"][agent_key].append(run)
+                if run.role == "DEVELOPER":
+                    developer_tasks[agent_key][task.id] = task
                 groups["daily"][run.started_at.date().isoformat()].append(run)
                 groups["run_kinds"][run.run_kind].append(run)
                 groups["repositories"][task.repository_id or "unattributed"].append(run)
@@ -57,8 +61,7 @@ class BuildDashboard:
         for key, selected in groups["agents"].items():
             # Attribute to each profile that actually had a Developer run; counts are
             # participation, not disjoint ownership when a task changed profiles.
-            cohort_ids = {r.task_id for r in selected if r.role == "DEVELOPER"}
-            cohort = [t for t in tasks if t.id in cohort_ids]
+            cohort = list(developer_tasks[key].values())
             terminal = [t for t in cohort if t.status in {"MERGED", "FAILED", "CANCELLED"}]
             successes = [metrics(t) for t in terminal if t.status == "MERGED"]
             costs = [float(t["cost_usd"]) for t in successes if t["cost_complete"]]

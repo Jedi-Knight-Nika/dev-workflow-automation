@@ -2,7 +2,7 @@
 
 The dashboard, Team pages, task pages, and repository list have a **Visualize activity** button. Opening it checks the selected scope and time range. Starting the view loads recorded history; live follow is an explicit option. The viewer supports task flow, workspace groups, code changes, playback speed, timeline seeking, filters, an event inspector, resizing, maximization, and fullscreen with a viewport fallback.
 
-This implements the recorded-history features in the [activity visualizer design](../engineering_activity_visualizer_technical_design.md). It follows the existing modular monolith. It does not introduce a second workflow engine, new agents, or a generic event bus.
+This implements recorded-history replay within the existing modular monolith. It does not introduce a second workflow engine, new agents, or a generic event bus.
 
 ## Architecture and ownership
 
@@ -17,15 +17,15 @@ flowchart LR
   API --> UI[Lazy viewer and replay worker]
 ```
 
-| Location | Responsibility |
-| --- | --- |
-| `backend/app/activity/domain` | Public activity facts, safe identifiers and paths, receipt amount semantics |
-| `backend/app/activity/application` | Scope/window values and read-query port |
-| `backend/app/activity/infrastructure` | SQL read model, source projection, bounded queries, source relationships, immutable Git metadata, optional file retention |
-| `backend/app/bootstrap/activity.py` | Dependency composition and a dedicated small connection pool |
-| `backend/app/activity_runner.py` | Optional projector process; no engineering scheduler or provider calls |
-| `backend/app/interfaces/http/routes/visualization.py` | Input validation, existing error translation, history and SSE transport |
-| `frontend/src/lib/visualization` | Lazy shell, API client, pure replay state, shared receipt comparisons, process/capacity metrics, plan history, inspector, range summaries, telemetry, Canvas worker, optional Gource frame |
+| Location                                              | Responsibility                                                                                                                                                                             |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `backend/app/activity/domain`                         | Public activity facts, safe identifiers and paths, receipt amount semantics                                                                                                                |
+| `backend/app/activity/application`                    | Scope/window values and read-query port                                                                                                                                                    |
+| `backend/app/activity/infrastructure`                 | SQL read model, source projection, bounded queries, source relationships, immutable Git metadata, optional file retention                                                                  |
+| `backend/app/bootstrap/activity.py`                   | Dependency composition and a dedicated small connection pool                                                                                                                               |
+| `backend/app/activity_runner.py`                      | Optional projector process; no engineering scheduler or provider calls                                                                                                                     |
+| `backend/app/interfaces/http/routes/visualization.py` | Input validation, existing error translation, history and SSE transport                                                                                                                    |
+| `frontend/src/lib/visualization`                      | Lazy shell, API client, pure replay state, shared receipt comparisons, process/capacity metrics, plan history, inspector, range summaries, telemetry, Canvas worker, optional Gource frame |
 
 Engineering transactions continue to write their existing durable records. The projector reads committed records in batches and writes only its own tables. Unique source identities make retries idempotent. It does not use the largest source ID as a cursor: a transaction with a lower allocated ID can commit later. Indexed anti-joins find those late records. An advisory lock used only by activity writers serializes their commits so the public sequence is safe for frozen snapshots and live resumption.
 
@@ -77,16 +77,16 @@ This is observed validated-commit activity, not a complete Git history or a reco
 
 Normal Compose builds include a separate `activity` service. Production and execution overlays include it too. The API image already contains Git; no additional package or service is required. Compose waits for the API migration/health check before starting projection. When running processes directly, apply the normal migrations and run `python -m app.activity_runner` from `backend` alongside the API.
 
-| Setting | Default | Purpose |
-| --- | --- | --- |
-| `ACTIVITY_ENABLED` | `true` | Enables API access and the projector loop |
-| `ACTIVITY_COLLECT_FILES` | `true` | Enables validated-commit metadata collection |
-| `ACTIVITY_FILE_RETENTION_DAYS` | `0` | Zero preserves file detail; positive values expire old derived file rows in batches of 100 |
-| `ACTIVITY_POLL_SECONDS` | `5` | Delay between projection batches |
-| `ACTIVITY_MAX_EVENTS` | `5000` | Maximum events loaded into one viewer |
-| `ACTIVITY_MAX_FILES` | `5000` | Maximum file-change rows loaded into one viewer |
-| `ACTIVITY_MAX_TASKS` | `200` | Maximum tasks in one viewer |
-| `ACTIVITY_MAX_REPLAY_DAYS` | `90` | Maximum requested historical range |
+| Setting                        | Default | Purpose                                                                                    |
+| ------------------------------ | ------- | ------------------------------------------------------------------------------------------ |
+| `ACTIVITY_ENABLED`             | `true`  | Enables API access and the projector loop                                                  |
+| `ACTIVITY_COLLECT_FILES`       | `true`  | Enables validated-commit metadata collection                                               |
+| `ACTIVITY_FILE_RETENTION_DAYS` | `0`     | Zero preserves file detail; positive values expire old derived file rows in batches of 100 |
+| `ACTIVITY_POLL_SECONDS`        | `5`     | Delay between projection batches                                                           |
+| `ACTIVITY_MAX_EVENTS`          | `5000`  | Maximum events loaded into one viewer                                                      |
+| `ACTIVITY_MAX_FILES`           | `5000`  | Maximum file-change rows loaded into one viewer                                            |
+| `ACTIVITY_MAX_TASKS`           | `200`   | Maximum tasks in one viewer                                                                |
+| `ACTIVITY_MAX_REPLAY_DAYS`     | `90`    | Maximum requested historical range                                                         |
 
 Set `ACTIVITY_ENABLED=false` for both API and projector to disable the module; existing engineering processing remains functional. The launcher reports that visualization is disabled if opened. No render worker or visualization request is created merely by visiting the dashboard.
 

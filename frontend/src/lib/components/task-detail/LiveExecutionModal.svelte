@@ -209,6 +209,8 @@
   }}
 >
   <section>
+    <!-- Drag-to-reposition is a mouse-only convenience; the modal is fully usable without it. -->
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
     <header onpointerdown={beginDrag}>
       <div class="identity">
         <span class:connected class="live-dot"></span>

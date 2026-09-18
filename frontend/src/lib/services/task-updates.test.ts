@@ -45,6 +45,7 @@ it('filters events using the current task and preserves connection notifications
   update({ data: '{"task_id":"second"}' });
   expect(refresh).toHaveBeenCalledTimes(2);
   stream.onopen();
+  expect(refresh).toHaveBeenCalledTimes(3);
   stream.onerror();
   expect(connected.mock.calls).toEqual([[true], [false]]);
   stop();
@@ -64,6 +65,27 @@ it('refreshes the task list, skips hidden polling, and closes resources on clean
   document.hidden = false;
   vi.advanceTimersByTime(10000);
   expect(refresh).toHaveBeenCalledTimes(2);
+  expect(stream.close).toHaveBeenCalledOnce();
+  expect(vi.getTimerCount()).toBe(0);
+});
+
+it('shares the connection and poll until the final subscriber leaves', () => {
+  const { stream } = setup();
+  const first = vi.fn();
+  const second = vi.fn();
+  const stopFirst = subscribeTaskUpdates(first, { taskId: () => 'first' });
+  const stopSecond = subscribeTaskUpdates(second, { taskId: () => 'second' });
+  expect(stream.addEventListener).toHaveBeenCalledOnce();
+  expect(vi.getTimerCount()).toBe(1);
+  stream.addEventListener.mock.calls[0][1]({ data: '{"task_id":"second"}' });
+  expect(first).not.toHaveBeenCalled();
+  expect(second).toHaveBeenCalledOnce();
+  stopFirst();
+  stopFirst();
+  expect(stream.close).not.toHaveBeenCalled();
+  vi.advanceTimersByTime(10000);
+  expect(second).toHaveBeenCalledTimes(2);
+  stopSecond();
   expect(stream.close).toHaveBeenCalledOnce();
   expect(vi.getTimerCount()).toBe(0);
 });

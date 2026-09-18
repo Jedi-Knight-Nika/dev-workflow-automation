@@ -100,8 +100,7 @@
             rows="2"
             maxlength="500"
             bind:value={reason}
-            disabled={busy}
-          ></textarea>
+            disabled={busy}></textarea>
         </label>
         <div class="flex flex-wrap gap-2">
           <Button disabled={busy || !!session.blocker || reason.trim().length < 3} onclick={apply}

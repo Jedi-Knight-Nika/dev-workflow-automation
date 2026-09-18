@@ -35,13 +35,12 @@ class FakeTasks:
         self.added.append(task)
 
 
-class FakeJobs:
+class FakeExecution:
     def __init__(self) -> None:
-        self.enqueued: list[tuple[Task, dict[str, Any]]] = []
+        self.started: list[Task] = []
 
-    async def enqueue_intake(self, task: Task, payload: dict[str, Any]) -> object:
-        self.enqueued.append((task, payload))
-        return task.id
+    async def start(self, task: Task) -> None:
+        self.started.append(task)
 
 
 class FakeEvents:
@@ -62,7 +61,7 @@ class FakeEvents:
 class FakeUnitOfWork:
     def __init__(self) -> None:
         self.tasks = FakeTasks()
-        self.jobs = FakeJobs()
+        self.execution = FakeExecution()
         self.events = FakeEvents()
         self.commits = 0
         self.rollbacks = 0
@@ -85,7 +84,7 @@ async def test_create_task_use_case_coordinates_domain_through_ports() -> None:
     assert task.title == "Isolate business rules"
     assert task.status == TaskStatus.NEW
     assert unit_of_work.tasks.added == [task]
-    assert unit_of_work.jobs.enqueued == [(task, {"source": "dashboard"})]
+    assert unit_of_work.execution.started == [task]
     assert unit_of_work.events.added[0][1:] == (
         "TASK_CREATED",
         {"title": "Isolate business rules"},
@@ -102,7 +101,7 @@ async def test_creation_is_free_unless_start_is_explicit() -> None:
     unit_of_work = FakeUnitOfWork()
     assert not TaskCreate(title="Draft task").start_work
     await CreateTask(unit_of_work).execute(CreateTaskCommand(title="Draft task"))  # type: ignore[arg-type]
-    assert unit_of_work.jobs.enqueued == []
+    assert unit_of_work.execution.started == []
     assert unit_of_work.commits == 1
 
 
@@ -221,6 +220,90 @@ def test_no_parallel_horizontal_runtime():
         "integrations",
     ]:
         assert not list((root / folder).rglob("*.py")), folder
+
+
+def test_new_modules_cannot_introduce_unreviewed_private_dependencies():
+    existing = {
+        "activity": {
+            "agent_runtime",
+            "coordinator",
+            "delivery",
+            "engineering",
+            "repositories",
+            "teams",
+        },
+        "agent_runtime": {"engineering", "teams"},
+        "analytics": {
+            "agent_runtime",
+            "engineering",
+            "intake",
+            "observability",
+            "repositories",
+            "teams",
+        },
+        "coordinator": {
+            "agent_runtime",
+            "delivery",
+            "engineering",
+            "intake",
+            "repositories",
+            "teams",
+        },
+        "delivery": {"agent_runtime", "engineering", "intake", "repositories", "teams"},
+        "engineering": {
+            "agent_runtime",
+            "coordinator",
+            "delivery",
+            "intake",
+            "repositories",
+            "supervisor",
+            "teams",
+        },
+        "intake": {
+            "agent_runtime",
+            "coordinator",
+            "delivery",
+            "engineering",
+            "repositories",
+            "supervisor",
+            "teams",
+        },
+        "observability": {"agent_runtime", "engineering", "teams"},
+        "platform": {
+            "activity",
+            "agent_runtime",
+            "analytics",
+            "coordinator",
+            "delivery",
+            "engineering",
+            "intake",
+            "observability",
+            "repositories",
+            "teams",
+        },
+        "repositories": {"engineering", "teams"},
+        "supervisor": {"agent_runtime", "engineering", "intake"},
+        "teams": {"agent_runtime", "delivery", "engineering", "intake"},
+    }
+    root = BACKEND_ROOT / "app"
+    for path in root.rglob("*.py"):
+        parts = path.relative_to(root).parts
+        if len(parts) < 2 or parts[0] in {"bootstrap", "interfaces"}:
+            continue
+        owner = parts[0]
+        for imported in imported_modules(path):
+            target = imported.split(".")
+            if (
+                len(target) > 2
+                and target[0] == "app"
+                and target[1] != owner
+                and "infrastructure" in target
+            ):
+                assert target[1] in existing.get(owner, set()), (
+                    path,
+                    imported,
+                    "Use the owning module's application contract or review the dependency",
+                )
 
 
 def test_schema_contains_only_current_context_entities():

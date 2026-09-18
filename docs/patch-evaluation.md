@@ -10,13 +10,13 @@ an explicitly enabled test team with an isolated checkout and a fixed task budge
 
 Use real historical tickets, with their original text and the exact commit before the fix:
 
-| Case | Required outcome evidence |
-| --- | --- |
+| Case                       | Required outcome evidence                                           |
+| -------------------------- | ------------------------------------------------------------------- |
 | Live Execution drag/resize | Drag, resize, viewport bounds, keyboard control, read-only behavior |
-| Desktop startup loader | Desktop build/startup evidence and expected loading screen |
-| PR formatting feedback | Same PR updated, scoped formatting passes, no unrelated changes |
-| Small backend bug | A failing assertion passes and existing relevant tests still pass |
-| Cross-layer change | API contract and consumer agree; combined validation passes |
+| Desktop startup loader     | Desktop build/startup evidence and expected loading screen          |
+| PR formatting feedback     | Same PR updated, scoped formatting passes, no unrelated changes     |
+| Small backend bug          | A failing assertion passes and existing relevant tests still pass   |
+| Cross-layer change         | API contract and consumer agree; combined validation passes         |
 
 These are case definitions, not completed trials. Populate starting SHAs and executable
 acceptance checks before comparing runs. Do not compare a retry against an already-fixed base.

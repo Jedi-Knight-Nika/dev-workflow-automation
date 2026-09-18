@@ -52,9 +52,11 @@ fn start_stack(handle: tauri::AppHandle) {
         return;
     }
 
-    eprintln!("[launcher] running: docker compose up -d --wait (cwd={})", root.display());
-    let output = Command::new("docker")
-        .args(["compose", "up", "-d", "--wait"])
+    let mode = std::env::var("AEW_START_MODE").unwrap_or_else(|_| "console".to_string());
+    eprintln!("[launcher] starting mode {mode} (cwd={})", root.display());
+    let output = Command::new("sh")
+        .arg(root.join("scripts/start-local.sh"))
+        .args(["--mode", mode.as_str(), "--no-build"])
         .current_dir(&root)
         .output();
 
@@ -64,8 +66,14 @@ fn start_stack(handle: tauri::AppHandle) {
         }
         Ok(result) => {
             let stderr = String::from_utf8_lossy(&result.stderr).to_string();
-            eprintln!("[launcher] docker compose up failed (status={:?}): {stderr}", result.status);
-            let _ = handle.emit("stack-error", format!("docker compose up failed:\n{stderr}"));
+            eprintln!(
+                "[launcher] docker compose up failed (status={:?}): {stderr}",
+                result.status
+            );
+            let _ = handle.emit(
+                "stack-error",
+                format!("docker compose up failed:\n{stderr}"),
+            );
             return;
         }
         Err(err) => {
@@ -89,6 +97,13 @@ fn start_stack(handle: tauri::AppHandle) {
         std::thread::sleep(Duration::from_millis(500));
     }
     eprintln!("[launcher] port {UI_PORT} ready = {ready}");
+    if !ready {
+        let _ = handle.emit(
+            "stack-error",
+            "The frontend did not become ready on port 3000.",
+        );
+        return;
+    }
 
     match handle.get_webview_window("main") {
         Some(window) => match format!("http://localhost:{UI_PORT}").parse() {

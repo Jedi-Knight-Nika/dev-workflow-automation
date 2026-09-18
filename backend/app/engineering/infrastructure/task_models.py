@@ -132,6 +132,16 @@ class TaskRepositoryScope(Base):
     task: Mapped[Task] = relationship(back_populates="repository_scopes")
 
 
+class TaskCreationRequest(Base):
+    __tablename__ = "task_creation_requests"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    fingerprint: Mapped[str] = mapped_column(String(64))
+    task_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("tasks.id", ondelete="CASCADE"), index=True
+    )
+
+
 class Job(Base):
     __tablename__ = "jobs"
     __table_args__ = (

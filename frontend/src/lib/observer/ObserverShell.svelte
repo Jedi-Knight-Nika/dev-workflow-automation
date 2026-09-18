@@ -2,7 +2,6 @@
   import { onMount, tick, untrack } from 'svelte';
   import { SvelteSet } from 'svelte/reactivity';
   import { page } from '$app/state';
-  import { resolve } from '$app/paths';
   import { getDisplayMode } from '$lib/display.svelte';
   import ObserverOrb from './ObserverOrb.svelte';
   import { draggable } from './draggable';
@@ -15,38 +14,20 @@
     type Point,
     type Viewport
   } from './position';
-  import { observerApi, streamAnswer } from './api';
-  import { applyReplyEvent, uniqueSources } from './messages';
+  import { observerApi } from './api';
+  import { createObserverConversation } from './conversation.svelte';
+  import ObserverPanelContent from './ObserverPanelContent.svelte';
   import { getAssistantName, setAssistantName } from './identity.svelte';
-  import type {
-    AttentionEvent,
-    Briefing,
-    Conversation,
-    FocusMode,
-    ObserverMessage,
-    ObserverScope,
-    ObserverStatus,
-    OrbMode
-  } from './types';
+  import type { Briefing, FocusMode, ObserverScope, ObserverStatus, OrbMode } from './types';
 
   let enabled = $state(false);
   const assistantName = $derived(getAssistantName());
   let currentStatus = $state<ObserverStatus | null>(null);
   let briefing = $state<Briefing | null>(null);
   let open = $state(false);
-  let busy = $state(false);
   let offline = $state(false);
   let bubble = $state('');
   let unreadReply = $state(false);
-  let error = $state('');
-  let activity = $state('');
-  let input = $state('');
-  let messages = $state<ObserverMessage[]>([]);
-  let conversation = $state<string>();
-  let conversations = $state<Conversation[]>([]);
-  let showHistory = $state(false);
-  let showChanges = $state(false);
-  let showAttention = $state(false);
   let focus = $state<FocusMode>('normal');
   let dialog: HTMLDialogElement;
   let dock = $state<HTMLDivElement>();
@@ -73,7 +54,6 @@
   };
   let log = $state<HTMLDivElement>();
   let textarea = $state<HTMLTextAreaElement>();
-  let request: AbortController | undefined;
   let refreshRequest: AbortController | undefined;
   let refreshTimer: ReturnType<typeof setTimeout> | undefined;
   let bubbleTimer: ReturnType<typeof setTimeout> | undefined;
@@ -81,6 +61,32 @@
   let lastBubble = 0;
   const seen = new SvelteSet<string>();
   let explicitScope = $state<ObserverScope | null>(null);
+
+  const conversation = createObserverConversation({
+    enabled: () => enabled,
+    name: () => assistantName,
+    scope: () => scope,
+    open: () => open,
+    reply: (answer) => {
+      unreadReply = true;
+      if (focus === 'silent') return;
+      bubble = `${assistantName} replied: ${answer.slice(0, 130)}`;
+      clearTimeout(bubbleTimer);
+      bubbleTimer = setTimeout(() => {
+        bubble = '';
+      }, 15000);
+    },
+    scroll: () => {
+      void tick().then(() => {
+        if (log) log.scrollTop = log.scrollHeight;
+      });
+    },
+    changeScope: (value) => {
+      explicitScope = value;
+    },
+    refresh: () => refresh(true)
+  });
+  const chat = conversation.state;
 
   function savePosition() {
     try {
@@ -115,8 +121,8 @@
   const mode = $derived<OrbMode>(
     offline
       ? 'offline'
-      : busy
-        ? activity === 'Answering'
+      : chat.busy
+        ? chat.activity === 'Answering'
           ? 'speaking'
           : 'thinking'
         : currentStatus?.highest_severity === 'CRITICAL'
@@ -145,9 +151,9 @@
     if (mounted && key) {
       untrack(() => {
         explicitScope = null;
-        request?.abort();
-        messages = [];
-        conversation = undefined;
+        conversation.abort();
+        chat.messages = [];
+        chat.id = undefined;
         briefing = null;
         void refresh(true);
       });
@@ -155,11 +161,11 @@
   });
 
   function stop() {
-    request?.abort();
+    conversation.abort();
     refreshRequest?.abort();
     clearTimeout(refreshTimer);
     clearTimeout(bubbleTimer);
-    busy = false;
+    chat.busy = false;
     bubble = '';
     unreadReply = false;
     currentStatus = null;
@@ -240,7 +246,7 @@
     open = true;
     unreadReply = false;
     bubble = '';
-    error = '';
+    chat.error = '';
     await tick();
     // A floating companion, not a blocking modal: its launcher and the app remain usable.
     if (!enabled || !open) return;
@@ -257,126 +263,6 @@
     if (restoreFocus) launcher?.focus({ preventScroll: true });
   }
 
-  async function send(question = input) {
-    const message = question.trim();
-    if (!message || busy || !enabled) return;
-    input = '';
-    error = '';
-    busy = true;
-    activity = 'Reading product facts';
-    request?.abort();
-    const controller = new AbortController();
-    request = controller;
-    const responseId = crypto.randomUUID();
-    messages = [
-      ...messages,
-      { id: crypto.randomUUID(), role: 'user', content: message, sources: [] },
-      { id: responseId, role: 'assistant', content: '', sources: [] }
-    ];
-    try {
-      const created = await observerApi.question(message, scope, conversation, controller.signal);
-      conversation = created.conversation_id;
-      await streamAnswer(
-        created.request_id,
-        (event) => {
-          if (controller.signal.aborted) return;
-          const failureMessage = event.message || `${assistantName} unavailable.`;
-          messages = applyReplyEvent(messages, responseId, event, failureMessage);
-          if (event.type === 'observer.tool_started')
-            activity = `Reading ${(event.tool || 'facts').replaceAll('_', ' ')}`;
-          if (event.type === 'observer.model_started')
-            activity = 'Local AI · composing an explanation';
-          if (event.type === 'observer.text_delta') {
-            activity = 'Answering';
-          }
-          if (event.type === 'observer.completed') {
-            activity =
-              event.mode === 'local'
-                ? 'Local Ollama · source-backed explanation'
-                : event.reason || 'Deterministic facts';
-            if (!open) {
-              unreadReply = true;
-              if (focus !== 'silent') {
-                bubble = `${assistantName} replied: ${(event.answer || '').slice(0, 130)}`;
-                clearTimeout(bubbleTimer);
-                bubbleTimer = setTimeout(() => {
-                  bubble = '';
-                }, 15000);
-              }
-            }
-          }
-          if (event.type === 'observer.failed') {
-            error = failureMessage;
-          }
-          void tick().then(() => {
-            if (log) log.scrollTop = log.scrollHeight;
-          });
-        },
-        controller.signal
-      );
-    } catch {
-      if (!controller.signal.aborted)
-        error = `${assistantName} could not finish this answer. Saved conversations remain in History.`;
-    } finally {
-      if (request === controller) busy = false;
-      messages = messages.map((m) =>
-        m.id === responseId && !m.content
-          ? {
-              ...m,
-              content: controller.signal.aborted
-                ? 'Reply cancelled because the chat was reset or assistant settings changed. Send again when ready; no automatic AI retry was started.'
-                : error || 'The reply was interrupted. Please try again.'
-            }
-          : m
-      );
-    }
-  }
-
-  async function eventAction(event: AttentionEvent, minutes?: number) {
-    try {
-      if (minutes) await observerApi.snooze(event.id, minutes);
-      else await observerApi.acknowledge(event.id);
-      await refresh();
-    } catch {
-      error = 'Could not update this attention item.';
-    }
-  }
-  async function changeFocus() {
-    try {
-      await observerApi.preferences({ focus });
-    } catch {
-      error = 'Could not save notification preference.';
-    }
-  }
-  async function markSeen() {
-    try {
-      await observerApi.preferences({ last_seen_at: new Date().toISOString() });
-      showChanges = false;
-    } catch {
-      error = 'Could not save last visit.';
-    }
-  }
-  async function history() {
-    try {
-      conversations = await observerApi.conversations();
-      showHistory = !showHistory;
-    } catch {
-      error = 'History unavailable.';
-    }
-  }
-  async function loadConversation(item: Conversation) {
-    try {
-      request?.abort();
-      busy = false;
-      messages = await observerApi.history(item.id);
-      explicitScope = item.scope;
-      conversation = item.id;
-      showHistory = false;
-      await refresh(true);
-    } catch {
-      error = 'Could not load that conversation.';
-    }
-  }
   onMount(() => {
     mounted = true;
     try {
@@ -561,161 +447,19 @@
             : 'Deterministic mode'}</span
       ><span class="status-cost">NO CLOUD SPEND</span>
     </div>
-    <nav class="panel-actions" aria-label="{assistantName} views">
-      <button
-        onclick={() => {
-          request?.abort();
-          busy = false;
-          messages = [];
-          conversation = undefined;
-          explicitScope = null;
-          showHistory = false;
-        }}>New chat</button
-      >
-      <button onclick={history} aria-expanded={showHistory}>History</button>
-      <button
-        onclick={() => {
-          showChanges = !showChanges;
-        }}
-        aria-expanded={showChanges}>Since my visit</button
-      >
-      <label class="focus-select"
-        ><span class="sr-only">Notifications</span><select bind:value={focus} onchange={changeFocus}
-          ><option value="normal">Notifications</option><option value="warnings-only"
-            >Warnings only</option
-          ><option value="critical-only">Critical only</option><option value="silent">Silent</option
-          ></select
-        ></label
-      >
-    </nav>
-    <div class="conversation" bind:this={log}>
-      {#if showHistory}<section class="history-list">
-          <h3>Recent conversations</h3>
-          {#each conversations as item (item.id)}<button onclick={() => loadConversation(item)}
-              >{item.title}<small
-                >{item.scope.page.toLowerCase()} · {new Date(
-                  item.updated_at
-                ).toLocaleDateString()}</small
-              ></button
-            >{:else}<p class="subtext">No saved conversations yet.</p>{/each}
-        </section>{/if}
-      {#if showChanges}<section class="briefing">
-          <h3>Since your last seen marker</h3>
-          {#each briefing?.changes || [] as change (change.key)}<p>{change.text}</p>{/each}<button
-            class="text-button"
-            onclick={markSeen}>Mark these changes seen</button
-          >
-        </section>{/if}
-      {#if attention.length}<section class="attention">
-          <h3>Important now <span>{attention.length}</span></h3>
-          <button
-            class="text-button"
-            onclick={() => {
-              showAttention = !showAttention;
-            }}
-            aria-expanded={showAttention}
-            >{showAttention ? 'Collapse attention' : 'View all attention'}</button
-          >
-          {#each attention.slice(0, showAttention ? 100 : messages.length ? 0 : 2) as event (event.id)}<article
-              class:critical={event.severity === 'CRITICAL'}
-            >
-              <div class="event-heading">
-                <span>{event.severity}</span><small>{event.status.toLowerCase()}</small>
-              </div>
-              <p>{event.title}</p>
-              <div class="event-actions">
-                {#if event.task_id}<a
-                    href={resolve('/tasks/[id]', { id: event.task_id })}
-                    onclick={closePanel}>View task ↗</a
-                  >{/if}{#if event.status === 'OPEN'}<button onclick={() => eventAction(event)}
-                    >Acknowledge</button
-                  ><button onclick={() => eventAction(event, 15)}>Snooze 15m</button><button
-                    onclick={() => eventAction(event, 60)}>1h</button
-                  >{/if}
-              </div>
-            </article>{/each}
-        </section>{/if}
-      {#if messages.length === 0}<section class="welcome">
-          <p class="eyebrow">FACTS FIRST. AI SECOND.</p>
-          <h3>Eyes on the system.<br />Hands off your work.</h3>
-          <p>{briefing?.message || 'Reading current product facts…'}</p>
-          {#if currentStatus?.reason}<p class="sleep-note">{currentStatus.reason}</p>{/if}
-          <div class="questions">
-            {#each briefing?.suggested_questions || ['What needs attention?', 'What can you do?'] as question (question)}<button
-                onclick={() => send(question)}
-                disabled={busy}>{question}<span>↗</span></button
-              >{/each}
-          </div>
-        </section>{/if}
-      <div
-        role="log"
-        aria-live="polite"
-        aria-relevant="additions text"
-        aria-label="{assistantName} conversation"
-      >
-        {#each messages as message (message.id)}<article
-            class="message"
-            class:user={message.role === 'user'}
-          >
-            <div class="message-label">{message.role === 'user' ? 'YOU' : assistantName}</div>
-            <p>{message.content || (busy ? `${activity}…` : 'This reply was interrupted.')}</p>
-            {#if message.sources.length}<div class="sources">
-                {#each uniqueSources(message.sources) as source (source.source + source.complete)}<span
-                    class:incomplete={!source.complete}
-                    title={source.measured_at
-                      ? `Measured ${new Date(source.measured_at).toLocaleString()}`
-                      : 'Source time unavailable'}
-                    >{source.source.replaceAll('_', ' ')} · {source.complete
-                      ? source.measured_at
-                        ? new Date(source.measured_at).toLocaleTimeString([], {
-                            hour: '2-digit',
-                            minute: '2-digit'
-                          })
-                        : 'contract'
-                      : 'partial'}</span
-                  >{/each}
-              </div>{/if}
-          </article>{/each}
-      </div>
-      {#if error}<p class="error" role="alert">{error}</p>{/if}
-    </div>
-    <form
-      class="composer"
-      onsubmit={(event) => {
-        event.preventDefault();
-        void send();
-      }}
-    >
-      <label for="observer-question" class="sr-only">Ask {assistantName}</label><textarea
-        id="observer-question"
-        bind:this={textarea}
-        bind:value={input}
-        rows="2"
-        maxlength="2000"
-        placeholder={scope.page === 'TASK' ? 'Ask about this task…' : 'Ask about your system…'}
-        disabled={busy}
-        onkeydown={(event) => {
-          if (event.key === 'Enter' && !event.shiftKey) {
-            event.preventDefault();
-            void send();
-          }
-        }}
-      ></textarea>
-      <div class="composer-footer">
-        <span>{busy ? activity : activity || 'No source access. No write authority.'}</span><button
-          class="accent-action"
-          type="submit"
-          disabled={busy || !input.trim()}
-          aria-label="Send {assistantName} question">{busy ? 'Reading…' : 'Send ↑'}</button
-        >
-      </div>
-    </form>
-    <footer class="panel-footer">
-      <span>Engineering always has priority.</span><a
-        href={resolve('/settings')}
-        onclick={closePanel}>{assistantName} settings</a
-      >
-    </footer>
+    <ObserverPanelContent
+      {conversation}
+      {assistantName}
+      {briefing}
+      {currentStatus}
+      {scope}
+      {attention}
+      bind:focus
+      bind:log
+      bind:textarea
+      onclose={closePanel}
+      onrefresh={() => refresh()}
+    />
   {/if}
 </dialog>
 
@@ -927,263 +671,13 @@
   .status-dot.critical {
     background: #fb7185;
   }
-  .panel-actions {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 13px 22px;
-    font-size: 10px;
-    color: var(--color-muted);
-  }
-  .panel-actions button:hover,
-  .text-button:hover {
-    color: var(--color-brand);
-  }
-  .focus-select {
-    margin-left: auto;
-  }
-  .focus-select select {
-    background: var(--color-panel);
-    color: var(--color-muted);
-    max-width: 105px;
-    font-size: 10px;
-    border: 0;
-  }
-  .conversation {
-    overflow-y: auto;
-    flex: 1;
-    padding: 0 22px 18px;
-    min-height: 0;
-    overscroll-behavior: contain;
-  }
-  .welcome {
-    padding: 24px 0;
-  }
-  .welcome h3 {
-    font-size: 23px;
-    font-weight: 450;
-    letter-spacing: -0.04em;
-    line-height: 1.35;
-    margin: 12px 0 18px;
-  }
-  .welcome > p:not(.eyebrow) {
-    font-size: 12px;
-    line-height: 1.75;
-    color: var(--color-muted);
-  }
-  .welcome .sleep-note {
-    border-left: 2px solid var(--color-line);
-    padding-left: 10px;
-    margin-top: 14px;
-    font-size: 10px !important;
-  }
-  .questions {
-    display: grid;
-    gap: 7px;
-    margin-top: 24px;
-  }
-  .questions button {
-    text-align: left;
-    border: 1px solid var(--color-line);
-    border-radius: 10px;
-    padding: 11px 13px;
-    font-size: 11px;
-    display: flex;
-    justify-content: space-between;
-    gap: 8px;
-    background: var(--color-panel-alt);
-  }
-  .questions button:hover {
-    border-color: var(--color-brand);
-  }
-  .questions span {
-    color: var(--color-brand);
-  }
-  .attention h3,
-  .briefing h3,
-  .history-list h3 {
-    font: 10px monospace;
-    color: var(--color-muted);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    margin: 14px 0 10px;
-  }
-  .attention h3 span {
-    color: var(--color-brand);
-  }
-  .attention article {
-    border: 1px solid #fbbf2433;
-    border-radius: 10px;
-    padding: 10px 12px;
-    margin-bottom: 7px;
-    background: #fbbf2405;
-  }
-  .attention article.critical {
-    border-color: #fb718555;
-    background: #fb718507;
-  }
-  .event-heading {
-    display: flex;
-    justify-content: space-between;
-    font: 8px monospace;
-    color: #d99a12;
-  }
-  .event-heading small {
-    color: var(--color-muted);
-  }
-  .attention p {
-    font-size: 11px;
-    margin-top: 7px;
-  }
-  .event-actions {
-    display: flex;
-    gap: 12px;
-    flex-wrap: wrap;
-    margin-top: 9px;
-    font-size: 10px;
-    color: var(--color-muted);
-  }
-  .event-actions button:hover,
-  .event-actions a:hover {
-    color: var(--color-brand);
-  }
-  .message {
-    padding: 18px 0;
-    border-bottom: 1px solid var(--color-line);
-  }
-  .message.user {
-    margin: 10px 0;
-    padding: 12px 14px;
-    border: 1px solid var(--color-line);
-    border-radius: 12px;
-    background: var(--color-panel-alt);
-  }
-  .message-label {
-    font: 8px monospace;
-    letter-spacing: 0.12em;
-    color: var(--color-brand);
-    margin-bottom: 8px;
-  }
-  .message.user .message-label {
-    color: var(--color-muted);
-  }
-  .message p {
-    white-space: pre-wrap;
-    overflow-wrap: anywhere;
-    font-size: 12px;
-    line-height: 1.75;
-  }
-  .sources {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 5px;
-    margin-top: 12px;
-  }
-  .sources span {
-    font: 8px monospace;
-    color: var(--color-muted);
-    background: var(--color-panel-alt);
-    border: 1px solid var(--color-line);
-    border-radius: 5px;
-    padding: 4px 6px;
-  }
-  .sources .incomplete {
-    color: #d99a12;
-  }
-  .composer {
-    border: 1px solid var(--color-line);
-    border-radius: 13px;
-    padding: 12px;
-    margin: 0 16px;
-    background: var(--color-panel-alt);
-  }
-  .composer:focus-within {
-    border-color: color-mix(in srgb, var(--color-brand) 55%, var(--color-line));
-  }
-  .composer textarea {
-    resize: none;
-    width: 100%;
-    font-size: 12px;
-    background: transparent;
-    color: var(--color-heading);
-    border: none;
-    outline: none;
-  }
-  .composer textarea::placeholder {
-    color: var(--color-muted);
-  }
-  .composer-footer {
-    display: flex;
-    gap: 8px;
-    align-items: center;
-    justify-content: space-between;
-    margin-top: 4px;
-  }
-  .composer-footer span {
-    font: 8px monospace;
-    color: var(--color-muted);
-  }
-  .composer-footer button {
-    font-size: 10px;
-    padding: 6px 10px;
-    background: var(--color-brand);
-    color: var(--color-on-brand);
-    border-radius: 7px;
-  }
-  .composer-footer button:disabled {
-    opacity: 0.4;
-  }
-  .panel-footer {
-    display: flex;
-    gap: 8px;
-    justify-content: space-between;
-    padding: 12px 22px;
-    font-size: 9px;
-    color: var(--color-muted);
-  }
-  .panel-footer a {
-    text-decoration: underline;
-    text-underline-offset: 3px;
-  }
-  .history-list button {
-    display: block;
-    width: 100%;
-    text-align: left;
-    padding: 10px;
-    font-size: 11px;
-    border: 1px solid var(--color-line);
-    border-radius: 8px;
-    margin-bottom: 6px;
-  }
-  .history-list small {
-    display: block;
-    color: var(--color-muted);
-    font-size: 9px;
-    margin-top: 4px;
-  }
-  .briefing p {
-    font-size: 10px;
-    line-height: 1.7;
-    padding: 6px 0;
-  }
-  .text-button {
-    font-size: 10px;
-    color: var(--color-brand);
-  }
-  .error {
-    color: #fb7185;
-    font-size: 11px;
-    padding: 14px 0;
-  }
   button {
     cursor: pointer;
   }
   button:disabled {
     cursor: default;
   }
-  button:focus-visible,
-  a:focus-visible,
-  select:focus-visible {
+  button:focus-visible {
     outline: 2px solid var(--color-brand);
     outline-offset: 3px;
   }
@@ -1267,15 +761,6 @@
     box-shadow: 0 0 8px currentColor;
     color: var(--color-brand);
   }
-  .observer-dialog[data-display='jarvis'] .composer,
-  .observer-dialog[data-display='jarvis'] .questions button {
-    border-radius: 5px;
-    border-color: color-mix(in srgb, var(--color-brand) 25%, var(--color-line));
-    background: color-mix(in srgb, var(--color-brand) 4%, var(--color-panel-alt));
-  }
-  .observer-dialog[data-display='jarvis'] .sources span {
-    border-radius: 3px;
-  }
   .compact .panel-header {
     min-height: 62px;
   }
@@ -1283,17 +768,12 @@
     width: 54px !important;
     height: 54px !important;
   }
-  .compact .eyebrow,
-  .compact .panel-footer {
+  .compact .eyebrow {
     display: none;
   }
-  .compact .status-strip,
-  .compact .panel-actions {
+  .compact .status-strip {
     padding-top: 6px;
     padding-bottom: 6px;
-  }
-  .compact .composer {
-    margin-bottom: 10px;
   }
   @media (prefers-reduced-motion: reduce) {
     .observer-launch {
@@ -1320,12 +800,6 @@
     }
     .eyebrow {
       font-size: 8px;
-    }
-    .panel-actions {
-      gap: 10px;
-    }
-    .panel-footer {
-      padding-bottom: max(12px, env(safe-area-inset-bottom));
     }
   }
 </style>

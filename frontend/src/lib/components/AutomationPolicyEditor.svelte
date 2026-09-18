@@ -150,8 +150,7 @@
             bind:value={repositories}
             rows="3"
             spellcheck="false"
-            placeholder="00000000-0000-0000-0000-000000000000"
-          ></textarea></label
+            placeholder="00000000-0000-0000-0000-000000000000"></textarea></label
         >
       </fieldset>
 
@@ -202,8 +201,7 @@
             bind:value={checks}
             rows="4"
             spellcheck="false"
-            placeholder={checkPlaceholder}
-          ></textarea></label
+            placeholder={checkPlaceholder}></textarea></label
         >
       </fieldset>
 

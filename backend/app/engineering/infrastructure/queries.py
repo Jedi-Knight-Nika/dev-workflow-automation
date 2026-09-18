@@ -3,7 +3,7 @@ import uuid
 from collections.abc import Sequence
 from typing import Any
 
-from sqlalchemy import Select, String, exists, func, or_, select
+from sqlalchemy import Select, String, and_, exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import load_only
 
@@ -13,6 +13,7 @@ from app.engineering.application.ports.task_queries import (
     TaskRepositoryScopeView,
     TaskView,
 )
+from app.engineering.application.task_pagination import read_cursor
 from app.engineering.infrastructure.dependencies import dependency_views
 from app.engineering.infrastructure.repositories import task_to_domain
 from app.engineering.infrastructure.task_models import Task, TaskRepositoryScope
@@ -124,6 +125,27 @@ class SqlAlchemyTaskQueries:
             "due": Task.due_at,
         }
         sort_column = sort_columns[filters.sort]
+        cursor = read_cursor(filters)
+        if cursor is not None:
+            after_tie = or_(
+                Task.created_at < cursor.created_at,
+                and_(Task.created_at == cursor.created_at, Task.id < cursor.task_id),
+            )
+            if cursor.value is None:
+                statement = statement.where(sort_column.is_(None), after_tie)
+            else:
+                after_value = (
+                    sort_column < cursor.value
+                    if filters.direction == "desc"
+                    else sort_column > cursor.value
+                )
+                statement = statement.where(
+                    or_(
+                        after_value,
+                        sort_column.is_(None),
+                        and_(sort_column == cursor.value, after_tie),
+                    )
+                )
         ordering = (
             sort_column.desc().nullslast()
             if filters.direction == "desc"
@@ -132,7 +154,9 @@ class SqlAlchemyTaskQueries:
         records = list(
             (
                 await self._session.scalars(
-                    statement.order_by(ordering, Task.created_at.desc()).limit(limit)
+                    statement.order_by(ordering, Task.created_at.desc(), Task.id.desc()).limit(
+                        limit
+                    )
                 )
             ).all()
         )
@@ -185,17 +209,17 @@ class SqlAlchemyTaskQueries:
         for scope, repository in scope_rows:
             scopes_by_task.setdefault(scope.task_id, []).append(
                 TaskRepositoryScopeView(
-                    scope.repository_id,
-                    f"{repository.owner}/{repository.name}",
-                    scope.selected_by,
-                    scope.reason,
-                    float(scope.confidence) if scope.confidence is not None else None,
-                    scope.is_primary,
-                    scope.changed,
-                    scope.branch_name,
-                    scope.current_revision,
-                    scope.pull_request_number,
-                    scope.pull_request_url,
+                    repository_id=scope.repository_id,
+                    repository_name=f"{repository.owner}/{repository.name}",
+                    selected_by=scope.selected_by,
+                    reason=scope.reason,
+                    confidence=float(scope.confidence) if scope.confidence is not None else None,
+                    is_primary=scope.is_primary,
+                    changed=scope.changed,
+                    branch_name=scope.branch_name,
+                    current_revision=scope.current_revision,
+                    pull_request_number=scope.pull_request_number,
+                    pull_request_url=scope.pull_request_url,
                 )
             )
         team_ids = {record.team_id for record in records if record.team_id}
@@ -215,23 +239,23 @@ class SqlAlchemyTaskQueries:
         )
         return [
             TaskView(
-                task_to_domain(record),
-                self._external(latest.get(record.id)),
-                (
+                task=task_to_domain(record),
+                source=self._external(latest.get(record.id)),
+                repository_name=(
                     f"{repositories[record.repository_id].owner}/{repositories[record.repository_id].name}"
                     if record.repository_id in repositories
                     else None
                 ),
-                record.due_at,
-                record.started_at,
-                record.completed_at,
-                record.team_id,
-                teams[record.team_id].name if record.team_id in teams else None,
-                record.project_name,
-                tuple(record.labels or []),
-                float(record.estimate) if record.estimate is not None else None,
-                tuple(scopes_by_task.get(record.id, [])),
-                tuple(dependencies.get(record.id, [])),
+                due_at=record.due_at,
+                started_at=record.started_at,
+                completed_at=record.completed_at,
+                team_id=record.team_id,
+                team_name=teams[record.team_id].name if record.team_id in teams else None,
+                project_name=record.project_name,
+                labels=tuple(record.labels or []),
+                estimate=float(record.estimate) if record.estimate is not None else None,
+                repository_scopes=tuple(scopes_by_task.get(record.id, [])),
+                dependencies=tuple(dependencies.get(record.id, [])),
             )
             for record in records
         ]
@@ -250,23 +274,23 @@ class SqlAlchemyTaskQueries:
         labels = labels_value.get("nodes", []) if isinstance(labels_value, dict) else labels_value
         estimate = raw.get("estimate")
         return ExternalTaskView(
-            snapshot.provider,
-            snapshot.external_id,
-            snapshot.identifier,
-            str(raw["url"]) if raw.get("url") else None,
-            snapshot.state_id,
-            str(state["name"]) if state.get("name") else None,
-            snapshot.assignee_id,
-            str(assignee["name"]) if assignee.get("name") else None,
-            str(assignee["email"]) if assignee.get("email") else None,
-            str(creator["name"]) if creator.get("name") else None,
-            str(team["name"]) if team.get("name") else None,
-            str(team["key"]) if team.get("key") else None,
-            str(project["name"]) if project.get("name") else None,
-            tuple(str(label.get("name")) for label in labels if label.get("name")),
-            float(estimate) if isinstance(estimate, (int, float)) else None,
-            str(raw["dueDate"]) if raw.get("dueDate") else None,
-            str(raw["createdAt"]) if raw.get("createdAt") else None,
-            str(raw["updatedAt"]) if raw.get("updatedAt") else None,
-            raw,
+            provider=snapshot.provider,
+            external_id=snapshot.external_id,
+            identifier=snapshot.identifier,
+            url=str(raw["url"]) if raw.get("url") else None,
+            state_id=snapshot.state_id,
+            state_name=str(state["name"]) if state.get("name") else None,
+            assignee_id=snapshot.assignee_id,
+            assignee_name=str(assignee["name"]) if assignee.get("name") else None,
+            assignee_email=str(assignee["email"]) if assignee.get("email") else None,
+            creator_name=str(creator["name"]) if creator.get("name") else None,
+            team_name=str(team["name"]) if team.get("name") else None,
+            team_key=str(team["key"]) if team.get("key") else None,
+            project_name=str(project["name"]) if project.get("name") else None,
+            labels=tuple(str(label.get("name")) for label in labels if label.get("name")),
+            estimate=float(estimate) if isinstance(estimate, (int, float)) else None,
+            due_date=str(raw["dueDate"]) if raw.get("dueDate") else None,
+            provider_created_at=str(raw["createdAt"]) if raw.get("createdAt") else None,
+            provider_updated_at=str(raw["updatedAt"]) if raw.get("updatedAt") else None,
+            raw_payload=raw,
         )

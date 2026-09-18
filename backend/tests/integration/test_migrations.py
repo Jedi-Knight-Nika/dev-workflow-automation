@@ -64,6 +64,7 @@ def exercise_fresh_setup(connection: Connection) -> None:
         supporting_revision("0011_team_capacity_history").upgrade()
         supporting_revision("0012_task_dependencies").upgrade()
         supporting_revision("0013_deployment_observations").upgrade()
+        supporting_revision("0014_task_creation_requests").upgrade()
         assert (
             connection.execute(text("SELECT * FROM team_agent_profiles ORDER BY id")).all()
             == baseline_profiles

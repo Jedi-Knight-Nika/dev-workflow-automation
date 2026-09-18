@@ -1,12 +1,14 @@
 import uuid
 from typing import Any
 
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.engineering.application.create_task import CreationConflict
 from app.engineering.domain.lifecycle import Stage, TaskStatus, WaitReason
 from app.engineering.domain.task import Task
 from app.engineering.infrastructure.task_models import Task as TaskRecord
-from app.engineering.infrastructure.task_models import TaskEvent
+from app.engineering.infrastructure.task_models import TaskCreationRequest, TaskEvent
 
 
 def task_to_domain(record: TaskRecord) -> Task:
@@ -34,12 +36,35 @@ def task_to_domain(record: TaskRecord) -> Task:
         labels=tuple(record.labels or []),
         estimate=float(record.estimate) if record.estimate is not None else None,
         due_at=record.due_at,
+        team_id=record.team_id,
     )
 
 
 class SqlAlchemyTaskRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
+
+    async def find_creation(self, request_id: uuid.UUID, fingerprint: str) -> Task | None:
+        await self._session.execute(
+            text("SELECT pg_advisory_xact_lock(741963206, hashtext(:request_id))"),
+            {"request_id": str(request_id)},
+        )
+        request = await self._session.get(TaskCreationRequest, request_id)
+        if request is None:
+            return None
+        if request.fingerprint != fingerprint:
+            raise CreationConflict("Creation request was already used with different task details")
+        record = await self._session.get(TaskRecord, request.task_id)
+        if record is None:
+            raise CreationConflict("Creation request no longer has an available task")
+        return task_to_domain(record)
+
+    async def remember_creation(
+        self, request_id: uuid.UUID, fingerprint: str, task_id: uuid.UUID
+    ) -> None:
+        self._session.add(
+            TaskCreationRequest(id=request_id, fingerprint=fingerprint, task_id=task_id)
+        )
 
     async def add(self, task: Task) -> None:
         record = TaskRecord(
@@ -67,29 +92,6 @@ class SqlAlchemyTaskRepository:
         )
         self._session.add(record)
         await self._session.flush()
-
-
-class SqlAlchemyJobRepository:
-    def __init__(self, session: AsyncSession) -> None:
-        self._session = session
-
-    async def enqueue_intake(self, task: Task, payload: dict[str, Any]) -> uuid.UUID:
-        from app.engineering.infrastructure.job_queue import request_execution
-        from app.teams.infrastructure.routing import assign_routed_team
-
-        record = await self._session.get(TaskRecord, task.id)
-        if record is None:
-            raise LookupError("Task not found")
-        await assign_routed_team(self._session, record, reason="manual-creation")
-        await request_execution(self._session, record, actor="user:manual-creation")
-        task.status = TaskStatus(record.status)
-        task.stage = Stage(record.stage)
-        task.wait_reason = WaitReason(record.wait_reason)
-        task.lifecycle_version = record.lifecycle_version
-        task.requirement_version = record.requirement_version
-        task.workspace_path = record.workspace_path
-        task.branch_name = record.branch_name
-        return task.id
 
 
 class SqlAlchemyEventRepository:

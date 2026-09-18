@@ -53,8 +53,7 @@
       ><span>{t('teamsPage.descriptionLabel')}</span><textarea
         bind:value={description}
         rows="4"
-        placeholder={t('teamsPage.descriptionPlaceholder')}
-      ></textarea></label
+        placeholder={t('teamsPage.descriptionPlaceholder')}></textarea></label
     >
     <label
       ><span>{t('teamsPage.parallelTasksLabel')}</span><input

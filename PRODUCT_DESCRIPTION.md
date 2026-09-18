@@ -187,7 +187,7 @@ Formal checks and approvals are deterministic. Natural-language review uses the 
 
 ## Teams and policy
 
-Each Team has fixed `INTERPRETER`, `DEVELOPER`, `THINKER`, and `REVIEWER` profile records. Thinker and Reviewer are reserved profiles; optional paid dispatch is not connected. The Supervisor has separate deployment configuration and metered receipts. Operators configure available profile identity, provider, model, harness, effort, repository scope, concurrency and budgets. They cannot create role kinds or change lifecycle topology.
+Each Team has fixed `INTERPRETER`, `DEVELOPER`, `THINKER`, and `REVIEWER` profile records. Thinker and Reviewer are optional paid consultations, disabled by default; dispatch requires an enabled native harness, credentials, pricing where required, and an explicit budget. Thinker handles a requested plan; Reviewer can request repairs after validation but cannot authorize merge. The Supervisor has separate deployment configuration and metered receipts. Operators configure available profile identity, provider, model, harness, effort, repository scope, concurrency and budgets. They cannot create role kinds or change lifecycle topology.
 
 Automation policy is versioned and audited. It controls enrollment, repositories, task and Team spending, reviewer actors, checks, approval semantics, and automatic merge. Stopping a Team revokes active leases and pauses work without erasing usage. Enabling it again does not silently resume paused tasks.
 

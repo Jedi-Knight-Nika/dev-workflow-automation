@@ -5,8 +5,9 @@
   import PageHeader from '$lib/components/PageHeader.svelte';
   import ErrorBanner from '$lib/components/ErrorBanner.svelte';
   import { createLiveRefresh } from '$lib/live-refresh';
-  import { listTasks, createTask, type TaskFilters } from '$lib/services/tasks';
-  import { listTeams, assignTaskToTeam } from '$lib/services/teams';
+  import { listTaskPage, createTask, type TaskFilters } from '$lib/services/tasks';
+  import { listTeams } from '$lib/services/teams';
+  import { createTaskRequest } from '$lib/task-creation';
   import { listRepositories } from '$lib/services/repositories';
   import { tasksByColumn, priorityLabel, parseEstimate, formatEstimate } from '$lib/task-board';
   import type { Task, Team, Repository } from '$lib/types';
@@ -34,12 +35,22 @@
   });
   const columns = $derived(tasksByColumn(tasks));
   let sequence = 0;
+  let cursors = $state<(string | undefined)[]>([undefined]);
+  let nextCursor = $state<string | null>(null);
+  let filterKey = '';
   async function refresh() {
     const request = ++sequence;
+    const key = JSON.stringify(filters);
+    if (key !== filterKey) {
+      filterKey = key;
+      cursors = [undefined];
+      nextCursor = null;
+    }
     try {
-      const result = await listTasks(filters);
+      const result = await listTaskPage(filters, cursors.at(-1));
       if (request === sequence) {
-        tasks = result;
+        tasks = result.items;
+        nextCursor = result.nextCursor;
         error = '';
       }
     } catch (cause) {
@@ -48,28 +59,39 @@
       if (request === sequence) loading = false;
     }
   }
+  function changePage(forward: boolean) {
+    if (loading) return;
+    if (forward && nextCursor) cursors = [...cursors, nextCursor];
+    else if (!forward && cursors.length > 1) cursors = cursors.slice(0, -1);
+    else return;
+    loading = true;
+    void refresh();
+  }
   const live = createLiveRefresh(refresh);
+  const creationRequest = createTaskRequest();
   async function save() {
     if (saving) return;
     saving = true;
     error = '';
     try {
-      // Assign before starting so the selected Team owns the native session.
-      const task = await createTask({
-        title: draft.title.trim(),
-        description: draft.description,
-        priority: draft.priority,
-        repository_id: draft.repository_id || null,
-        start_work: draft.start_work && !draft.team_id,
-        estimate: parseEstimate(String(draft.estimate ?? '')),
-        project_name: draft.project_name || null,
-        labels: draft.labels
-          .split(',')
-          .map((label) => label.trim())
-          .filter(Boolean),
-        due_at: draft.due_at ? new Date(draft.due_at).toISOString() : null
-      });
-      if (draft.team_id) await assignTaskToTeam(draft.team_id, task.id, draft.start_work);
+      await createTask(
+        creationRequest.prepare({
+          title: draft.title.trim(),
+          description: draft.description,
+          priority: draft.priority,
+          repository_id: draft.repository_id || null,
+          start_work: draft.start_work,
+          team_id: draft.team_id || null,
+          estimate: parseEstimate(String(draft.estimate ?? '')),
+          project_name: draft.project_name || null,
+          labels: draft.labels
+            .split(',')
+            .map((label) => label.trim())
+            .filter(Boolean),
+          due_at: draft.due_at ? new Date(draft.due_at).toISOString() : null
+        })
+      );
+      creationRequest.complete();
       creating = false;
       draft = {
         title: '',
@@ -269,8 +291,17 @@
     </div>
   {/if}
   <p class="text-muted text-xs">
-    Showing up to 500 matching tickets. Live updates do not call an AI model.
+    Showing up to 500 matching tickets per page. Live updates do not call an AI model.
   </p>
+  {#if cursors.length > 1 || nextCursor}
+    <nav class="flex items-center justify-center gap-4" aria-label="Task pages">
+      <button disabled={loading || cursors.length === 1} onclick={() => changePage(false)}
+        >Previous</button
+      >
+      <span class="text-muted text-sm">Page {cursors.length}</span>
+      <button disabled={loading || !nextCursor} onclick={() => changePage(true)}>Next</button>
+    </nav>
+  {/if}
 </main>
 {#snippet card(task: Task)}
   <a

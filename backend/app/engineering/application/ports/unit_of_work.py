@@ -7,9 +7,19 @@ from app.engineering.domain.task import Task
 class TaskRepository(Protocol):
     async def add(self, task: Task) -> None: ...
 
+    async def find_creation(self, request_id: uuid.UUID, fingerprint: str) -> Task | None: ...
 
-class JobRepository(Protocol):
-    async def enqueue_intake(self, task: Task, payload: dict[str, Any]) -> uuid.UUID: ...
+    async def remember_creation(
+        self, request_id: uuid.UUID, fingerprint: str, task_id: uuid.UUID
+    ) -> None: ...
+
+
+class TaskAssignment(Protocol):
+    async def assign(self, task_id: uuid.UUID, team_id: uuid.UUID) -> None: ...
+
+
+class TaskExecution(Protocol):
+    async def start(self, task: Task) -> None: ...
 
 
 class EventRepository(Protocol):
@@ -25,8 +35,9 @@ class EventRepository(Protocol):
 
 class UnitOfWork(Protocol):
     tasks: TaskRepository
-    jobs: JobRepository
+    execution: TaskExecution
     events: EventRepository
+    assignments: TaskAssignment
 
     async def commit(self) -> None: ...
 

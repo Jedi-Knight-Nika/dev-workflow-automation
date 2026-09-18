@@ -9,28 +9,42 @@ from app.analytics.application.ports import AnalyticsQueries
 class CachedAnalyticsQueries:
     """Single-flight bounded cache so a dashboard's cards share one DB cohort."""
 
-    def __init__(self, inner: AnalyticsQueries) -> None:
+    def __init__(self, inner: AnalyticsQueries, *, max_concurrent_fills: int = 2) -> None:
+        if max_concurrent_fills < 1:
+            raise ValueError("Cache fill concurrency must be positive")
         self.inner = inner
         self.cache: dict[tuple[Any, ...], tuple[float, Any]] = {}
-        self.lock = asyncio.Lock()
+        self.fills: dict[tuple[Any, ...], asyncio.Task[Any]] = {}
+        self.capacity = asyncio.Semaphore(max_concurrent_fills)
 
     async def _read(self, method: str, *args: Any) -> Any:
         key = (method, *args)
-        # No await between lookup and return: fresh entries need not wait for a
-        # different key's database query. Misses still share the bounded fill lock.
         cached = self.cache.get(key)
         if cached and monotonic() - cached[0] < 20:
             return cached[1]
-        async with asyncio.timeout(12), self.lock:
-            # Another reader may have filled this key while we waited.
-            cached = self.cache.get(key)
-            if cached and monotonic() - cached[0] < 20:
-                return cached[1]
-            result = await getattr(self.inner, method)(*args)
-            if key not in self.cache and len(self.cache) >= 128:
-                self.cache.pop(next(iter(self.cache)))
-            self.cache[key] = monotonic(), result
-            return result
+        pending = self.fills.get(key)
+        if pending is None:
+            if len(self.fills) >= 128:
+                raise TimeoutError("Analytics cache fill capacity reached")
+            pending = asyncio.create_task(self._fill(key, method, args))
+            self.fills[key] = pending
+            pending.add_done_callback(self._finished)
+        return await asyncio.shield(pending)
+
+    def _finished(self, pending: asyncio.Task[Any]) -> None:
+        if not pending.cancelled():
+            pending.exception()
+
+    async def _fill(self, key: tuple[Any, ...], method: str, args: tuple[Any, ...]) -> Any:
+        try:
+            async with asyncio.timeout(12), self.capacity:
+                result = await getattr(self.inner, method)(*args)
+                if key not in self.cache and len(self.cache) >= 128:
+                    self.cache.pop(next(iter(self.cache)))
+                self.cache[key] = monotonic(), result
+                return result
+        finally:
+            self.fills.pop(key, None)
 
     async def dashboard(self, days: int, team_id: UUID | None = None) -> dict[str, Any]:
         return dict(await self._read("dashboard", days, team_id))

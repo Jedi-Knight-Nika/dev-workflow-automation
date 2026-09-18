@@ -6,18 +6,30 @@ set -eu
   exit 1
 }
 case "${BACKUP_SET:-}" in
-  ''|*[!0-9A-Za-z-]*) echo "BACKUP_SET must be one backup directory basename" >&2; exit 1 ;;
+  '' | *[!0-9A-Za-z-]*)
+    echo "BACKUP_SET must be one backup directory basename" >&2
+    exit 1
+    ;;
 esac
-[ -n "${RESTORE_DATABASE:-}" ] || { echo "Set RESTORE_DATABASE to a new database name" >&2; exit 1; }
+[ -n "${RESTORE_DATABASE:-}" ] || {
+  echo "Set RESTORE_DATABASE to a new database name" >&2
+  exit 1
+}
 cd "/backups/$BACKUP_SET"
 sha256sum -c SHA256SUMS
 pg_restore --list database.dump >/dev/null
 tar -tzf runtime.tar.gz >/dev/null
 for directory in workspaces native control; do
   target="/engineering-data/$directory"
-  [ ! -L "$target" ] || { echo "Refusing symlink $target" >&2; exit 1; }
+  [ ! -L "$target" ] || {
+    echo "Refusing symlink $target" >&2
+    exit 1
+  }
   mkdir -p "$target"
-  [ -z "$(ls -A "$target")" ] || { echo "Refusing nonempty $target" >&2; exit 1; }
+  [ -z "$(ls -A "$target")" ] || {
+    echo "Refusing nonempty $target" >&2
+    exit 1
+  }
 done
 # Archives must originate from our backup tool; never restore an untrusted archive.
 # createdb deliberately fails when the destination already exists. No drop/truncate.
