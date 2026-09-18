@@ -64,6 +64,57 @@ def test_map_only_investigation_skips_unused_source_reads(tmp_path, monkeypatch)
     assert mapped == {**complete, "source_slices": []}
 
 
+def test_survey_reuses_one_checkout_snapshot(tmp_path, monkeypatch):
+    from unittest.mock import Mock
+
+    from app.agent_runtime.infrastructure import repo_index
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    (tmp_path / "Panel.ts").write_text("export function resizeWindow() { return 1; }")
+    snapshot = Mock(wraps=repo_index._index_snapshot)
+    monkeypatch.setattr(repo_index, "_index_snapshot", snapshot)
+    result = repo_index.survey(tmp_path, "resizeWindow")
+    assert result["candidate_paths"] == ["Panel.ts"]
+    assert result["repository_paths"] == ["Panel.ts"]
+    snapshot.assert_called_once()
+
+
+def test_warm_index_reads_only_changed_source_and_detects_restored_mtime(tmp_path, monkeypatch):
+    import os
+
+    from app.agent_runtime.infrastructure.repo_index import investigate
+
+    first = tmp_path / "first.py"
+    second = tmp_path / "second.py"
+    first.write_text("def original(): return 1\n")
+    second.write_text("def stable(): return 2\n")
+    cache = tmp_path / ".cache"
+    original = investigate(tmp_path, "original", cache, include_source_slices=False)
+    reads = []
+    read_bytes = Path.read_bytes
+
+    def track(path):
+        reads.append(path)
+        return read_bytes(path)
+
+    monkeypatch.setattr(Path, "read_bytes", track)
+    assert investigate(tmp_path, "original", cache, include_source_slices=False) == original
+    assert reads == []
+    stat = first.stat()
+    first.write_text("def modified(): return 1\n")
+    os.utime(first, ns=(stat.st_atime_ns, stat.st_mtime_ns))
+    changed = investigate(tmp_path, "modified", cache, include_source_slices=False)
+    assert reads == [first]
+    assert changed["index_key"] != original["index_key"]
+    assert changed["repo_map"][0]["symbols"][0]["name"] == "modified"
+    second.unlink()
+    added = tmp_path / "added.py"
+    added.write_text("def added(): return 3\n")
+    updated = investigate(tmp_path, "added", cache, include_source_slices=False)
+    assert updated["files_scanned"] == 2
+    assert updated["candidate_paths"][0] == "added.py"
+
+
 @pytest.mark.parametrize("cached", ["null", "[]", '"invalid"', "{broken json"])
 def test_repository_index_rebuilds_invalid_cache_roots(tmp_path, cached):
     from app.agent_runtime.infrastructure.repo_index import investigate

@@ -4,6 +4,7 @@ from dataclasses import asdict, dataclass, field
 from time import monotonic
 from typing import Any
 
+from app.agent_runtime.domain.progress import ProgressWindow
 from app.agent_runtime.domain.token_efficiency_policy import TokenEfficiencyPolicy
 
 
@@ -36,6 +37,8 @@ class DeveloperProgressGovernor:
     failed_checks: dict[str, int] = field(default_factory=dict)
     inference_cycles: int = 0
     cached_input: int = 0
+    previous_window: dict[str, int] = field(default_factory=dict)
+    check_regressions: int = 0
 
     def restore(self, snapshot: dict[str, Any]) -> None:
         self.total = int(snapshot.get("input_tokens_observed") or 0)
@@ -66,6 +69,8 @@ class DeveloperProgressGovernor:
             self.last_progress = self.total
             if outcome == "passed":
                 self.check_improvements += 1
+        if previous == "passed" and outcome != "passed":
+            self.check_regressions += 1
         self.checks[command] = outcome
 
     def progress(self, fingerprint: str) -> None:
@@ -94,6 +99,14 @@ class DeveloperProgressGovernor:
         active_context: int | None,
         cached_input: int | None = None,
     ) -> tuple[list[str], str | None]:
+        self.previous_window = {
+            "input": self.total,
+            "cached": self.cached_input,
+            "diffs": self.diff_changes,
+            "improvements": self.check_improvements,
+            "regressions": self.check_regressions,
+            "reads": self.repeated_read_count,
+        }
         # Cumulative usage never resets when a native context compacts.
         self.total = max(self.total, total)
         self.inference_cycles += 1
@@ -151,7 +164,25 @@ class DeveloperProgressGovernor:
         return ([] if self.policy.mode == "INSTRUMENT" else fresh), self.stop_reason
 
     def snapshot(self) -> dict[str, Any]:
+        previous = self.previous_window
+        window = ProgressWindow(
+            input_tokens=max(0, self.total - previous.get("input", 0)),
+            uncached_input_tokens=max(
+                0,
+                self.total
+                - self.cached_input
+                - previous.get("input", 0)
+                + previous.get("cached", 0),
+            ),
+            diff_changed=self.diff_changes > previous.get("diffs", 0),
+            checks_improved=self.check_improvements > previous.get("improvements", 0),
+            checks_regressed=self.check_regressions > previous.get("regressions", 0),
+            repeated_commands=max(self.repeats.values(), default=0),
+            repeated_failures=max(self.failed_checks.values(), default=0),
+            repeated_reads=max(0, self.repeated_read_count - previous.get("reads", 0)),
+        )
         return {
+            "progress_window": window.view(),
             "policy": asdict(self.policy),
             "input_tokens_observed": self.total,
             "cached_input_tokens_observed": self.cached_input,

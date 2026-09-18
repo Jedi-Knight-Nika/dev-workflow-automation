@@ -157,7 +157,8 @@ async def test_one_patch_and_at_most_one_repair(
                     "name": "typecheck",
                     "exit_code": 1 if checks <= failures else 0,
                     "stdout_tail": "named type error",
-                }
+                },
+                {"name": "format", "exit_code": 0, "stdout_tail": "successful format output"},
             ],
         }
 
@@ -170,6 +171,12 @@ async def test_one_patch_and_at_most_one_repair(
         assert "tools" not in payload
         assert payload["reasoning"]["effort"] == "low"
         assert len(payload["input"]) == 1
+        packet = json.loads(payload["input"][0]["content"])
+        if len(requests) > 1:
+            assert [check["name"] for check in packet["previous_failure"]["checks"]] == [
+                "typecheck"
+            ]
+            assert "successful format output" not in json.dumps(packet)
         return httpx.Response(
             200,
             json={
@@ -204,8 +211,11 @@ async def test_one_patch_and_at_most_one_repair(
     monkeypatch.setattr(patch_pipeline.httpx, "AsyncClient", lambda **kwargs: client)
     receipt = await harness.run_turn("Move the window, not its contents")
     assert len(requests) == expected_calls
+    assert receipt.raw_usage["request_count"] == expected_calls
+    assert receipt.raw_usage["request_count_complete"] is True
     assert receipt.status == expected_status
     assert receipt.usage.input_tokens == expected_calls * 1000
+    assert any(check["name"] == "format" for check in harness.checks["checks"])
     settings.supervision_callback.assert_not_called()
     again = await harness.run_turn("retry")
     assert again.failure_code == "PATCH_ALREADY_ATTEMPTED"

@@ -41,6 +41,20 @@ class Team(Base):
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class TeamCapacityChange(Base):
+    """Append-only policy audit; historical limits are never inferred from today's Team."""
+
+    __tablename__ = "team_capacity_changes"
+    __table_args__ = (
+        Index("ix_team_capacity_time", "team_id", "created_at", "id"),
+        CheckConstraint("capacity BETWEEN 1 AND 32", name="ck_team_capacity_value"),
+    )
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    team_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("teams.id", ondelete="CASCADE"))
+    capacity: Mapped[int] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class TaskAssignment(Base):
     __tablename__ = "task_assignments"
     __table_args__ = (

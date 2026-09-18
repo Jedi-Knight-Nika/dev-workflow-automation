@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.agent_runtime.infrastructure.models import AIRun, DeveloperSession
 from app.engineering.application.jobs import PhaseLease
+from app.engineering.domain.causality import TransitionCause
 from app.engineering.domain.lifecycle import Action, Stage, TaskStatus, WaitReason
 from app.engineering.infrastructure.job_queue import claim_next_job
 from app.engineering.infrastructure.lifecycle import record_transition, state_of
@@ -25,7 +26,9 @@ PHASE_ACTIONS = {
 }
 
 
-async def enqueue_phase(session: AsyncSession, task: Task) -> Job | None:
+async def enqueue_phase(
+    session: AsyncSession, task: Task, *, cause: TransitionCause | None = None
+) -> Job | None:
     """Caller holds the Task lock; insertion and phase change share a transaction."""
     state = state_of(task)
     if state.status not in {TaskStatus.NEW, TaskStatus.ACTIVE}:
@@ -49,15 +52,27 @@ async def enqueue_phase(session: AsyncSession, task: Task) -> Job | None:
     )
     session.add(job)
     await session.flush()
+    parent = await session.scalar(
+        select(TaskEvent.id)
+        .where(
+            TaskEvent.task_id == task.id,
+            TaskEvent.event_type == "TASK_LIFECYCLE_CHANGED",
+            TaskEvent.payload["version"].as_string() == str(task.lifecycle_version),
+        )
+        .order_by(TaskEvent.id.desc())
+        .limit(1)
+    )
     session.add(
         TaskEvent(
             task_id=task.id,
             source="engineering",
             event_type="JOB_QUEUED",
             payload={
+                **(cause.facts() if cause else {}),
                 "job_id": str(job.id),
                 "action": action,
                 "lifecycle_version": task.lifecycle_version,
+                **({"parent_event_id": parent} if parent else {}),
             },
         )
     )
@@ -72,13 +87,23 @@ class SqlPhaseJobs:
         lease_seconds: int,
         *,
         orphan_cleanup: Callable[[], Awaitable[None]] | None = None,
+        global_developer_slots: int | None = None,
+        validation_slots: int | None = None,
     ) -> None:
         self.sessions, self.worker_id, self.lease_seconds = sessions, worker_id, lease_seconds
         self.orphan_cleanup = orphan_cleanup
+        self.global_developer_slots = global_developer_slots
+        self.validation_slots = validation_slots
 
     async def claim(self) -> PhaseLease | None:
         async with self.sessions() as session:
-            job = await claim_next_job(session, self.worker_id, self.lease_seconds)
+            job = await claim_next_job(
+                session,
+                self.worker_id,
+                self.lease_seconds,
+                global_developer_slots=self.global_developer_slots,
+                validation_slots=self.validation_slots,
+            )
             if job is None:
                 return None
             assert job.lease_token is not None
@@ -174,6 +199,7 @@ class SqlPhaseJobs:
                 action,
                 expected_version=lease.lifecycle_version,
                 actor=self.worker_id,
+                cause=TransitionCause(job_id=job.id),
             )
             job.state, job.finished_at = JobState.SUCCEEDED, datetime.now(UTC)
             job.result = {"action": action.value, "lifecycle_version": task.lifecycle_version}
@@ -214,6 +240,7 @@ class SqlPhaseJobs:
                     Action.BLOCK,
                     expected_version=lease.lifecycle_version,
                     actor=self.worker_id,
+                    cause=TransitionCause(job_id=job.id),
                     wait_reason=reason,
                 )
 

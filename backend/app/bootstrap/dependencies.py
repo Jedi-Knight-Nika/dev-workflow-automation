@@ -4,8 +4,10 @@ from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent_runtime.infrastructure.provider_catalog import EncryptedProviderCatalogWorkflow
+from app.delivery.infrastructure.deployments import SqlDeploymentQueries
 from app.engineering.application.query_events import QueryEvents
 from app.engineering.infrastructure.conversation import SqlAlchemyTaskConversationStore
+from app.engineering.infrastructure.dependencies import SqlTaskDependencies
 from app.engineering.infrastructure.event_queries import SqlAlchemyEventQueries
 from app.engineering.infrastructure.history import SqlAlchemyTaskHistoryQueries
 from app.engineering.infrastructure.queries import SqlAlchemyTaskQueries
@@ -63,6 +65,14 @@ def get_task_queries(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> SqlAlchemyTaskQueries:
     return SqlAlchemyTaskQueries(session)
+
+
+def get_task_dependencies() -> SqlTaskDependencies:
+    return SqlTaskDependencies(SessionLocal)
+
+
+def get_deployment_queries() -> SqlDeploymentQueries:
+    return SqlDeploymentQueries(SessionLocal)
 
 
 def get_task_history_queries(

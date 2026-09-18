@@ -6,12 +6,13 @@ from pathlib import Path
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import load_only
 
 from app.agent_runtime.domain.token_efficiency_policy import TokenEfficiencyPolicy
 from app.agent_runtime.infrastructure.checkpoints import checkpoint_bytes, workspace_facts
+from app.agent_runtime.infrastructure.cost_queries import unsettled_usage
 from app.agent_runtime.infrastructure.models import (
     AIRun,
     DeveloperCheckpoint,
@@ -21,6 +22,7 @@ from app.agent_runtime.infrastructure.models import (
 )
 from app.agent_runtime.infrastructure.sessions import SqlSessionAdministration
 from app.agent_runtime.infrastructure.workspace_lock import workspace_lock
+from app.engineering.infrastructure.requirements import current_requirement
 from app.engineering.infrastructure.task_models import Job, Task, TaskEvent
 from app.platform.configuration.models import SettingsAuditEvent
 from app.platform.configuration.settings import get_settings
@@ -142,10 +144,7 @@ class SqlTokenEfficiency:
                 select(AIRun.id)
                 .where(
                     AIRun.task_id == task_id,
-                    or_(
-                        AIRun.status == "RUNNING",
-                        func.coalesce(AIRun.provider_cost_usd, AIRun.calculated_cost_usd).is_(None),
-                    ),
+                    unsettled_usage(),
                 )
                 .limit(1)
             ):
@@ -190,7 +189,7 @@ class SqlTokenEfficiency:
                 **facts,
                 "goal": task.title[:500],
                 "requirement_digest": hashlib.sha256(
-                    (task.title + "\n" + (task.description or "")).encode()
+                    (await current_requirement(self.session, task)).encode()
                 ).hexdigest(),
                 "semantic_note": note.strip(),
                 "review_feedback_pending": str(native.checkpoint.get("next_feedback") or ""),

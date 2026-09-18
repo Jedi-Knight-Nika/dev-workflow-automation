@@ -1,7 +1,9 @@
 <script lang="ts">
+  import CoordinatorPanel from '$lib/components/coordination/CoordinatorPanel.svelte';
+  let coordinationMode = $state<'off' | 'shadow' | 'active'>('off');
   import { page } from '$app/state';
+  import { afterNavigate } from '$app/navigation';
   import { resolve } from '$app/paths';
-  import { SvelteMap } from 'svelte/reactivity';
   import { onMount } from 'svelte';
   import PageHeader from '$lib/components/PageHeader.svelte';
   import TaskResourceBreakdown from '$lib/components/observability/TaskResourceBreakdown.svelte';
@@ -14,10 +16,13 @@
   import DeveloperSessionPanel from '$lib/components/task-detail/DeveloperSessionPanel.svelte';
   import JobList from '$lib/components/task-detail/JobList.svelte';
   import RunList from '$lib/components/task-detail/RunList.svelte';
+  import TaskDependencies from '$lib/components/task-detail/TaskDependencies.svelte';
   import TimelineList from '$lib/components/task-detail/TimelineList.svelte';
   import ValidationList from '$lib/components/task-detail/ValidationList.svelte';
-  import { API_BASE_URL, ApiError } from '$lib/api';
-  import { createLiveRefresh } from '$lib/live-refresh';
+  import { ApiError } from '$lib/api';
+  import { startTaskRefresh } from '$lib/services/task-updates';
+  import { createLatestRequest, createLiveRefresh } from '$lib/live-refresh';
+  import { mergeTaskMessages } from '$lib/task-messages';
   import { safeExternalUrl } from '$lib/task-links';
   import {
     getTask,
@@ -56,15 +61,19 @@
   let connected = $state(false);
   let activeTaskId = '';
   let missingTaskId = $state('');
+  const requests = createLatestRequest();
+  let routeTaskId: string | undefined;
 
   async function refresh() {
     const id = page.params.id ?? '';
     if (missingTaskId === id) return;
+    const latest = requests.begin();
+    const current = () => page.params.id === id && latest();
     let next: Task;
     try {
       next = await getTask(id);
     } catch (cause) {
-      if (page.params.id !== id) return;
+      if (!current()) return;
       if (cause instanceof ApiError && cause.status === 404) {
         task = null;
         missingTaskId = id;
@@ -73,111 +82,126 @@
       }
       throw cause;
     }
-    if (page.params.id !== id) return;
+    if (!current()) return;
     missingTaskId = '';
-    const [nextJobs, nextEvents, nextValidations, nextMetrics, notes, nextRuns] = await Promise.all(
-      [
-        listTaskJobs(id),
-        listTaskEvents(id),
-        listTaskValidations(id),
-        getTaskMetrics(id),
-        listTaskMessages(id),
-        listTaskRuns(id)
-      ]
-    );
-    if (page.params.id !== id) return;
+    const snapshot = await Promise.all([
+      listTaskJobs(id),
+      listTaskEvents(id),
+      listTaskValidations(id),
+      getTaskMetrics(id),
+      listTaskMessages(id),
+      listTaskRuns(id)
+    ]).catch((cause) => {
+      if (!current()) return null;
+      throw cause;
+    });
+    if (!snapshot || !current()) return;
+    const [nextJobs, nextEvents, nextValidations, nextMetrics, notes, nextRuns] = snapshot;
     task = next;
     jobs = nextJobs;
     runs = nextRuns;
     events = nextEvents;
     validations = nextValidations;
     metrics = nextMetrics;
-    if (activeTaskId !== id) {
+    const knownMessages = new Set(messages.map((message) => message.id));
+    if (
+      activeTaskId !== id ||
+      (notes.next_before_id !== null &&
+        !notes.items.some((message) => knownMessages.has(message.id)))
+    ) {
+      // A burst larger than one page can leave a gap. Restart pagination from
+      // the latest page so every intervening message remains reachable.
       messages = notes.items;
       cursor = notes.next_before_id;
       activeTaskId = id;
     } else {
-      const merged = new SvelteMap(messages.map((message) => [message.id, message]));
-      for (const message of notes.items) merged.set(message.id, message);
-      messages = [...merged.values()].sort((a, b) => a.id - b.id);
+      messages = mergeTaskMessages(messages, notes.items);
     }
   }
 
-  onMount(() => {
-    const live = createLiveRefresh(async () => {
-      try {
-        await refresh();
-        error = '';
-      } catch (cause) {
-        error = String(cause);
-      }
-    });
+  const live = createLiveRefresh(async () => {
+    const id = page.params.id;
+    try {
+      await refresh();
+      if (page.params.id === id) error = '';
+    } catch (cause) {
+      if (page.params.id === id) error = String(cause);
+    }
+  });
+  afterNavigate(() => {
+    if (routeTaskId === page.params.id) return;
+    routeTaskId = page.params.id;
+    requests.invalidate();
+    task = null;
+    messages = [];
+    cursor = null;
+    activeTaskId = '';
+    missingTaskId = '';
+    coordinationMode = 'off';
+    sending = commanding = loadingOlder = false;
+    error = '';
     live.request();
-    const stream = new EventSource(API_BASE_URL + '/events/stream');
-    stream.onopen = () => {
-      connected = true;
-      live.request();
-    };
-    stream.onerror = () => {
-      connected = false;
-    };
-    stream.addEventListener('update', (event) => {
-      try {
-        if (JSON.parse(event.data).task_id === page.params.id) live.request();
-      } catch {
-        /* Ignore malformed event; the bounded poll reconciles it. */
+  });
+  onMount(() => {
+    return startTaskRefresh(live, {
+      taskId: () => page.params.id,
+      connected: (value) => {
+        connected = value;
+        if (value) live.request();
       }
     });
-    const timer = setInterval(() => {
-      if (!document.hidden) live.request();
-    }, 10000);
-    return () => {
-      live.stop();
-      stream.close();
-      clearInterval(timer);
-    };
   });
 
   async function command(action: TaskCommand) {
-    if (!task || commanding) return;
+    if (!task || task.id !== page.params.id || commanding) return;
+    const id = task.id;
     commanding = true;
     error = '';
     try {
-      await runTaskCommand(task.id, action);
-      await refresh();
+      await runTaskCommand(id, action);
+      if (page.params.id === id) await refresh();
     } catch (cause) {
-      error = String(cause);
+      if (page.params.id === id) error = String(cause);
     } finally {
-      commanding = false;
+      if (page.params.id === id) commanding = false;
     }
   }
 
   async function send(body: string, replyTo?: number) {
-    if (!task || sending) return;
+    if (!task || task.id !== page.params.id || sending) return;
+    const id = task.id;
     sending = true;
     error = '';
     try {
-      await addTaskMessage(task.id, body, replyTo);
-      await refresh();
+      await addTaskMessage(id, body, replyTo);
+      if (page.params.id !== id) return;
+      try {
+        await refresh();
+      } catch (cause) {
+        if (page.params.id === id) error = 'Message saved. Could not refresh: ' + String(cause);
+      }
     } catch (cause) {
-      error = String(cause);
+      if (page.params.id === id) error = String(cause);
       throw cause;
     } finally {
-      sending = false;
+      if (page.params.id === id) sending = false;
     }
   }
 
   async function older() {
     if (!task || cursor === null || loadingOlder) return;
     loadingOlder = true;
+    const requestedTaskId = task.id;
+    const requestedCursor = cursor;
     try {
-      const notes = await listTaskMessages(task.id, cursor);
-      messages = [...notes.items, ...messages];
+      const notes = await listTaskMessages(requestedTaskId, requestedCursor);
+      if (page.params.id !== requestedTaskId || cursor !== requestedCursor) return;
+      messages = mergeTaskMessages(messages, notes.items);
       cursor = notes.next_before_id;
     } catch (cause) {
-      error = String(cause);
+      if (page.params.id === requestedTaskId) error = String(cause);
     } finally {
-      loadingOlder = false;
+      if (page.params.id === requestedTaskId) loadingOlder = false;
     }
   }
 </script>
@@ -218,19 +242,25 @@
         resuming.
       </p>
     {/if}
+    {#key task.id}<CoordinatorPanel
+        taskId={task.id}
+        onMode={(mode) => (coordinationMode = mode)}
+      />{/key}
     <TaskControls {task} {commanding} onTaskCommand={command} />
+    {#key task.id}<TaskDependencies {task} onChanged={refresh} />{/key}
     <TaskMetricsPanel {metrics} taskId={task.id} taskTitle={task.title} />
     {#key task.id}<DeveloperSessionPanel taskId={task.id} onChanged={refresh} />{/key}
     <section class="min-w-0 xl:col-span-2">
-      <TaskConversation
-        {messages}
-        taskStatus={task.status}
-        hasOlder={cursor !== null}
-        {loadingOlder}
-        {sending}
-        onLoadOlder={older}
-        onSend={send}
-      />
+      {#key task.id}<TaskConversation
+          {messages}
+          {coordinationMode}
+          taskStatus={task.status}
+          hasOlder={cursor !== null}
+          {loadingOlder}
+          {sending}
+          onLoadOlder={older}
+          onSend={send}
+        />{/key}
     </section>
     <section class="min-w-0 rounded-xl border border-line p-5 xl:col-span-2">
       <h2 class="mb-3 font-semibold">Requirements · version {task.requirement_version}</h2>

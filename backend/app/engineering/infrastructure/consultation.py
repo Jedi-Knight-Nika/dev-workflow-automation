@@ -1,31 +1,85 @@
 """Optional, read-only native consultation; one bounded artifact crosses roles."""
 
 import os
-from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 from typing import Literal
 from uuid import uuid4
 
 import httpx
-from sqlalchemy import select
+from sqlalchemy import and_, case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.agent_runtime.infrastructure.container import RunnerMounts
+from app.agent_runtime.infrastructure.cost_queries import (
+    engineering_cost,
+    unsettled_engineering_usage,
+)
 from app.agent_runtime.infrastructure.docker_harness import DockerHarness
 from app.agent_runtime.infrastructure.helper_accounting import SqlHelperStore
-from app.agent_runtime.infrastructure.models import AIRun, DeveloperSession, PricingCatalog
+from app.agent_runtime.infrastructure.models import AIRun, DeveloperSession
+from app.agent_runtime.infrastructure.pricing_catalog import standard_price
 from app.agent_runtime.infrastructure.runner import Manifest
 from app.engineering.application.develop import DevelopTask, SessionContext
 from app.engineering.application.jobs import PhaseBlocked, PhaseLease
 from app.engineering.domain.consultation import outcome
 from app.engineering.domain.lifecycle import WaitReason
+from app.engineering.infrastructure.requirements import current_requirement
 from app.engineering.infrastructure.task_models import Task
 from app.platform.configuration.settings import Settings
 from app.platform.integrations.models import Integration
 from app.platform.security.crypto import cipher
 from app.teams.infrastructure.automation import read_policy
 from app.teams.infrastructure.models import TeamAgentProfile
+
+
+async def consultation_allowance(
+    session: AsyncSession,
+    task: Task,
+    role: str,
+    task_limit: Decimal,
+    role_limit: Decimal,
+) -> Decimal:
+    cost = engineering_cost()
+    total, role_total, incomplete, planned = (
+        await session.execute(
+            select(
+                func.sum(cost),
+                func.sum(case((AIRun.role_kind == role, cost), else_=0)),
+                func.max(case((unsettled_engineering_usage(), 1), else_=0)),
+                func.max(
+                    case(
+                        (
+                            and_(
+                                AIRun.role_kind == role,
+                                AIRun.requirement_version == task.requirement_version,
+                                AIRun.status == "COMPLETED",
+                            ),
+                            1,
+                        ),
+                        else_=0,
+                    )
+                ),
+            ).where(AIRun.task_id == task.id)
+        )
+    ).one()
+    if role == "THINKER" and planned:
+        raise PhaseBlocked(
+            WaitReason.MISSING_REQUIREMENT,
+            "A plan already exists for this requirement; inspect it and provide new feedback instead of repeating planning",
+        )
+    if incomplete:
+        raise PhaseBlocked(
+            WaitReason.BUDGET_EXHAUSTED,
+            "Reconcile incomplete usage before another paid consultation",
+        )
+    remaining = min(
+        task_limit - (total if total is not None else Decimal(0)),
+        role_limit - (role_total if role_total is not None else Decimal(0)),
+    )
+    if remaining <= 0:
+        raise PhaseBlocked(WaitReason.BUDGET_EXHAUSTED, "Consultation/task spending limit reached")
+    return remaining
 
 
 async def consult(
@@ -74,55 +128,20 @@ async def consult(
                 WaitReason.MISSING_CONFIGURATION, "Consultation provider credential is missing"
             )
         key = cipher.decrypt(integration.encrypted_credentials)
-        price = await session.scalar(
-            select(PricingCatalog)
-            .where(
-                PricingCatalog.provider == profile.provider,
-                PricingCatalog.model == profile.model,
-                PricingCatalog.context_tier == "standard",
-                PricingCatalog.service_tier == "standard",
-                PricingCatalog.effective_at <= datetime.now(UTC),
-            )
-            .order_by(PricingCatalog.effective_at.desc())
-            .limit(1)
-        )
+        price = await standard_price(session, profile.provider, profile.model)
         if profile.provider == "openai" and price is None:
             raise PhaseBlocked(
                 WaitReason.MISSING_CONFIGURATION, "Configure verified consultation pricing"
             )
         assert task.team_id is not None
         policy = await read_policy(session, task.team_id)
-        rows = list(await session.scalars(select(AIRun).where(AIRun.task_id == task.id)))
-        if role == "THINKER" and any(
-            row.role_kind == role
-            and row.requirement_version == task.requirement_version
-            and row.status == "COMPLETED"
-            for row in rows
-        ):
-            raise PhaseBlocked(
-                WaitReason.MISSING_REQUIREMENT,
-                "A plan already exists for this requirement; inspect it and provide new feedback instead of repeating planning",
-            )
-        total = role_total = Decimal(0)
-        for row in rows:
-            cost = (
-                row.provider_cost_usd
-                if row.provider_cost_usd is not None
-                else row.calculated_cost_usd
-            )
-            if cost is None or row.status == "RUNNING":
-                raise PhaseBlocked(
-                    WaitReason.BUDGET_EXHAUSTED,
-                    "Reconcile incomplete usage before another paid consultation",
-                )
-            total += cost
-            if row.role_kind == role:
-                role_total += cost
-        remaining = min(policy.task_budget_usd - total, profile.hard_budget_usd - role_total)
-        if remaining <= 0:
-            raise PhaseBlocked(
-                WaitReason.BUDGET_EXHAUSTED, "Consultation/task spending limit reached"
-            )
+        remaining = await consultation_allowance(
+            session, task, role, policy.task_budget_usd, profile.hard_budget_usd
+        )
+        try:
+            requirement = await current_requirement(session, task)
+        except ValueError as exc:
+            raise PhaseBlocked(WaitReason.MISSING_REQUIREMENT, str(exc)) from exc
     namespace = uuid4()
     state = settings.harness_state_root.resolve() / str(task.id) / "helpers" / str(namespace)
     directory = (
@@ -148,7 +167,7 @@ async def consult(
     )
     # Source is read on demand through native tools. Never attach the checkout or transcript.
     prompt = (
-        f"Requirement version {task.requirement_version}: {task.title}\n{task.description}\n"
+        f"Requirement version {task.requirement_version}: {requirement}\n"
         f"Base revision: {native.checkpoint.get('base_sha', '')}; current revision: {task.current_revision or ''}\n"
         f"Developer's concise report:\n{native.checkpoint.get('summary', '')}\n"
         f"Validated change summary (inspect named files on demand):\n{change_context[:6000]}"

@@ -480,8 +480,5 @@
     .flow :global(.svelte-flow__edge.animated path) {
       animation: none;
     }
-    .flow :global(.svelte-flow__node[style*='node-pulse']) {
-      animation: none !important;
-    }
   }
 </style>

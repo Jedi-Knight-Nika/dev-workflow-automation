@@ -4,7 +4,16 @@ import globals from 'globals';
 import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
-  { ignores: ['.svelte-kit/**', 'build/**', 'node_modules/**'] },
+  {
+    ignores: [
+      '.svelte-kit/**',
+      'build/**',
+      'node_modules/**',
+      'playwright-report/**',
+      'test-results/**',
+      'static/gource/vendor/**'
+    ]
+  },
   eslint.configs.recommended,
   ...tseslint.configs.recommended,
   ...svelte.configs.recommended,

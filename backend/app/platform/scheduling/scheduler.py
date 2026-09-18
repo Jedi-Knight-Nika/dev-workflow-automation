@@ -32,6 +32,7 @@ class Scheduler:
         self._stop = asyncio.Event()
         self._loop_task: asyncio.Task[None] | None = None
         self._heartbeat_task: asyncio.Task[None] | None = None
+        self._integration_task: asyncio.Task[None] | None = None
         self._job_tasks: set[asyncio.Task[None]] = set()
         self._last_recovery = 0.0
 
@@ -44,18 +45,23 @@ class Scheduler:
         self._last_recovery = monotonic()
         await self.presence.online()
         self._loop_task = asyncio.create_task(self._run(), name="phase-scheduler")
+        self._integration_task = asyncio.create_task(
+            self._integrations(), name="integration-polling"
+        )
         self._heartbeat_task = asyncio.create_task(self._heartbeat(), name="worker-heartbeat")
 
     async def stop(self) -> None:
         self._stop.set()
         # Polling HTTP calls must not postpone cancellation of paid native turns.
-        background = [task for task in (self._loop_task, self._heartbeat_task) if task]
+        background = [
+            task for task in (self._loop_task, self._heartbeat_task, self._integration_task) if task
+        ]
         running = list(self._job_tasks)
         for task in (*background, *running):
             task.cancel()
         await asyncio.gather(*background, *running, return_exceptions=True)
         self._job_tasks.clear()
-        self._loop_task = self._heartbeat_task = None
+        self._loop_task = self._heartbeat_task = self._integration_task = None
         await self.presence.stopped()
 
     async def _wait(self, seconds: float) -> None:
@@ -79,14 +85,22 @@ class Scheduler:
             # still escape; observe it, leaving lease recovery to suspend the job.
             log.error("phase_controller_failed", task=task.get_name())
 
+    async def _integrations(self) -> None:
+        # Provider latency must not hold up independent engineering job admission.
+        while not self._stop.is_set():
+            try:
+                await self.reconciler.execute()
+                await self.deliveries.execute()
+            except Exception:
+                log.exception("integration_iteration_failed")
+            await self._wait(self.settings.scheduler_poll_seconds)
+
     async def _run(self) -> None:
         while not self._stop.is_set():
             try:
                 if monotonic() - self._last_recovery >= self.settings.worker_lease_seconds:
                     await self.jobs.recover()
                     self._last_recovery = monotonic()
-                await self.reconciler.execute()
-                await self.deliveries.execute()
                 while (
                     not self._stop.is_set()
                     and len(self._job_tasks) < self.settings.scheduler_max_concurrent_jobs

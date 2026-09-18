@@ -18,6 +18,7 @@ from openai_codex.generated.v2_all import CommandExecResponse, ThreadStartRespon
 
 from app.agent_runtime.application.developer_progress_governor import DeveloperProgressGovernor
 from app.agent_runtime.application.harness import HarnessSettings, TurnReceipt, WorkspaceUnavailable
+from app.agent_runtime.domain.request_usage import with_request_count
 from app.agent_runtime.domain.usage import Usage
 from app.agent_runtime.infrastructure.checkpoints import workspace_facts
 from app.agent_runtime.infrastructure.responses_tools import TOOLS
@@ -51,6 +52,7 @@ class ResponsesHarness:
     tool_names = frozenset(tool["name"] for tool in TOOLS)
     tool_bytes = 40000
     result_bytes = 20000
+    max_history_bytes = 300000
 
     def __init__(self, settings: HarnessSettings):
         self.settings = settings
@@ -66,6 +68,7 @@ class ResponsesHarness:
         self.running: asyncio.Task[Any] | None = None
         self.supervised: set[str] = set()
         self.tool_history: list[dict[str, str]] = []
+        self.request_count = 0
 
     async def start(self) -> str:
         if self.settings.read_only:
@@ -79,7 +82,7 @@ class ResponsesHarness:
     async def resume(self, native_session_id: str) -> None:
         self.id = str(UUID(native_session_id))
         path = self.root / f"{self.id}.json"
-        if path.is_symlink() or path.stat().st_size > 300000:
+        if path.is_symlink() or path.stat().st_size > self.max_history_bytes:
             raise WorkspaceUnavailable("Invalid Responses session")
         self.history = json.loads(path.read_bytes())
         if not isinstance(self.history, list):
@@ -158,6 +161,7 @@ class ResponsesHarness:
         }
 
     async def run_turn(self, prompt: str) -> TurnReceipt:
+        self.request_count = 0
         self.running = asyncio.current_task()
         provider_seconds = 0.0
         totals = {
@@ -217,6 +221,7 @@ class ResponsesHarness:
                         break
                     uncertain = True
                     request_started = monotonic()
+                    self.request_count += 1
                     response = await self.http.post(
                         "https://api.openai.com/v1/responses",
                         json=payload,
@@ -405,7 +410,9 @@ class ResponsesHarness:
             summary,
             status,
             Usage() if uncertain else measured_usage(totals),
-            raw_usage={"observed": totals, "usage_complete": not uncertain},
+            raw_usage=with_request_count(
+                {"observed": totals, "usage_complete": not uncertain}, self.request_count
+            ),
             provider_duration_ms=int(provider_seconds * 1000) if not uncertain else None,
             failure_code=failure,
             token_efficiency=snapshot,

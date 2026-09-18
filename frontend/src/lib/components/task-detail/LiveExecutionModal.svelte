@@ -47,6 +47,14 @@
       }
       const next = run.telemetry;
       if (next) {
+        if (next.execution_mode && next.execution_mode !== previous?.execution_mode)
+          await push(`Execution mode → ${next.execution_mode.replaceAll('_', ' ').toLowerCase()}`);
+        if (next.execution_phase && next.execution_phase !== previous?.execution_phase)
+          await push(`Work → ${next.execution_phase.replaceAll('_', ' ').toLowerCase()}`);
+        if (next.total_work_units && next.completed_work_units !== previous?.completed_work_units)
+          await push(
+            `Implementation steps · ${next.completed_work_units ?? 0}/${next.total_work_units} complete`
+          );
         if (next.phase_label && next.phase_label !== previous?.phase_label)
           await push(`Phase → ${next.phase_label.replaceAll('_', ' ').toLowerCase()}`);
         if ((next.source_read_count ?? 0) > (previous?.source_read_count ?? 0))

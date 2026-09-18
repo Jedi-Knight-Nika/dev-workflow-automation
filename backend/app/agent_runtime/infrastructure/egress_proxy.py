@@ -9,7 +9,7 @@ import asyncio
 import os
 import re
 
-ALLOWED = frozenset({"api.openai.com", "api.anthropic.com", "github.com"})
+ALLOWED = frozenset({"api.openai.com", "api.anthropic.com", "api.deepseek.com", "github.com"})
 LIMIT = asyncio.Semaphore(64)
 
 

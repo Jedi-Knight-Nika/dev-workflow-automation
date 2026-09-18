@@ -13,11 +13,14 @@ import sys
 from dataclasses import asdict
 from decimal import Decimal
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.agent_runtime.application.harness import DeveloperHarness, HarnessSettings
+from app.agent_runtime.domain.envelope import AgentEnvelope
+from app.agent_runtime.domain.handoffs import result_packet, validate_work
+from app.agent_runtime.domain.model_policy import PricedModel
 from app.agent_runtime.domain.token_efficiency_policy import TokenEfficiencyPolicy
 from app.agent_runtime.domain.usage import Pricing
 from app.agent_runtime.infrastructure.checkpoints import checkpoint_bytes, workspace_facts
@@ -73,8 +76,12 @@ class Manifest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     harness: Literal["codex", "claude", "responses", "patch"]
     model: str = Field(min_length=1, max_length=255)
+    provider: Literal["openai", "anthropic", "deepseek"] | None = None
     effort: Literal["none", "low", "medium", "high"] = "medium"
-    prompt: str = Field(min_length=1, max_length=24000)
+    routed_models: list[PricedModel] = Field(default_factory=list, max_length=3)
+    pricing_id: str | None = None
+    work_request: AgentEnvelope | None = None
+    prompt: str = Field(default="", max_length=24000)
     supplemental_instructions: str = Field(default="", max_length=8000)
     native_session_id: str | None = Field(default=None, max_length=255)
     previous_usage: dict[str, int | None] | None = None
@@ -88,6 +95,20 @@ class Manifest(BaseModel):
     progress_baseline: dict[str, Any] = Field(default_factory=dict)
     rollover_checkpoint: dict[str, Any] | None = None
     rollover_digest: str | None = None
+
+    @model_validator(mode="after")
+    def bind_work_request(self) -> Self:
+        if self.work_request is not None:
+            validate_work(self.work_request)
+            request = self.work_request.payload["request"]
+            if self.role_kind != "DEVELOPER" or self.operation != "development":
+                raise ValueError("Typed work is only valid for Developer execution")
+            if self.prompt and self.prompt != request:
+                raise ValueError("Work envelope differs from the execution request")
+            self.prompt = request
+        if not self.prompt.strip():
+            raise ValueError("Execution requires a request")
+        return self
 
 
 async def await_controller(native_id: str, control: Path = Path("/run/control")) -> None:
@@ -140,6 +161,15 @@ async def request_supervision(anomaly: dict[str, Any]) -> dict[str, Any]:
 
 
 async def execute(manifest: Manifest) -> None:
+    provider = manifest.provider or ("anthropic" if manifest.harness == "claude" else "openai")
+    if (provider, manifest.harness) not in {
+        ("openai", "codex"),
+        ("openai", "responses"),
+        ("openai", "patch"),
+        ("anthropic", "claude"),
+        ("deepseek", "patch"),
+    }:
+        raise ValueError("Unsupported harness/provider pair")
     if manifest.harness in {"responses", "patch"} and (
         manifest.role_kind != "DEVELOPER" or manifest.operation != "development"
     ):
@@ -151,8 +181,21 @@ async def execute(manifest: Manifest) -> None:
         for key in ("DATABASE_URL", "APP_SECRET_KEY", "GITHUB_TOKEN", "GH_TOKEN")
     ):
         raise RuntimeError("Unexpected controller credentials in runner environment")
+    work = manifest.work_request
+    if work is not None:
+        validate_work(work)
+        if (
+            manifest.role_kind != "DEVELOPER"
+            or manifest.operation != "development"
+            or work.payload["request"] != manifest.prompt
+        ):
+            raise ValueError("Work contract does not match the authorized manifest")
     settings = HarnessSettings(
+        work_request=work,
+        routed_models=tuple(manifest.routed_models),
+        pricing_id=manifest.pricing_id,
         model=manifest.model,
+        provider=provider,
         workspace=Path("/workspace"),
         effort=manifest.effort,
         instructions=(
@@ -233,6 +276,29 @@ async def execute(manifest: Manifest) -> None:
             if manifest.operation == "compaction"
             else await harness.run_turn(manifest.prompt)
         )
+        if work is not None:
+            checks = (receipt.token_efficiency.get("frontend_checks") or {}).get("checks", [])
+            receipt = replace(
+                receipt,
+                result=result_packet(
+                    work,
+                    status=receipt.status,
+                    summary=receipt.summary,
+                    turn_id=receipt.native_turn_id,
+                    failure_code=receipt.failure_code,
+                    checks=[
+                        {
+                            "name": str(check.get("name", "unknown"))[:200],
+                            "status": "PASSED"
+                            if check.get("exit_code") == 0
+                            else "FAILED"
+                            if type(check.get("exit_code")) is int
+                            else "UNKNOWN",
+                        }
+                        for check in checks[:100]
+                    ],
+                ),
+            )
         emit("turn_completed", receipt=asdict(receipt))
     finally:
         await harness.close()

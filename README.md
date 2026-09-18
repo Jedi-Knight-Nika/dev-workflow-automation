@@ -4,6 +4,10 @@ A self-hosted engineering control plane that turns authorized work into validate
 
 See [PRODUCT_DESCRIPTION.md](PRODUCT_DESCRIPTION.md) for the complete product, architecture, setup, security, API, operations, and acceptance reference.
 
+The [Coordinator rollout guide](docs/coordinator-implementation.md) covers event-driven conversations, human clarification, execution queues, spending controls, configuration, and experimental model/protocol evaluation.
+
+The [activity replay guide](docs/activity-visualizer.md) covers the optional read-only viewer, projection architecture, deployment settings, and historical data limits.
+
 Start the configured local application:
 
 ```sh

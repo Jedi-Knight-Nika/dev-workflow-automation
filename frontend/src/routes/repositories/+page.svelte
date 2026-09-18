@@ -3,6 +3,7 @@
   import PageHeader from '$lib/components/PageHeader.svelte';
   import ErrorBanner from '$lib/components/ErrorBanner.svelte';
   import RepositoryRuntimeEditor from '$lib/components/RepositoryRuntimeEditor.svelte';
+  import DeploymentHistory from '$lib/delivery/DeploymentHistory.svelte';
   import {
     listRepositories,
     discoverGithubRepositories,
@@ -88,6 +89,7 @@
   description="Register source repositories and assign them to Teams. Native sessions read their isolated checkout directly."
 />
 <main class="space-y-5 p-4 sm:p-6 md:p-10">
+  <DeploymentHistory repositories={rows} />
   {#if error}<ErrorBanner message={error} />{/if}
   <div class="flex flex-wrap items-center gap-4">
     <button class="btn-primary" disabled={busy} onclick={() => void discover()}

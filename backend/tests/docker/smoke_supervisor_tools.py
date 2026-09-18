@@ -5,6 +5,7 @@ Mount the frontend read-only at /fixtures. This never changes a real task checko
 
 import json
 import shutil
+import subprocess
 from pathlib import Path
 
 from openai_codex.client import CodexClient, CodexConfig
@@ -33,6 +34,8 @@ shutil.copytree("/opt/frontend/node_modules", frontend / "node_modules", symlink
     "import {test, expect} from 'vitest'; test('runtime', () => expect(1+1).toBe(2));\n"
 )
 (frontend / "vitest.config.ts").write_text("export default {test:{include:['window.test.ts']}};\n")
+subprocess.run(["git", "init", "-q", str(workspace)], check=True)
+subprocess.run(["git", "add", "frontend/src/lib/Window.svelte"], cwd=workspace, check=True)
 logs = Path.home() / ".aew/tool-logs"
 logs.mkdir(parents=True)
 command = [
@@ -177,6 +180,17 @@ try:
     assert applied["changed_files"] == [selected["path"]], applied
     checked = patcher._tool("check", json.dumps({"paths": applied["changed_files"]}))
     assert checked["exit_code"] == 0, checked
+    surveyed = patcher._tool("survey", json.dumps({"objective": "Window count"}))
+    assert selected["path"] in surveyed["repository_paths"], surveyed
+    inspected = patcher._tool(
+        "inspect", json.dumps({"objective": "Window count", "paths": [selected["path"]]})
+    )
+    assert inspected["sources"][0]["sha256"] != selected["sha256"], inspected
+    intermediate = patcher._tool(
+        "check", json.dumps({"paths": applied["changed_files"], "intermediate": True})
+    )
+    assert intermediate["exit_code"] == 0, intermediate
+    assert not any(c["name"] == "typecheck" for c in intermediate["checks"])
 finally:
     if patcher.client:
         patcher.client.close()

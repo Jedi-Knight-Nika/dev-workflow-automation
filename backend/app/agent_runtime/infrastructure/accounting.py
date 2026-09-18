@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
@@ -7,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.agent_runtime.application.harness import TurnReceipt
+from app.agent_runtime.infrastructure.agent_codec import canonical
 from app.agent_runtime.infrastructure.models import (
     AIRun,
     DeveloperSession,
@@ -16,6 +18,7 @@ from app.agent_runtime.infrastructure.models import (
 from app.agent_runtime.infrastructure.receipts import apply_receipt, known_no_inference
 from app.agent_runtime.infrastructure.reservations import consumed_cost, reserve_budget
 from app.agent_runtime.infrastructure.token_efficiency import ensure_generation
+from app.agent_runtime.infrastructure.work_history import record_work_history
 from app.engineering.application.develop import checkpoint_payload
 from app.engineering.infrastructure.task_models import Job, Task
 from app.platform.scheduling.states import JobState
@@ -45,6 +48,7 @@ class SqlDevelopmentStore:
         self.lease_token, self.pricing_id = lease_token, pricing_id
         self.reservation_usd = reservation_usd
         self.operation = operation
+        self.routing_price_ids: set[UUID] = set()
 
     async def progress(self, snapshot: dict[str, Any]) -> None:
         async with self.sessions.begin() as session:
@@ -58,6 +62,7 @@ class SqlDevelopmentStore:
                 .with_for_update()
             )
             if row:
+                record_work_history(session, row, snapshot)
                 row.token_efficiency = snapshot
                 # Operational signal only. Provider receipts own all invoice fields.
                 row.active_context_estimate = snapshot.get("active_context_estimate")
@@ -91,7 +96,7 @@ class SqlDevelopmentStore:
 
     async def consumed_cost(self, task_id: UUID) -> Decimal | None:
         async with self.sessions() as session:
-            return await consumed_cost(session, task_id)
+            return await consumed_cost(session, task_id, include_coordinator_reservations=True)
 
     async def session_started(self, task_id: UUID, native_id: str) -> None:
         async with self.sessions.begin() as session:
@@ -117,7 +122,13 @@ class SqlDevelopmentStore:
             if native.state == "RUNNING":
                 raise ValueError("Another turn already owns this session")
             if await session.scalar(
-                select(AIRun.id).where(AIRun.task_id == task_id, AIRun.status == "RUNNING").limit(1)
+                select(AIRun.id)
+                .where(
+                    AIRun.task_id == task_id,
+                    AIRun.status == "RUNNING",
+                    AIRun.role_kind != "COORDINATOR",
+                )
+                .limit(1)
             ):
                 raise ValueError("Another run already owns this task")
             native.state = "RUNNING"
@@ -141,6 +152,11 @@ class SqlDevelopmentStore:
                 if self.operation == "compaction"
                 else "fixed",
                 status="RUNNING",
+                raw_usage={
+                    "admitted_routing_price_ids": sorted(
+                        str(value) for value in self.routing_price_ids
+                    )
+                },
                 reserved_cost_usd=self.reservation_usd,
                 pricing_id=self.pricing_id,
                 context_generation_id=generation.id,
@@ -150,6 +166,7 @@ class SqlDevelopmentStore:
             return row.id
 
     async def finish_run(self, run_id: UUID, receipt: TurnReceipt) -> None:
+        invalid_routing = False
         async with self.sessions.begin() as session:
             row = await session.get(AIRun, run_id, with_for_update=True)
             if row is None or row.session_id != self.session_id or row.job_id != self.job_id:
@@ -170,7 +187,36 @@ class SqlDevelopmentStore:
             if native.native_session_id != receipt.native_session_id:
                 raise ValueError("Receipt belongs to a different native session")
             price = await session.get(PricingCatalog, self.pricing_id) if self.pricing_id else None
+            admitted_ids = (row.raw_usage or {}).get("admitted_routing_price_ids", [])
             apply_receipt(row, receipt, price)
+            row.raw_usage = {**(row.raw_usage or {}), "admitted_routing_price_ids": admitted_ids}
+            if "priced_requests" in receipt.raw_usage:
+                from app.agent_runtime.infrastructure.routed_usage import settled_cost
+
+                prices = list(
+                    await session.scalars(
+                        select(PricingCatalog).where(
+                            PricingCatalog.id.in_([UUID(value) for value in admitted_ids])
+                        )
+                    )
+                )
+                row.calculated_cost_usd = settled_cost(
+                    receipt.raw_usage["priced_requests"],
+                    receipt.usage,
+                    {str(p.id): p for p in prices},
+                )
+                row.provider_cost_usd = None
+                if row.calculated_cost_usd is None:
+                    row.usage_complete = False
+                    if receipt.status == "completed":
+                        invalid_routing = True
+                        row.status, row.failure_code = "FAILED", "INVALID_ROUTED_USAGE"
+                        receipt = replace(receipt, status="failed", failure_code=row.failure_code)
+                elif (
+                    len({request["model"] for request in receipt.raw_usage["priced_requests"]}) > 1
+                ):
+                    row.model, row.pricing_id = "multiple-models", None
+            record_work_history(session, row, receipt.token_efficiency)
             row.token_efficiency = receipt.token_efficiency or None
             row.active_context_estimate = receipt.token_efficiency.get("active_context_estimate")
             row.active_context_estimate_source = (
@@ -192,6 +238,10 @@ class SqlDevelopmentStore:
                 **checkpoint_payload(receipt, native.requirement_version),
             }
             checkpoint["token_efficiency"] = receipt.token_efficiency
+            if receipt.result is not None:
+                checkpoint["agent_result"] = canonical(receipt.result)
+            elif self.operation == "development":
+                checkpoint.pop("agent_result", None)
             if self.operation == "continuity":
                 digest = native.checkpoint.get("rollover_digest")
                 checkpoint["summary"] = native.checkpoint.get("summary", "")
@@ -222,10 +272,16 @@ class SqlDevelopmentStore:
             # flight. Account the receipt, but do not consume the newer delta.
             if (
                 self.operation == "development"
+                and receipt.status == "completed"
                 and task
                 and task.requirement_version == native.requirement_version
             ):
                 native.checkpoint.pop("next_feedback", None)
+                native.checkpoint.pop("coordinator_guidance", None)
+
+        if invalid_routing:
+            # Commit the uncertain receipt and retain its reservation before stopping delivery.
+            raise ValueError("Routed usage failed controller verification")
 
     async def fail_run(self, run_id: UUID, code: str, *, inference_started: bool = True) -> None:
         async with self.sessions.begin() as session:

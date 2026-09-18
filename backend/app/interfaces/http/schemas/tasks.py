@@ -59,6 +59,17 @@ class TaskRepositoryScopeRead(BaseModel):
     pull_request_url: str | None
 
 
+class TaskDependencyRead(BaseModel):
+    id: uuid.UUID
+    title: str
+    status: TaskStatus
+
+
+class TaskDependenciesUpdate(BaseModel):
+    dependency_ids: list[uuid.UUID] = Field(max_length=32)
+    expected_dependency_ids: list[uuid.UUID] = Field(max_length=32)
+
+
 class TaskRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: uuid.UUID
@@ -89,6 +100,7 @@ class TaskRead(BaseModel):
     labels: list[str] = Field(default_factory=list)
     estimate: float | None = None
     repository_scopes: list[TaskRepositoryScopeRead] = Field(default_factory=list)
+    dependencies: list[TaskDependencyRead] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
 

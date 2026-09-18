@@ -6,6 +6,7 @@ from sqlalchemy import SQLColumnExpression, case, func, select
 from sqlalchemy.sql import ColumnElement
 from sqlalchemy.sql.selectable import Subquery
 
+from app.agent_runtime.infrastructure.cost_queries import settled_cost
 from app.agent_runtime.infrastructure.models import AIRun
 from app.engineering.infrastructure.task_models import Task
 
@@ -20,7 +21,7 @@ def metered_runs() -> Subquery:
             AIRun.provider,
             AIRun.input_tokens,
             AIRun.output_tokens,
-            func.coalesce(AIRun.provider_cost_usd, AIRun.calculated_cost_usd).label("cost_usd"),
+            settled_cost().label("cost_usd"),
             AIRun.started_at,
             AIRun.provider_duration_ms.label("duration_ms"),
         ).join(Task, Task.id == AIRun.task_id)

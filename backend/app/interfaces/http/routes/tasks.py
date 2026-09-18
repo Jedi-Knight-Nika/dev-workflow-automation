@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.bootstrap.dependencies import (
     get_task_conversation_store,
+    get_task_dependencies,
     get_task_history_queries,
     get_task_lifecycle_factory,
     get_task_queries,
@@ -19,6 +20,7 @@ from app.engineering.application.manage_task_conversation import (
     QueryTaskConversation,
 )
 from app.engineering.application.ports.task_conversation import TaskConversationStore
+from app.engineering.application.ports.task_dependencies import TaskDependencies
 from app.engineering.application.ports.task_history import TaskHistoryQueries
 from app.engineering.application.ports.task_lifecycle import (
     TaskLifecycleUnitOfWorkFactory,
@@ -29,11 +31,13 @@ from app.engineering.application.query_history import QueryTaskHistory
 from app.engineering.application.query_tasks import GetTask, ListTasks
 from app.engineering.domain.controls import LifecycleAction
 from app.engineering.domain.lifecycle import InvalidTransition, TaskStatus
+from app.interfaces.http.errors import service_errors
 from app.interfaces.http.schemas.tasks import (
     EventRead,
     JobRead,
     LiveExecutionRead,
     TaskCreate,
+    TaskDependenciesUpdate,
     TaskMessageCreate,
     TaskMessagePageRead,
     TaskMessageRead,
@@ -60,8 +64,21 @@ def task_view_response(view: TaskView) -> TaskRead:
             "labels": view.labels,
             "estimate": view.estimate,
             "repository_scopes": [asdict(scope) for scope in view.repository_scopes],
+            "dependencies": [asdict(dependency) for dependency in view.dependencies],
         }
     )
+
+
+@router.put("/{task_id}/dependencies", status_code=204)
+async def replace_dependencies(
+    task_id: uuid.UUID,
+    command: TaskDependenciesUpdate,
+    dependencies: TaskDependencies = Depends(get_task_dependencies),
+) -> None:
+    with service_errors():
+        await dependencies.replace(
+            task_id, tuple(command.dependency_ids), tuple(command.expected_dependency_ids)
+        )
 
 
 @router.get("", response_model=list[TaskRead])

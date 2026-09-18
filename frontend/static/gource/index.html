@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self'; style-src 'self'; img-src 'self' blob: data:; worker-src 'self' blob:; base-uri 'none'; form-action 'none'"
+    />
+    <title>Gource historical code replay</title>
+    <link rel="stylesheet" href="bridge.css" />
+    <script src="vendor/gource-web.js" defer></script>
+    <script src="bridge.js" defer></script>
+  </head>
+  <body>
+    <p id="status" role="status">Loading Gource…</p>
+    <canvas
+      id="canvas"
+      tabindex="0"
+      aria-label="Gource code activity. Drag to move, scroll to zoom. Space pauses playback."
+    ></canvas>
+  </body>
+</html>

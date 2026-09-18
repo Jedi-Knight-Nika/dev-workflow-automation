@@ -14,6 +14,14 @@
   } = $props();
   const terminal = $derived(['MERGED', 'CANCELLED', 'FAILED'].includes(task.status));
   const suspended = $derived(['NEW', 'PAUSED', 'WAITING_HUMAN'].includes(task.status));
+  let confirmation = $state<{ taskId: string; action: 'cancel' | 'archive' } | null>(null);
+
+  function confirmCommand() {
+    if (!confirmation || confirmation.taskId !== task.id || commanding) return;
+    const action = confirmation.action;
+    confirmation = null;
+    onTaskCommand(action);
+  }
 </script>
 
 <section
@@ -40,18 +48,30 @@
     <Button
       variant="danger"
       disabled={commanding}
-      onclick={() => {
-        if (confirm('Cancel this task? Work stops; its files and evidence remain available.'))
-          onTaskCommand('cancel');
-      }}>Cancel task</Button
+      onclick={() => (confirmation = { taskId: task.id, action: 'cancel' })}>Cancel task</Button
     >
   {:else}
     <Button
       disabled={commanding}
-      onclick={() => {
-        if (confirm('Archive this completed or cancelled task?')) onTaskCommand('archive');
-      }}>Archive</Button
+      onclick={() => (confirmation = { taskId: task.id, action: 'archive' })}>Archive</Button
     >
+  {/if}
+  {#if confirmation?.taskId === task.id && (confirmation.action === 'archive') === terminal}
+    <div
+      class="flex w-full flex-wrap items-center gap-3 rounded-lg border border-line p-3"
+      role="group"
+      aria-label="Confirm task action"
+    >
+      <p class="text-sm" role="status">
+        {confirmation.action === 'cancel'
+          ? 'Cancel this task? Work stops; files and execution evidence are preserved.'
+          : 'Archive this completed or cancelled task?'}
+      </p>
+      <Button variant="danger" disabled={commanding} onclick={confirmCommand}>
+        {confirmation.action === 'cancel' ? 'Yes, cancel task' : 'Yes, archive task'}
+      </Button>
+      <Button disabled={commanding} onclick={() => (confirmation = null)}>Keep task</Button>
+    </div>
   {/if}
   <p class="w-full text-xs text-muted">
     Resume keeps the current phase, native session and budget usage. Publication and merge follow

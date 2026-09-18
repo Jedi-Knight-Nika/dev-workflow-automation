@@ -1,6 +1,7 @@
 from decimal import Decimal
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 from urllib.parse import urlparse
 
 from pydantic import Field, model_validator
@@ -29,6 +30,11 @@ class Settings(BaseSettings):
     scheduler_enabled: bool = False
     scheduler_poll_seconds: float = 1.0
     scheduler_max_concurrent_jobs: int = Field(default=2, ge=1, le=32)
+    account_monthly_budget_usd: Decimal | None = Field(
+        default=None, gt=0, le=100000, allow_inf_nan=False
+    )
+    global_developer_slots: int = Field(default=2, ge=1, le=64)
+    validation_slots: int = Field(default=2, ge=1, le=64)
     docker_api_timeout_seconds: int = Field(default=30, ge=1, le=300)
     worker_lease_seconds: int = 330
     worker_heartbeat_seconds: float = 5.0
@@ -45,6 +51,12 @@ class Settings(BaseSettings):
     developer_harness_claude: bool = False
     developer_harness_responses: bool = False
     local_event_interpreter: bool = False
+    coordinator_mode: Literal["off", "shadow", "active"] = "off"
+    coordinator_providers: list[str] = Field(default_factory=lambda: ["dashboard", "trello"])
+    coordinator_provider: Literal["openai", "deepseek"] = "openai"
+    coordinator_model: str = "gpt-5.6-luna"
+    coordinator_request_limit_usd: Decimal = Field(default=Decimal("0.05"), gt=0, le=1)
+    coordinator_debounce_seconds: float = Field(default=3, ge=0, le=5)
     supervisor_enabled: bool = False
     supervisor_model: str = "gpt-5.6-luna"
     supervisor_request_limit_usd: Decimal = Field(default=Decimal("0.02"), gt=0, le=1)
@@ -98,6 +110,14 @@ class Settings(BaseSettings):
     metrics_token_file: Path | None = None
     observability_alert_token_file: Path | None = None
     forecasts_enabled: bool = False
+    activity_enabled: bool = True
+    activity_collect_files: bool = True
+    activity_file_retention_days: int = Field(default=0, ge=0, le=3650)
+    activity_poll_seconds: float = Field(default=5, ge=1, le=60)
+    activity_max_events: int = Field(default=5000, ge=100, le=20000)
+    activity_max_files: int = Field(default=5000, ge=200, le=20000)
+    activity_max_tasks: int = Field(default=200, ge=10, le=500)
+    activity_max_replay_days: int = Field(default=90, ge=1, le=365)
     forecast_min_samples: int = Field(default=5, ge=3, le=100)
     forecast_horizon_days: int = Field(default=7, ge=1, le=30)
 

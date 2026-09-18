@@ -10,7 +10,7 @@ from app.teams.infrastructure.automation import read_policy
 from app.teams.infrastructure.management import SqlAlchemyTeamManagementWorkflow
 from app.teams.infrastructure.models import TeamAgentProfile
 from app.teams.infrastructure.profiles import SqlTeamProfiles
-from app.teams.infrastructure.team_models import Team
+from app.teams.infrastructure.team_models import Team, TeamCapacityChange
 
 
 @pytest.mark.asyncio
@@ -50,6 +50,19 @@ async def test_new_team_has_fixed_profiles_and_disabled_policy_atomically(
             await session.refresh(developer)
             assert developer.model == "operator-configured"
             assert len(await SqlTeamProfiles(session).list_profiles(team_id)) == 4
+            workflow = SqlAlchemyTeamManagementWorkflow(session)
+            for capacity in (2, 2, 1):
+                await workflow.update(
+                    team_id, SaveTeamCommand(name=created.name, max_concurrent_tasks=capacity)
+                )
+            history = list(
+                await session.scalars(
+                    select(TeamCapacityChange.capacity)
+                    .where(TeamCapacityChange.team_id == team_id)
+                    .order_by(TeamCapacityChange.id)
+                )
+            )
+            assert history == [1, 2, 1]
     finally:
         if team_id:
             async with postgres_session_factory.begin() as session:

@@ -88,6 +88,8 @@ export type AutomationPolicy = {
   required_checks: string[];
   task_budget_usd: string | number;
   team_budget_usd: string | number;
+  monthly_budget_usd?: string | number | null;
+  daily_allowance_usd?: string | number | null;
   require_formal_approval: boolean;
   reviewer_scope: 'allowlist' | 'any_human';
 };

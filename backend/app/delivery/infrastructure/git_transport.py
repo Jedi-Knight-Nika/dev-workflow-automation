@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent_runtime.infrastructure.container import RunnerMounts, developer_container_spec
 from app.agent_runtime.infrastructure.container_job import run_container_job
-from app.agent_runtime.infrastructure.docker_harness import atomic_json
+from app.agent_runtime.infrastructure.control_files import atomic_json
 from app.delivery.infrastructure.git_runner import GitManifest
 from app.platform.configuration.settings import Settings
 from app.platform.integrations.github_auth import resolve_github_auth

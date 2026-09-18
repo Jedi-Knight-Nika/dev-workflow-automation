@@ -28,6 +28,7 @@ export type Task = {
   project_name?: string | null;
   labels?: string[];
   estimate?: number | null;
+  dependencies?: Array<{ id: string; title: string; status: string }>;
   repository_scopes?: Array<{
     repository_id: string;
     repository_name: string;
@@ -390,6 +391,11 @@ export type LiveExecution = {
     input_tokens_observed?: number | null;
     active_context_estimate?: number | null;
     phase_label?: string | null;
+    execution_mode?: string;
+    execution_phase?: string;
+    completed_work_units?: number;
+    total_work_units?: number;
+    model_calls_by_kind?: Record<string, number>;
     tool_call_count?: number;
     diff_changes?: number;
     source_read_count?: number;

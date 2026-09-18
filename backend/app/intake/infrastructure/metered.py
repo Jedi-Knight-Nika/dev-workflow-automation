@@ -11,8 +11,10 @@ import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.agent_runtime.domain.request_usage import with_request_count
 from app.agent_runtime.domain.usage import Pricing, Usage
-from app.agent_runtime.infrastructure.models import AIRun, PricingCatalog
+from app.agent_runtime.infrastructure.models import AIRun
+from app.agent_runtime.infrastructure.pricing_catalog import standard_price
 from app.agent_runtime.infrastructure.reservations import reserve_budget
 from app.intake.domain.events import Event, Interpretation
 from app.intake.infrastructure.cloud_wire import normalized_usage, request_body, response_text
@@ -100,18 +102,7 @@ class CloudInterpreter:
                 }
             }
         async with self.sessions.begin() as session:
-            price = await session.scalar(
-                select(PricingCatalog)
-                .where(
-                    PricingCatalog.provider == self.provider,
-                    PricingCatalog.model == self.model,
-                    PricingCatalog.context_tier == "standard",
-                    PricingCatalog.service_tier == "standard",
-                    PricingCatalog.effective_at <= datetime.now(UTC),
-                )
-                .order_by(PricingCatalog.effective_at.desc())
-                .limit(1)
-            )
+            price = await standard_price(session, self.provider, self.model)
             integration = await session.scalar(
                 select(Integration).where(Integration.provider_name == self.provider)
             )
@@ -180,7 +171,7 @@ class CloudInterpreter:
             async with self.sessions.begin() as session:
                 row = await session.get(AIRun, run_id, with_for_update=True)
                 assert row
-                row.raw_usage, row.usage_complete = raw, usage.complete
+                row.raw_usage, row.usage_complete = with_request_count(raw, 1), usage.complete
                 row.input_tokens, row.output_tokens = usage.input_tokens, usage.output_tokens
                 row.cache_read_tokens, row.cache_write_tokens = (
                     usage.cache_read_input_tokens,
@@ -197,6 +188,7 @@ class CloudInterpreter:
             async with self.sessions.begin() as session:
                 row = await session.get(AIRun, run_id, with_for_update=True)
                 if row and row.status == "RUNNING":
+                    row.raw_usage = with_request_count(row.raw_usage or {}, 1)
                     row.status, row.finished_at = "FAILED", datetime.now(UTC)
                     row.failure_code = type(exc).__name__[:100]
             if isinstance(exc, (httpx.HTTPError, KeyError, TypeError)):

@@ -2,33 +2,22 @@
 
 import asyncio
 import json
-import os
 from collections.abc import Awaitable, Callable
-from pathlib import Path
 from time import monotonic
 from typing import Any
 from uuid import UUID
 
 import httpx
-from pydantic import TypeAdapter
 
 from app.agent_runtime.application.harness import TurnReceipt, WorkspaceUnavailable
 from app.agent_runtime.infrastructure.container import RunnerMounts, developer_container_spec
+from app.agent_runtime.infrastructure.control_files import atomic_json
 from app.agent_runtime.infrastructure.runner import Manifest
+from app.agent_runtime.infrastructure.typed_receipt import decode_receipt
 
 
 class RunnerProtocolError(RuntimeError):
     pass
-
-
-def atomic_json(path: Path, payload: dict[str, Any]) -> None:
-    """Publish control data atomically; the container only has a read-only bind."""
-    temporary = path.with_suffix(".tmp")
-    with temporary.open("x", encoding="utf-8") as stream:
-        json.dump(payload, stream)
-        stream.flush()
-        os.fsync(stream.fileno())
-    temporary.replace(path)
 
 
 class DockerFrames:
@@ -109,7 +98,12 @@ class DockerHarness:
         if (self.mounts.manifest.parent / "start.json").exists():
             raise RunnerProtocolError("Controller directory has already authorized a turn")
         self.manifest = self.manifest.model_copy(update={"native_session_id": native_id})
-        atomic_json(self.mounts.manifest, self.manifest.model_dump(mode="json"))
+        atomic_json(
+            self.mounts.manifest,
+            self.manifest.model_dump(
+                mode="json", exclude={"prompt"} if self.manifest.work_request else set()
+            ),
+        )
         spec = developer_container_spec(
             self.mounts,
             image=self.image,
@@ -184,7 +178,7 @@ class DockerHarness:
                         elif event.get("event") == "turn_completed":
                             if not self.started.done() or self.completed.done():
                                 raise RunnerProtocolError("Receipt received out of order")
-                            receipt = TypeAdapter(TurnReceipt).validate_python(event["receipt"])
+                            receipt = decode_receipt(event["receipt"], self.manifest.work_request)
                             if (
                                 receipt.native_session_id != self.started.result()
                                 or receipt.status not in {"completed", "failed", "interrupted"}

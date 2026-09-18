@@ -8,6 +8,7 @@
 </script>
 
 <section
+  id="execution-details"
   class="min-w-0 rounded-xl border border-line p-5 xl:col-span-2"
   aria-label="AI run receipts"
 >

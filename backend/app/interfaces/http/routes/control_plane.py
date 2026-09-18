@@ -302,9 +302,12 @@ async def configure_integration(
         body.configuration,
         body.credential.get_secret_value() if body.credential else None,
     )
-    return IntegrationRead.model_validate(
-        await ManageIntegrations(workflow).configure(command), from_attributes=True
-    )
+    try:
+        return IntegrationRead.model_validate(
+            await ManageIntegrations(workflow).configure(command), from_attributes=True
+        )
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
 
 
 @router.post("/integrations/{provider_name}/test", response_model=IntegrationRead)

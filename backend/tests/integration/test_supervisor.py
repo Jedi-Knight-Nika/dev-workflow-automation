@@ -13,6 +13,8 @@ from app.agent_runtime.infrastructure.models import AIRun, DeveloperSession, Pri
 from app.engineering.application.jobs import PhaseBlocked
 from app.engineering.domain.lifecycle import Action
 from app.engineering.infrastructure.jobs import SqlPhaseJobs
+from app.engineering.infrastructure.requirements import ACCEPTED_REQUIREMENT
+from app.engineering.infrastructure.task_models import TaskEvent
 from app.platform.configuration.settings import Settings
 from app.platform.integrations.models import Integration
 from app.platform.security.crypto import cipher
@@ -61,6 +63,14 @@ async def test_supervisor_accounts_once_and_does_not_repurchase_failed_decision(
                 )
                 assert native
                 native_id = native.id
+                session.add(
+                    TaskEvent(
+                        task_id=task_id,
+                        source="coordinator",
+                        event_type=ACCEPTED_REQUIREMENT,
+                        payload={"request": "Include mobile support", "invariants": []},
+                    )
+                )
             jobs = SqlPhaseJobs(postgres_session_factory, "supervisor-test", 60)
             intake = await jobs.claim()
             assert intake
@@ -84,6 +94,8 @@ async def test_supervisor_accounts_once_and_does_not_repurchase_failed_decision(
 
             def respond(request: httpx.Request) -> httpx.Response:
                 calls.append(request)
+                packet = json.loads(json.loads(request.content)["input"][1]["content"])
+                assert "Include mobile support" in packet["objective"]
                 return httpx.Response(
                     200,
                     json={
@@ -128,6 +140,8 @@ async def test_supervisor_accounts_once_and_does_not_repurchase_failed_decision(
                 runs = list(await session.scalars(select(AIRun).where(AIRun.task_id == task_id)))
                 assert len(runs) == 1
                 assert runs[0].role_kind == "SUPERVISOR"
+                assert runs[0].raw_usage["request_count"] == 1
+                assert runs[0].raw_usage["request_count_complete"] is True
                 assert runs[0].input_tokens == 100 and runs[0].calculated_cost_usd is not None
             if valid:
                 decision.clear()

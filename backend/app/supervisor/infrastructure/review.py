@@ -8,13 +8,14 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.agent_runtime.infrastructure.models import AIRun
 from app.engineering.infrastructure.models import ValidationRun
+from app.engineering.infrastructure.requirements import current_requirement
 from app.engineering.infrastructure.task_models import Task
 from app.intake.domain.events import Event
 from app.intake.infrastructure.metered import CloudInterpreter
 from app.intake.infrastructure.ollama import classification_messages
 from app.platform.configuration.settings import Settings
 from app.supervisor.infrastructure.memory import task_memory
-from app.supervisor.infrastructure.schemas import SYSTEM_POLICY
+from app.supervisor.infrastructure.prompts import SYSTEM_POLICY
 
 
 async def review_supervisor(
@@ -41,7 +42,7 @@ async def review_supervisor(
     ).all()
     packet = {
         "task_id": str(task.id),
-        "objective": task.title + "\n" + task.description,
+        "objective": await current_requirement(session, task),
         "stage": task.stage,
         "current_sha": task.current_revision,
         "pr_number": task.pull_request_number,

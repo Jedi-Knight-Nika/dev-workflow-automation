@@ -58,6 +58,12 @@ def exercise_fresh_setup(connection: Connection) -> None:
         supporting_revision("0005_configuration_names").upgrade()
         supporting_revision("0006_canonical_identifiers").upgrade()
         supporting_revision("0007_observer").upgrade()
+        supporting_revision("0008_coordinator").upgrade()
+        supporting_revision("0009_activity").upgrade()
+        supporting_revision("0010_activity_details").upgrade()
+        supporting_revision("0011_team_capacity_history").upgrade()
+        supporting_revision("0012_task_dependencies").upgrade()
+        supporting_revision("0013_deployment_observations").upgrade()
         assert (
             connection.execute(text("SELECT * FROM team_agent_profiles ORDER BY id")).all()
             == baseline_profiles
