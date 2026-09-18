@@ -1,60 +1,34 @@
 # Autonomous Engineering Worker
 
-A self-hosted engineering control plane that turns authorized work into validated pull requests through persistent native coding sessions, deterministic delivery, guarded merge, and live operational analytics.
+A self-hosted system that takes authorized engineering tasks through code changes, validation, pull requests and guarded merges.
 
-See [PRODUCT_DESCRIPTION.md](PRODUCT_DESCRIPTION.md) for the complete product, architecture, setup, security, API, operations, and acceptance reference.
+Built with Python/FastAPI, PostgreSQL and SvelteKit, with isolated Docker runners and an optional desktop launcher.
 
-The [full architecture and workflow report](docs/project-architecture-and-workflow.md) explains the technology stack, module ownership, data model, runtime processes, task-to-commit/push/merge flow, frontend, security, operations, and extension guidelines.
+## Run locally
 
-The [Coordinator rollout guide](docs/coordinator-implementation.md) covers event-driven conversations, human clarification, execution queues, spending controls, configuration, and experimental model/protocol evaluation.
-
-The [activity replay guide](docs/activity-visualizer.md) covers the optional read-only viewer, projection architecture, deployment settings, and historical data limits.
-
-After configuring `.env` and the prerequisites in the product reference, start the local console:
+Configure Docker and `.env` using the [setup guide](docs/guide.md#local-setup), then:
 
 ```sh
 sh scripts/start-local.sh --mode console
 ```
 
-The UI is available at `http://localhost:3000` and the API at `http://localhost:8000/api`.
+Open `http://localhost:3000`. Execution modes require configured credentials, repositories and budgets and can resume authorized queued work.
 
-Use `--mode execution` to include native execution, or `--mode full` to also include monitoring and alerts. Execution requires configured runtimes, credentials, repository access, and spending policy; enabling it can resume authorized queued work. The script defaults to `full` when no mode or `AEW_START_MODE` is supplied, preserving its previous behavior. `--no-build` reuses images and does not deploy source changes.
+## Development
 
-For development, `make dev-backend` and `make dev-frontend` run separate servers; the frontend proxies `/api` to `http://localhost:8000` by default. `make test` runs backend and frontend unit suites; database integration tests require an isolated `TEST_DATABASE_URL`. Browser tests remain a separate `make frontend-e2e` command.
-
-## Code quality
-
-Use Node.js 22.13+ (or a supported newer LTS), Python 3.12+, uv, and Rust with the `rustfmt` and `clippy` components. The desktop check also needs the platform's Tauri build dependencies. On macOS, install shell tools with `brew install shellcheck shfmt`; other platforms can use the upstream binaries or their package manager. Run `make setup` to install the locked Python and frontend dependencies. Desktop JavaScript reuses the frontend tooling; there is no second linter dependency tree.
-
-| Files                                                                  | Tools                                                                                                          |
-| ---------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| Python application, migrations, tests, evaluations and utility scripts | Ruff 0.16.8 for lint/format; existing mypy for application and selected operator-script types.                 |
-| TypeScript, JavaScript and Svelte                                      | ESLint 10.10.0 with typescript-eslint 8.70.0 and eslint-plugin-svelte 3.23.0; svelte-check for frontend types. |
-| Web code, HTML/CSS, JSON, YAML and Markdown                            | Prettier 3.9.8 with prettier-plugin-svelte 4.1.1.                                                              |
-| Desktop Rust                                                           | Rust's bundled rustfmt and Clippy; CI uses Rust 1.96.0.                                                        |
-| Shell scripts                                                          | ShellCheck 0.11.0 and shfmt 3.14.1.                                                                            |
-
-Formatter/linter package releases were checked on 2026-09-18. Python/JavaScript versions are pinned and locked; Rust uses its bundled tools rather than a separate formatter package. Existing runtime/framework dependencies are not upgraded as part of formatting. Keep the shell tools aligned with the listed versions when reproducing formatting locally.
+After installing the [prerequisites](docs/guide.md#code-quality):
 
 ```sh
-make format        # Format Python, web/config/docs, Rust and shell; no lint auto-fixes
-make format-check  # Verify formatting without writing
-make lint          # Python, frontend/desktop JavaScript and shell lint
-make typecheck     # Existing Python and Svelte/TypeScript checks
-make desktop-check # Rust Clippy + type/build checks
-make check         # All of these, tests, operational syntax and frontend build
+make setup      # Install dependencies and the pre-push hook
+make format     # Format project files
+make pre-push   # Check formatting, lint and types
+make check      # Also run tests and builds
 ```
 
-Prettier has one root configuration, and `.editorconfig` defines shared whitespace. Generated files, lockfiles, dependencies, local runtime data and third-party vendor assets are excluded from formatting. `make format` does not run the application, execute provider tasks or deploy anything. CI enforces formatting/linting plus the existing test/build checks; browser and live deployment acceptance remain separate.
+Run `make dev-backend` and `make dev-frontend` in separate terminals. Existing checkouts can enable automatic push checks with `make hooks`.
 
-Tool references: [Ruff](https://docs.astral.sh/ruff/), [Prettier installation/version pinning](https://prettier.io/docs/install), [Svelte ESLint support](https://sveltejs.github.io/eslint-plugin-svelte/user-guide/), and [Rust components](https://rust-lang.github.io/rustup/concepts/components.html).
+## Documentation
 
-### Before pushing
-
-Run `make hooks` once in an existing checkout; `make setup` also installs the hook for new checkouts. This uses Git's native `core.hooksPath` and the version-controlled `.githooks/pre-push`, with no Husky or additional dependency. An existing custom hooks path is preserved: installation stops with instructions instead of replacing it.
-
-Every normal `git push` runs `make pre-push` for the whole working tree: formatting checks, Python/web/desktop/shell lint, Python/Svelte type checks, Rust Clippy and operational syntax checks. Any failed command blocks the push. The hook does not auto-format, stage, stash or commit files. Fix formatting with `make format`, review and commit the changes, then push again.
-
-The quality-tool prerequisites above must be available in the environment that launches Git, including GUI clients. These checks inspect the current checkout, not another branch or a snapshot of outgoing commits; push the intended checked-out branch with changes committed. Full tests and builds stay in `make check` and CI, and browser/live acceptance stays separate. Local hooks can be bypassed, so required CI checks remain the enforcement boundary. See [Git's hook documentation](https://git-scm.com/docs/githooks#_pre_push).
-
-The completed `next_todo.md` implementation plan and duplicate cleanup/follow-up notes were consolidated into the architecture report and Coordinator rollout guide. Operational guides, recorded evaluation results and third-party notices remain.
+- [Setup and development](docs/guide.md): configuration, code quality, hooks, desktop and deployment.
+- [Architecture and workflow](docs/architecture.md): product behavior, modules, data and task-to-merge flow.
+- [Evaluation and results](docs/evaluation.md): benchmark procedures, acceptance limits and recorded outcomes.

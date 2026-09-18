@@ -150,4 +150,4 @@ if __name__ == "__main__":
         print(json.dumps(result, ensure_ascii=False))
     except (ValueError, OSError, KeyError, TypeError) as exc:
         print(json.dumps({"error": str(exc)[:500]}))
-        raise SystemExit(1)
+        raise SystemExit(1) from exc

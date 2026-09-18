@@ -339,4 +339,4 @@ if __name__ == "__main__":
         )
     except (ValueError, OSError, KeyError, TypeError, subprocess.TimeoutExpired) as exc:
         print(json.dumps({"error": str(exc)[:2200]}))
-        raise SystemExit(1)
+        raise SystemExit(1) from exc

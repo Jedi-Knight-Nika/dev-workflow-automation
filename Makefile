@@ -115,7 +115,7 @@ shared-format-check:
 	frontend/node_modules/.bin/prettier --ignore-path .gitignore --ignore-path .prettierignore --check .
 
 desktop-lint:
-	frontend/node_modules/.bin/eslint desktop/src eslint.config.mjs
+	frontend/node_modules/.bin/eslint desktop/src eslint.config.mjs --max-warnings 0
 
 desktop-check:
 	cd desktop/src-tauri && cargo clippy --locked --all-targets -- -D warnings

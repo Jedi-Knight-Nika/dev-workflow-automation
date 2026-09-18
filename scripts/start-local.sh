@@ -32,7 +32,7 @@ case "$mode" in
 esac
 cd "$(dirname "$0")/.."
 [ -f .env ] || {
-  echo "Configure .env first. See PRODUCT_DESCRIPTION.md." >&2
+  echo "Configure .env first. See docs/guide.md." >&2
   exit 1
 }
 set -- docker compose --env-file .env -p autonomous-engineering-worker -f compose.yaml

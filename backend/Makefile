@@ -7,13 +7,13 @@ dev:
 	uv run uvicorn app.main:app --reload --port 8000
 
 lint:
-	uv run ruff check . ../scripts
+	uv run ruff check --config pyproject.toml . ../scripts
 
 format:
-	uv run ruff format . ../scripts
+	uv run ruff format --config pyproject.toml . ../scripts
 
 format-check:
-	uv run ruff format --check . ../scripts
+	uv run ruff format --check --config pyproject.toml . ../scripts
 
 typecheck:
 	uv run mypy app ../scripts/validate_real_workflow.py ../scripts/rotate_credentials.py

@@ -321,7 +321,7 @@ def _rank_snapshot(
         else []
     )
     selected = []
-    for score, row, matches in ranked[:5]:
+    for _score, row, matches in ranked[:5]:
         names = {
             s["name"]
             for s in row["symbols"]
