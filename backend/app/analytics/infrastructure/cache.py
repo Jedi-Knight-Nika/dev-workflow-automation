@@ -21,6 +21,7 @@ class CachedAnalyticsQueries:
         key = (method, *args)
         cached = self.cache.get(key)
         if cached and monotonic() - cached[0] < 20:
+            self.cache[key] = self.cache.pop(key)
             return cached[1]
         pending = self.fills.get(key)
         if pending is None:

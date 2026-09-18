@@ -33,9 +33,11 @@ class ProcessCoordinator:
         await self.runs.recover()
 
     async def _watch(self, run_id: UUID) -> None:
+        interval = self.watch_seconds
         while True:
-            await asyncio.sleep(self.watch_seconds)
+            await asyncio.sleep(interval)
             await self.runs.ensure_authorized(run_id)
+            interval = min(interval * 2, max(self.watch_seconds, 5))
 
     async def _decide(
         self, run_id: UUID, task_id: UUID, provider: str, packet: dict[str, Any]
@@ -54,6 +56,7 @@ class ProcessCoordinator:
             decision = await self.model.decide(run_id, packet, 1)
             if decision.read_tools:
                 raise ValueError("Coordinator exhausted its context expansion")
+        await self.runs.ensure_authorized(run_id)
         await self.runs.complete(run_id, task_id, decision, packet)
 
     async def process_one(self) -> bool:

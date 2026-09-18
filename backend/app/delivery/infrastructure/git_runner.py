@@ -15,8 +15,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.agent_runtime.infrastructure.process import capture
-from app.agent_runtime.infrastructure.workspace_lock import workspace_lock
+from app.platform.runtime.process import capture
+from app.platform.runtime.workspace_lock import workspace_lock
 
 
 class GitManifest(BaseModel):

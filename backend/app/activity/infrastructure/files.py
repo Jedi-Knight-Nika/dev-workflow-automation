@@ -11,8 +11,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.activity.domain.events import file_path, reference
 from app.activity.infrastructure.models import ActivityEvent, ActivityFileChange
 from app.activity.infrastructure.projector import PROJECTION_LOCK
-from app.agent_runtime.infrastructure.process import capture
 from app.engineering.infrastructure.task_models import Task, TaskRepositoryScope
+from app.platform.runtime.process import capture
 
 
 class FileHistoryError(ValueError):

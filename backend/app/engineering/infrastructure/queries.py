@@ -3,7 +3,7 @@ import uuid
 from collections.abc import Sequence
 from typing import Any
 
-from sqlalchemy import Select, String, and_, exists, func, or_, select
+from sqlalchemy import Select, Text, and_, exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import load_only
 
@@ -65,17 +65,13 @@ class SqlAlchemyTaskQueries:
             snapshot_filters.append(
                 or_(
                     ExternalTaskSnapshot.assignee_id == filters.assignee,
-                    ExternalTaskSnapshot.raw_payload["assignee"]["name"].as_string().ilike(pattern),
-                    ExternalTaskSnapshot.raw_payload["assignee"]["email"]
-                    .as_string()
-                    .ilike(pattern),
+                    ExternalTaskSnapshot.assignee_name.ilike(pattern),
+                    ExternalTaskSnapshot.assignee_email.ilike(pattern),
                 )
             )
         if filters.team:
             snapshot_filters.append(
-                ExternalTaskSnapshot.raw_payload["team"]["name"]
-                .as_string()
-                .ilike(f"%{filters.team.strip()}%")
+                ExternalTaskSnapshot.team_name.ilike(f"%{filters.team.strip()}%")
             )
         if filters.project:
             pattern = f"%{filters.project.strip()}%"
@@ -84,9 +80,7 @@ class SqlAlchemyTaskQueries:
                     Task.project_name.ilike(pattern),
                     exists().where(
                         ExternalTaskSnapshot.task_id == Task.id,
-                        ExternalTaskSnapshot.raw_payload["project"]["name"]
-                        .as_string()
-                        .ilike(pattern),
+                        ExternalTaskSnapshot.project_name.ilike(pattern),
                     ),
                 )
             )
@@ -94,19 +88,17 @@ class SqlAlchemyTaskQueries:
             snapshot_filters.append(
                 or_(
                     ExternalTaskSnapshot.state_id == filters.provider_state,
-                    ExternalTaskSnapshot.raw_payload["state"]["name"]
-                    .as_string()
-                    .ilike(f"%{filters.provider_state.strip()}%"),
+                    ExternalTaskSnapshot.state_name.ilike(f"%{filters.provider_state.strip()}%"),
                 )
             )
         if filters.label:
             label = filters.label.strip().lower()
             statement = statement.where(
                 or_(
-                    func.lower(Task.labels.cast(String)).contains(label),
+                    func.lower(Task.labels.cast(Text)).contains(label),
                     exists().where(
                         ExternalTaskSnapshot.task_id == Task.id,
-                        func.lower(ExternalTaskSnapshot.raw_payload.cast(String)).contains(label),
+                        ExternalTaskSnapshot.labels_text.contains(label),
                     ),
                 )
             )

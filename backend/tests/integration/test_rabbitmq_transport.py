@@ -63,6 +63,44 @@ async def test_unroutable_publication_is_not_reported_as_success(broker):
             await transport.queue.bind(transport.exchange, routing_key=rabbit.ROUTING_KEY)
 
 
+async def test_handler_bug_reaches_dead_letter_queue_and_next_message_can_run(broker):
+    url, rabbit = broker
+    poison = TaskWakeup(uuid4(), uuid4(), 1, datetime.now(UTC))
+    healthy = TaskWakeup(uuid4(), uuid4(), 1, datetime.now(UTC))
+    received = asyncio.Event()
+    attempts = 0
+
+    async def handle(event):
+        nonlocal attempts
+        if event.event_id == poison.event_id:
+            attempts += 1
+            raise RuntimeError("Unexpected projection failure")
+        received.set()
+
+    async with rabbit.activity_transport(url) as transport:
+        await transport.queue.purge()
+        dead = await transport.queue.channel.get_queue("aew.activity.dead")
+        await dead.purge()
+        consumer = asyncio.create_task(transport.consume(handle))
+        try:
+            await transport.publish(poison)
+            async with asyncio.timeout(10):
+                while True:
+                    message = await dead.get(fail=False)
+                    if message:
+                        assert rabbit.decode(message.body) == poison
+                        await message.ack()
+                        break
+                    await asyncio.sleep(0.05)
+            assert attempts == rabbit.MAX_HANDLER_ATTEMPTS
+            await transport.publish(healthy)
+            await asyncio.wait_for(received.wait(), 5)
+            assert not consumer.done()
+        finally:
+            consumer.cancel()
+            await asyncio.gather(consumer, return_exceptions=True)
+
+
 async def test_handler_failure_is_redelivered_after_connection_closes(broker):
     url, rabbit = broker
     event = TaskWakeup(uuid4(), uuid4(), 1, datetime.now(UTC))

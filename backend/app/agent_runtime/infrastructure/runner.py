@@ -25,7 +25,7 @@ from app.agent_runtime.domain.token_efficiency_policy import TokenEfficiencyPoli
 from app.agent_runtime.domain.usage import Pricing
 from app.agent_runtime.infrastructure.checkpoints import checkpoint_bytes, workspace_facts
 from app.agent_runtime.infrastructure.preflight import check_workspace
-from app.agent_runtime.infrastructure.workspace_lock import workspace_lock
+from app.platform.runtime.workspace_lock import workspace_lock
 
 SYSTEM_CONTRACT = """You are the Developer for one engineering task. Inspect current files with
 your native tools, implement the requested change, and run relevant tests. Correct
@@ -111,6 +111,10 @@ class Manifest(BaseModel):
         return self
 
 
+MAX_CONTROLLER_ACK_BYTES = 1024
+CONTROL_POLL_SECONDS = 0.5
+
+
 async def await_controller(native_id: str, control: Path = Path("/run/control")) -> None:
     """The controller commits the native ID before authorizing any paid turn.
 
@@ -121,12 +125,12 @@ async def await_controller(native_id: str, control: Path = Path("/run/control"))
         while True:
             path = control / "start.json"
             if path.exists():
-                if path.stat().st_size > 1024:
+                if path.stat().st_size > MAX_CONTROLLER_ACK_BYTES:
                     raise ValueError("Invalid controller acknowledgement")
                 if json.loads(path.read_bytes()) != {"native_session_id": native_id}:
                     raise ValueError("Controller acknowledgement belongs to another session")
                 return
-            await asyncio.sleep(0.1)
+            await asyncio.sleep(CONTROL_POLL_SECONDS)
 
 
 def emit(event: str, **payload: object) -> None:
@@ -142,7 +146,7 @@ async def request_supervision(anomaly: dict[str, Any]) -> dict[str, Any]:
     try:
         async with asyncio.timeout(55):
             while not path.exists():
-                await asyncio.sleep(0.1)
+                await asyncio.sleep(CONTROL_POLL_SECONDS)
             if path.stat().st_size > 8000:
                 raise ValueError("Oversized supervision response")
             response = json.loads(path.read_bytes())

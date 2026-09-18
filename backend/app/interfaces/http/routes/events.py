@@ -6,7 +6,9 @@ from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 
 from app.bootstrap.dependencies import get_event_queries
+from app.bootstrap.streams import task_signal
 from app.engineering.application.ports.event_queries import EventView
+from app.platform.scheduling.stream_signal import wait_for_change
 
 router = APIRouter(tags=["events"])
 
@@ -20,7 +22,10 @@ async def events_after(event_id: int) -> list[EventView]:
 
 
 async def sse_messages(
-    request: Request, heartbeat_seconds: float = 15, poll_seconds: float = 1
+    request: Request,
+    heartbeat_seconds: float = 15,
+    poll_seconds: float = 1,
+    listener: asyncio.Event | None = None,
 ) -> AsyncGenerator[str, None]:
     last_event_header = getattr(request, "headers", {}).get("last-event-id")
     try:
@@ -51,13 +56,24 @@ async def sse_messages(
         if elapsed >= heartbeat_seconds:
             yield ": keepalive\n\n"
             last_message = loop.time()
-        await asyncio.sleep(min(poll_seconds, heartbeat_seconds))
+        if listener is None:
+            await asyncio.sleep(min(poll_seconds, heartbeat_seconds))
+        else:
+            while not await wait_for_change(listener, heartbeat_seconds):
+                if await request.is_disconnected():
+                    return
+                yield ": keepalive\n\n"
 
 
 @router.get("/events/stream")
 async def stream_events(request: Request) -> StreamingResponse:
+    async def subscribed() -> AsyncGenerator[str, None]:
+        async with task_signal().subscribe() as listener:
+            async for message in sse_messages(request, listener=listener):
+                yield message
+
     return StreamingResponse(
-        sse_messages(request),
+        subscribed(),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )

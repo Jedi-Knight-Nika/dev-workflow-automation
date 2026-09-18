@@ -4,8 +4,8 @@ from uuid import uuid4
 
 import pytest
 
-from app.agent_runtime.infrastructure.process import capture
 from app.delivery.infrastructure import git_runner
+from app.platform.runtime.process import capture
 
 
 @pytest.mark.asyncio

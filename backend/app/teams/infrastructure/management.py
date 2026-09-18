@@ -249,30 +249,46 @@ class SqlAlchemyTeamManagementWorkflow:
         return views
 
     async def wake(self, team_id: uuid.UUID) -> WakeTeamResult:
+        from app.engineering.infrastructure.dependencies import lock_admission
         from app.engineering.infrastructure.job_queue import request_execution
 
-        team = await self._session.get(Team, team_id)
+        await lock_admission(self._session)
+        team = await self._session.get(Team, team_id, with_for_update=True)
         if team is None or team.archived_at or not team.enabled:
             raise TeamNotFound("Active team not found")
         team.execution_paused = False
-        tasks = await self._session.scalars(
-            select(Task)
-            .where(
+        await self._session.commit()
+        created = missing = 0
+        cursor = None
+        while True:
+            await lock_admission(self._session)
+            team = await self._session.get(
+                Team, team_id, with_for_update=True, populate_existing=True
+            )
+            if team is None or team.archived_at or not team.enabled or team.execution_paused:
+                await self._session.rollback()
+                break
+            query = select(Task).where(
                 Task.team_id == team_id,
                 Task.status == "NEW",
                 Task.archived_at.is_(None),
                 Task.workspace_path.is_(None),
                 Task.manual_takeover.is_(False),
             )
-            .order_by(Task.priority, Task.created_at)
-            .with_for_update()
-        )
-        created = missing = 0
-        for task in tasks:
-            missing += int(task.repository_id is None)
-            await request_execution(self._session, task, actor="user:team-wake")
-            created += int(task.workspace_path is not None)
-        await self._session.commit()
+            if cursor is not None:
+                query = query.where(Task.id > cursor)
+            tasks = list(
+                await self._session.scalars(query.order_by(Task.id).limit(25).with_for_update())
+            )
+            if not tasks:
+                await self._session.commit()
+                break
+            for task in tasks:
+                missing += int(task.repository_id is None)
+                await request_execution(self._session, task, actor="user:team-wake")
+                created += int(task.workspace_path is not None)
+            cursor = tasks[-1].id
+            await self._session.commit()
         counts = {
             state: count
             for state, count in (
@@ -295,38 +311,53 @@ class SqlAlchemyTeamManagementWorkflow:
     async def shutdown(self, team_id: uuid.UUID) -> ShutdownTeamResult:
         from app.engineering.domain.lifecycle import Action
         from app.engineering.infrastructure.controls import control_task
+        from app.engineering.infrastructure.dependencies import lock_admission
 
-        team = await self._session.get(Team, team_id)
+        await lock_admission(self._session)
+        team = await self._session.get(Team, team_id, with_for_update=True)
         if team is None or team.archived_at:
             raise TeamNotFound("Team not found")
         team.execution_paused = True
-        tasks = list(
-            await self._session.scalars(
-                select(Task)
-                .where(
-                    Task.team_id == team_id,
-                    Task.status.in_(["NEW", "ACTIVE", "WAITING_EXTERNAL", "WAITING_HUMAN"]),
-                    Task.archived_at.is_(None),
-                )
-                .order_by(Task.id)
-                .with_for_update()
+        await self._session.commit()
+        count = paused = 0
+        while True:
+            await lock_admission(self._session)
+            team = await self._session.get(
+                Team, team_id, with_for_update=True, populate_existing=True
             )
-        )
-        count = 0
-        for task in tasks:
+            if team is None or not team.execution_paused:
+                await self._session.rollback()
+                break
+            tasks = list(
+                await self._session.scalars(
+                    select(Task)
+                    .where(
+                        Task.team_id == team_id,
+                        Task.status.in_(["NEW", "ACTIVE", "WAITING_EXTERNAL", "WAITING_HUMAN"]),
+                        Task.archived_at.is_(None),
+                    )
+                    .order_by(Task.id)
+                    .limit(25)
+                    .with_for_update()
+                )
+            )
+            if not tasks:
+                await self._session.commit()
+                break
             count += int(
                 await self._session.scalar(
                     select(func.count(Job.id)).where(
-                        Job.task_id == task.id,
+                        Job.task_id.in_([task.id for task in tasks]),
                         Job.state.notin_([JobState.SUCCEEDED, JobState.FAILED, JobState.CANCELLED]),
                     )
                 )
                 or 0
             )
-            await control_task(self._session, task, Action.PAUSE, actor="user:team-shutdown")
-        # Stop new claims as well as running tasks; wake never resets paused tickets or usage.
-        await self._session.commit()
-        return ShutdownTeamResult(count, len(tasks))
+            for task in tasks:
+                await control_task(self._session, task, Action.PAUSE, actor="user:team-shutdown")
+            paused += len(tasks)
+            await self._session.commit()
+        return ShutdownTeamResult(count, paused)
 
     async def _views(self, teams: builtins.list[Team]) -> builtins.list[TeamView]:
         if not teams:

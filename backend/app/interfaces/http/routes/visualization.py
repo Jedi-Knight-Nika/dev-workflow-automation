@@ -16,8 +16,10 @@ from app.activity.application.ports import (
     ActivityWindow,
 )
 from app.bootstrap.activity import get_activity_monitor, get_activity_queries
+from app.bootstrap.streams import activity_signal
 from app.interfaces.http.errors import service_errors
 from app.platform.configuration.settings import get_settings
+from app.platform.scheduling.stream_signal import wait_for_change
 
 router = APIRouter(prefix="/visualization", tags=["visualization"])
 ScopeKind = Literal["workspace", "project", "team", "task", "repository"]
@@ -145,9 +147,14 @@ async def inspect(
 
 
 async def stream_messages(
-    request: Request, queries: ActivityQueries, window: ActivityWindow, cursor: int
+    request: Request,
+    queries: ActivityQueries,
+    window: ActivityWindow,
+    cursor: int,
+    listener: asyncio.Event | None = None,
 ) -> AsyncIterator[str]:
     heartbeat = 0
+    changed = True
     while not await request.is_disconnected():
         # Include late historical projections. A baseline-changing backfill
         # explicitly resets the viewer rather than silently losing old state.
@@ -155,7 +162,11 @@ async def stream_messages(
             window.scope, datetime(1970, 1, 1, tzinfo=UTC), datetime.now(UTC), window.detail
         )
         try:
-            page = await queries.events(live, cursor, None, 250)
+            page: dict[str, Any] = (
+                await queries.events(live, cursor, None, 250)
+                if changed
+                else {"events": [], "next_sequence": cursor, "has_more": False}
+            )
         except (LookupError, ValueError):
             yield "event: unavailable\ndata: {}\n\n"
             return
@@ -169,7 +180,7 @@ async def stream_messages(
         yield f'id: {cursor}\nevent: cursor\ndata: {{"sequence":{cursor}}}\n\n'
         if page["has_more"]:
             continue
-        if heartbeat % 10 == 0:
+        if listener is not None or heartbeat % 10 == 0:
             status_window = ActivityWindow(
                 window.scope, window.start, datetime.now(UTC), window.detail
             )
@@ -184,7 +195,10 @@ async def stream_messages(
             )
             yield f"event: status\ndata: {status}\n\n"
         heartbeat += 1
-        await asyncio.sleep(1)
+        if listener is None:
+            await asyncio.sleep(1)
+        else:
+            changed = await wait_for_change(listener, 10)
 
 
 @router.get("/stream")
@@ -209,8 +223,9 @@ async def stream(
     async def monitored_stream() -> AsyncIterator[str]:
         monitor.stream_open(cursor > 0)
         try:
-            async for message in stream_messages(request, queries, window, cursor):
-                yield message
+            async with activity_signal().subscribe() as listener:
+                async for message in stream_messages(request, queries, window, cursor, listener):
+                    yield message
         finally:
             monitor.stream_close()
 

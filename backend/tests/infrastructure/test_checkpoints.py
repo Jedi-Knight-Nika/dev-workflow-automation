@@ -4,8 +4,8 @@ import json
 import pytest
 
 from app.agent_runtime.infrastructure.checkpoints import checkpoint_bytes, workspace_facts
-from app.agent_runtime.infrastructure.process import capture
 from app.agent_runtime.infrastructure.tool_logs import ToolLogs
+from app.platform.runtime.process import capture
 
 
 @pytest.mark.asyncio

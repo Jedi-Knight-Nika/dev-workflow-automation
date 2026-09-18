@@ -17,6 +17,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    literal_column,
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -44,6 +45,21 @@ class Task(Base):
         Index("ix_tasks_due_at", "due_at"),
         Index("ix_tasks_team_status", "team_id", "status"),
         Index("ix_tasks_repository", "repository_id"),
+        *(
+            Index(
+                f"ix_tasks_{name}_search",
+                name,
+                postgresql_using="gin",
+                postgresql_ops={name: "gin_trgm_ops"},
+            )
+            for name in ("title", "external_key", "project_name")
+        ),
+        Index(
+            "ix_tasks_labels_search",
+            literal_column("lower(labels::text)").label("labels_search"),
+            postgresql_using="gin",
+            postgresql_ops={"labels_search": "gin_trgm_ops"},
+        ),
     )
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     external_key: Mapped[str | None] = mapped_column(String(100), unique=True)

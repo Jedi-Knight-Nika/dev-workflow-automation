@@ -21,12 +21,12 @@ from app.agent_runtime.infrastructure.models import (
     DeveloperTokenPolicy,
 )
 from app.agent_runtime.infrastructure.sessions import SqlSessionAdministration
-from app.agent_runtime.infrastructure.workspace_lock import workspace_lock
 from app.engineering.infrastructure.requirements import current_requirement
 from app.engineering.infrastructure.task_models import Job, Task, TaskEvent
 from app.platform.configuration.models import SettingsAuditEvent
 from app.platform.configuration.settings import get_settings
 from app.platform.persistence.base import utcnow
+from app.platform.runtime.workspace_lock import workspace_lock
 from app.platform.scheduling.states import JobState
 from app.teams.infrastructure.team_models import Team
 

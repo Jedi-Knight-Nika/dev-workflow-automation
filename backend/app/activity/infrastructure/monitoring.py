@@ -45,6 +45,11 @@ class ActivityMonitoring:
             registry=self.registry,
         )
         self.lag.set(-1)
+        self.enabled = Gauge(
+            "aew_activity_projection_enabled",
+            "Whether activity projection is configured",
+            registry=self.registry,
+        )
         self.init = Histogram(
             "aew_activity_renderer_init_seconds",
             "Renderer first frame latency",

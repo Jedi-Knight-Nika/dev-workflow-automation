@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 
 from app.agent_runtime.application.harness import WorkspaceUnavailable
-from app.agent_runtime.infrastructure.process import capture
+from app.platform.runtime.process import capture
 
 
 async def check_workspace(workspace: Path, *, read_only: bool = False) -> None:

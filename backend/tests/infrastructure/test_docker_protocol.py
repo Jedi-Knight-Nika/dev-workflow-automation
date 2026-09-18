@@ -18,7 +18,21 @@ from app.agent_runtime.infrastructure.docker_harness import (
     RunnerProtocolError,
 )
 from app.agent_runtime.infrastructure.runner import Manifest, await_controller
-from app.agent_runtime.infrastructure.workspace_lock import workspace_lock
+from app.platform.runtime.workspace_lock import workspace_lock
+
+
+async def test_failed_stop_still_force_deletes_owned_container():
+    from unittest.mock import AsyncMock
+
+    harness = object.__new__(DockerHarness)
+    harness.container_id = "owned"
+    harness.reader = harness.started = harness.completed = None
+    harness.interrupt = AsyncMock(side_effect=OSError("daemon interrupted stop"))
+    harness.client = AsyncMock()
+    harness.client.delete.return_value = httpx.Response(204)
+    with pytest.raises(OSError):
+        await harness.close()
+    harness.client.delete.assert_awaited_once_with("/containers/owned", params={"force": "true"})
 
 
 def frame(payload: bytes, stream: int = 1) -> bytes:

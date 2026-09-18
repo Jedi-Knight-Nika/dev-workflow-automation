@@ -14,6 +14,7 @@ from app.engineering.application.development_control import DevelopmentControl
 from app.engineering.application.jobs import RunEngineeringJob
 from app.engineering.infrastructure.development_recovery import SqlDevelopmentRecovery
 from app.engineering.infrastructure.executor import SqlPhaseExecutor
+from app.engineering.infrastructure.intake import SqlEngineeringIntake
 from app.engineering.infrastructure.jobs import SqlPhaseJobs
 from app.intake.application.process_deliveries import ProcessDeliveries
 from app.intake.application.reconcile_tasks import ReconcileExternalTasks
@@ -66,8 +67,8 @@ def create_scheduler(settings: Settings) -> Scheduler:
         presence=ManageWorkerPresence(SqlAlchemyWorkerPresence(SessionLocal, worker_id)),
         reconciler=ReconcileExternalTasks(
             CompositeTaskReconciliation(
-                SqlAlchemyLinearTaskReconciliation(SessionLocal),
-                SqlAlchemyTrelloTaskReconciliation(SessionLocal),
+                SqlAlchemyLinearTaskReconciliation(SessionLocal, SqlEngineeringIntake),
+                SqlAlchemyTrelloTaskReconciliation(SessionLocal, SqlEngineeringIntake),
             )
         ),
     )

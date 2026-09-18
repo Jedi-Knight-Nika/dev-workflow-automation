@@ -15,6 +15,8 @@ from app.agent_runtime.infrastructure.control_files import atomic_json
 from app.agent_runtime.infrastructure.runner import Manifest
 from app.agent_runtime.infrastructure.typed_receipt import decode_receipt
 
+MAX_LOG_BYTES = 131072
+
 
 class RunnerProtocolError(RuntimeError):
     pass
@@ -32,7 +34,7 @@ class DockerFrames:
         events = []
         while len(self.buffer) >= 8:
             stream, size = self.buffer[0], int.from_bytes(self.buffer[4:8], "big")
-            if stream not in {1, 2} or self.buffer[1:4] != b"\0\0\0" or size > 131072:
+            if stream not in {1, 2} or self.buffer[1:4] != b"\0\0\0" or size > MAX_LOG_BYTES:
                 raise RunnerProtocolError("Invalid runner log frame")
             if len(self.buffer) < 8 + size:
                 break
@@ -41,7 +43,7 @@ class DockerFrames:
             if stream == 2:
                 continue  # Raw SDK stderr is not task context or safe audit data.
             self.line.extend(frame)
-            if len(self.line) > 131072:
+            if len(self.line) > MAX_LOG_BYTES:
                 raise RunnerProtocolError("Runner event exceeded its bound")
             while b"\n" in self.line:
                 line, _, remainder = self.line.partition(b"\n")
@@ -250,11 +252,15 @@ class DockerHarness:
                     ):
                         raise RunnerProtocolError("Container ownership could not be verified")
                     self.container_id = metadata["Id"]
-            await self.interrupt()
-            if self.container_id:
-                response = await self.client.delete(f"/containers/{self.container_id}")
-                if response.status_code not in {204, 404}:
-                    response.raise_for_status()
+            try:
+                await self.interrupt()
+            finally:
+                if self.container_id:
+                    response = await self.client.delete(
+                        f"/containers/{self.container_id}", params={"force": "true"}
+                    )
+                    if response.status_code not in {204, 404}:
+                        response.raise_for_status()
         finally:
             if self.reader:
                 self.reader.cancel()

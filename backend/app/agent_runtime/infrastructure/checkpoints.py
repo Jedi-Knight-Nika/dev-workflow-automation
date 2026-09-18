@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from app.agent_runtime.infrastructure.process import capture
+from app.platform.runtime.process import capture
 
 
 async def workspace_facts(workspace: Path, root: Path) -> dict[str, Any]:

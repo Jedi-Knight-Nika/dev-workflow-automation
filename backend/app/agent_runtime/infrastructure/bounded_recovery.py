@@ -11,6 +11,7 @@ from app.agent_runtime.infrastructure.checkpoints import workspace_facts
 from app.agent_runtime.infrastructure.cost_queries import unsettled_usage
 from app.agent_runtime.infrastructure.models import AIRun, DeveloperSession
 from app.engineering.application.jobs import PhaseLease
+from app.engineering.domain.repair_limits import REPAIR_INPUT_TOKENS, REPAIR_USD
 from app.engineering.infrastructure.lease_guard import assert_current
 from app.engineering.infrastructure.task_models import Job, Task, TaskEvent
 
@@ -220,8 +221,8 @@ async def schedule_bounded_repair(
                     "previous_run_id": str(prior.id),
                     "errors": errors,
                     "diff_fingerprint": facts["diff_fingerprint"],
-                    "input_limit": 80000,
-                    "usd_limit": "0.15",
+                    "input_limit": REPAIR_INPUT_TOKENS,
+                    "usd_limit": str(REPAIR_USD),
                 },
             )
         )

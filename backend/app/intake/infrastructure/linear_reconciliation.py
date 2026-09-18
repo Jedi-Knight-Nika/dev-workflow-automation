@@ -1,22 +1,27 @@
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.engineering.infrastructure.job_queue import record_event, request_execution
 from app.engineering.infrastructure.task_models import Task
+from app.intake.application.ports.engineering_intake import EngineeringIntake
 from app.intake.application.ports.task_reconciliation import ReconciliationResult
 from app.intake.domain.linear import configured_repository_id, linear_datetime, linear_priority
 from app.intake.infrastructure.linear_client import LinearClient, LinearIssue
 from app.intake.infrastructure.task_snapshot import ExternalTaskSnapshot
 from app.platform.integrations.models import Integration
 from app.platform.security.crypto import cipher
-from app.teams.infrastructure.routing import assign_routed_team
 
 
 class SqlAlchemyLinearTaskReconciliation:
-    def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
+    def __init__(
+        self,
+        session_factory: async_sessionmaker[AsyncSession],
+        engineering: Callable[[AsyncSession], EngineeringIntake],
+    ) -> None:
         self._session_factory = session_factory
+        self._engineering = engineering
 
     async def reconcile_due(self) -> ReconciliationResult:
         async with self._session_factory() as session:
@@ -52,8 +57,27 @@ class SqlAlchemyLinearTaskReconciliation:
                 issues = await LinearClient(
                     cipher.decrypt(integration.encrypted_credentials)
                 ).list_issues(assignee, states)
+                snapshots = {
+                    row.external_id: row
+                    for row in await session.scalars(
+                        select(ExternalTaskSnapshot).where(
+                            ExternalTaskSnapshot.provider == "linear",
+                            ExternalTaskSnapshot.external_id.in_([issue["id"] for issue in issues]),
+                        )
+                    )
+                }
+                tasks = {
+                    row.external_key: row
+                    for row in await session.scalars(
+                        select(Task).where(
+                            Task.external_key.in_([issue["identifier"] for issue in issues])
+                        )
+                    )
+                }
                 for issue in issues:
-                    created = await self._upsert_issue(session, integration, issue)
+                    created = await self._upsert_issue(
+                        session, integration, issue, tasks, snapshots
+                    )
                     imported += int(created)
                     updated += int(not created)
             integration.sync_status, integration.last_error = ("READY", None)
@@ -67,9 +91,14 @@ class SqlAlchemyLinearTaskReconciliation:
         return ReconciliationResult(processed=True, imported=imported, updated=updated)
 
     async def _upsert_issue(
-        self, session: AsyncSession, integration: Integration, issue: LinearIssue
+        self,
+        session: AsyncSession,
+        integration: Integration,
+        issue: LinearIssue,
+        tasks: dict[str | None, Task],
+        snapshots: dict[str, ExternalTaskSnapshot],
     ) -> bool:
-        task = await session.scalar(select(Task).where(Task.external_key == issue["identifier"]))
+        task = tasks.get(issue["identifier"])
         created = task is None
         if task is None:
             task = Task(
@@ -81,15 +110,11 @@ class SqlAlchemyLinearTaskReconciliation:
             )
             session.add(task)
             await session.flush()
-            await assign_routed_team(session, task, reason="linear-reconciliation")
-            await request_execution(session, task, actor="tracker:ingestion")
-            await record_event(
-                session,
-                task.id,
-                "TASK_CREATED_FROM_LINEAR_RECONCILIATION",
-                {"linear_issue_id": issue["id"], "identifier": issue["identifier"]},
-                source="linear",
+            tasks[issue["identifier"]] = task
+            await self._engineering(session).created(
+                task.id, "linear", issue["id"], issue["identifier"]
             )
+
         else:
             from app.intake.infrastructure.engineering_events import requirements_changed
 
@@ -100,12 +125,7 @@ class SqlAlchemyLinearTaskReconciliation:
             task.description = issue["description"]
             task.priority = linear_priority(issue["priority"])
         task.due_at = linear_datetime(issue["raw"].get("dueDate"))
-        snapshot = await session.scalar(
-            select(ExternalTaskSnapshot).where(
-                ExternalTaskSnapshot.provider == "linear",
-                ExternalTaskSnapshot.external_id == issue["id"],
-            )
-        )
+        snapshot = snapshots.get(issue["id"])
         if snapshot is None:
             snapshot = ExternalTaskSnapshot(
                 task_id=task.id,
@@ -114,6 +134,7 @@ class SqlAlchemyLinearTaskReconciliation:
                 identifier=issue["identifier"],
             )
             session.add(snapshot)
+            snapshots[issue["id"]] = snapshot
         snapshot.task_id = task.id
         snapshot.assignee_id = issue["assignee_id"]
         snapshot.state_id = issue["state_id"]

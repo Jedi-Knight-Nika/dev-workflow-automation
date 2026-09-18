@@ -8,6 +8,17 @@ import pytest
 from app.analytics.infrastructure.cache import CachedAnalyticsQueries
 
 
+async def test_hot_cache_entry_survives_capacity_eviction():
+    inner = AsyncMock()
+    inner.dashboard.return_value = {}
+    cache = CachedAnalyticsQueries(inner)
+    cache.cache = {("dashboard", day, None): (monotonic(), {}) for day in range(128)}
+    await cache.dashboard(0)
+    await cache.dashboard(128)
+    assert ("dashboard", 0, None) in cache.cache
+    assert ("dashboard", 1, None) not in cache.cache
+
+
 @pytest.mark.asyncio
 async def test_fresh_cache_hit_does_not_wait_for_fill_lock():
     inner = AsyncMock()

@@ -15,6 +15,7 @@ from app.engineering.application.ports.development_recovery import (
     ResumablePhaseExecutor,
 )
 from app.engineering.domain.lifecycle import Action, WaitReason
+from app.engineering.domain.repair_limits import REPAIR_INPUT_TOKENS
 
 
 @dataclass(frozen=True)
@@ -34,7 +35,7 @@ def bounded_repair_policy(policy: TokenEfficiencyPolicy) -> TokenEfficiencyPolic
         first_edit_warning_tokens=20000,
         exploration_hard_tokens=50000,
         no_progress_tokens=20000,
-        max_turn_input_tokens=80000,
+        max_turn_input_tokens=REPAIR_INPUT_TOKENS,
         automatic_rollover=False,
     )
 

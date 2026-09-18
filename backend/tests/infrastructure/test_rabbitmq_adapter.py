@@ -113,3 +113,48 @@ async def test_poison_message_is_dead_lettered_without_calling_handler(rabbit):
         await rabbit.RabbitActivityTransport(AsyncMock(), Messages(message)).consume(handler)
     message.reject.assert_awaited_once_with(requeue=False)
     handler.assert_not_awaited()
+
+
+@pytest.mark.parametrize("attempt", [0, 1, 2])
+async def test_handler_bug_has_durable_bounded_retries(rabbit, monkeypatch, attempt):
+    monkeypatch.setattr(rabbit.asyncio, "sleep", AsyncMock())
+    message = AsyncMock(body=rabbit.encode(event()), headers={rabbit.RETRY_HEADER: attempt})
+    exchange = AsyncMock(publish=AsyncMock(return_value=rabbit.Basic.Ack()))
+    with pytest.raises(ConnectionError):
+        await rabbit.RabbitActivityTransport(exchange, Messages(message)).consume(
+            AsyncMock(side_effect=RuntimeError("private data must not be logged"))
+        )
+    if attempt == 2:
+        message.reject.assert_awaited_once_with(requeue=False)
+        message.ack.assert_not_awaited()
+        exchange.publish.assert_not_awaited()
+    else:
+        published = exchange.publish.await_args.args[0]
+        assert published.headers[rabbit.RETRY_HEADER] == attempt + 1
+        message.ack.assert_awaited_once()
+        message.reject.assert_not_awaited()
+
+
+async def test_unconfirmed_retry_does_not_ack_original(rabbit, monkeypatch):
+    monkeypatch.setattr(rabbit.asyncio, "sleep", AsyncMock())
+    message = AsyncMock(body=rabbit.encode(event()), headers={})
+    exchange = AsyncMock(publish=AsyncMock(return_value=None))
+    with pytest.raises(PublicationFailed):
+        await rabbit.RabbitActivityTransport(exchange, Messages(message)).consume(
+            AsyncMock(side_effect=RuntimeError())
+        )
+    message.ack.assert_not_awaited()
+    message.reject.assert_not_awaited()
+
+
+async def test_cancelled_handler_never_acks_or_republishes(rabbit):
+    import asyncio
+
+    message = AsyncMock(body=rabbit.encode(event()), headers={})
+    exchange = AsyncMock()
+    with pytest.raises(asyncio.CancelledError):
+        await rabbit.RabbitActivityTransport(exchange, Messages(message)).consume(
+            AsyncMock(side_effect=asyncio.CancelledError())
+        )
+    exchange.publish.assert_not_awaited()
+    message.ack.assert_not_awaited()

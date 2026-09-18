@@ -3,6 +3,7 @@ import signal
 
 import structlog
 
+from app.agent_runtime.infrastructure.capacity import check_host_capacity
 from app.bootstrap.coordinator import coordinator_controller
 from app.bootstrap.observability import supporting_controller
 from app.bootstrap.observer import observer_controller
@@ -32,6 +33,7 @@ async def run() -> None:
     loop = asyncio.get_running_loop()
     for name in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(name, stopped.set)
+    await check_host_capacity(settings)
     await scheduler.start()
     try:
         log.info("worker_service_started")

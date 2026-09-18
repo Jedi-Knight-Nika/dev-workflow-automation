@@ -48,6 +48,7 @@ def get_account_settings_store(
 
 
 def get_event_queries() -> QueryEvents:
+    """Each SSE read releases its session instead of pinning one for the connection."""
     return QueryEvents(SqlAlchemyEventQueries(SessionLocal))
 
 
@@ -58,6 +59,7 @@ def get_readiness_probe(
 
 
 def get_task_lifecycle_factory() -> SqlAlchemyTaskLifecycleUnitOfWorkFactory:
+    """Application-owned units of work commit lifecycle effects atomically."""
     return SqlAlchemyTaskLifecycleUnitOfWorkFactory(SessionLocal)
 
 
@@ -68,10 +70,12 @@ def get_task_queries(
 
 
 def get_task_dependencies() -> SqlTaskDependencies:
+    """Graph edits own a short transaction and their admission lock."""
     return SqlTaskDependencies(SessionLocal)
 
 
 def get_deployment_queries() -> SqlDeploymentQueries:
+    """Independent bounded reads do not share a mutable request transaction."""
     return SqlDeploymentQueries(SessionLocal)
 
 

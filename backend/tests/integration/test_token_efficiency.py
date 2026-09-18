@@ -5,8 +5,8 @@ import pytest
 from sqlalchemy import select
 
 from app.agent_runtime.infrastructure.models import AIRun, DeveloperContextGeneration
-from app.agent_runtime.infrastructure.process import capture
 from app.agent_runtime.infrastructure.token_efficiency import SqlTokenEfficiency
+from app.platform.runtime.process import capture
 from tests.integration.test_enrollment_and_costs import scenario
 from tests.integration.test_session_changes import prepare
 

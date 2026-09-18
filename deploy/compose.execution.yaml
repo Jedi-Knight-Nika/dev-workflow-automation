@@ -77,6 +77,8 @@ services:
     entrypoint: [/bin/true]
 
   provider-egress:
+    environment:
+      EGRESS_MAX_CONNECTIONS: ${EGRESS_MAX_CONNECTIONS:-64}
     build:
       context: ${BACKEND_BUILD_CONTEXT:-../backend}
       target: worker

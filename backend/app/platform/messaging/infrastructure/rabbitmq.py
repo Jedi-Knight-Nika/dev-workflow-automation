@@ -1,19 +1,24 @@
 """AMQP adapter. No task execution, database access or provider credentials."""
 
+import asyncio
 import json
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from datetime import datetime
 from uuid import UUID
 
+import structlog
 from aio_pika import DeliveryMode, ExchangeType, Message, connect
 from aio_pika.abc import AbstractExchange, AbstractQueue
-from aio_pika.exceptions import CONNECTION_EXCEPTIONS
+from aio_pika.exceptions import CONNECTION_EXCEPTIONS, AMQPException
 from pamqp.commands import Basic
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.platform.messaging.application.ports import PublicationFailed, TaskWakeup
 
 ROUTING_KEY = "engineering.lifecycle.changed"
+MAX_HANDLER_ATTEMPTS = 3
+RETRY_HEADER = "aew-handler-attempt"
 
 
 def encode(event: TaskWakeup) -> bytes:
@@ -55,7 +60,7 @@ class RabbitActivityTransport:
     def __init__(self, exchange: AbstractExchange, queue: AbstractQueue) -> None:
         self.exchange, self.queue = exchange, queue
 
-    async def publish(self, event: TaskWakeup) -> None:
+    async def publish(self, event: TaskWakeup, *, attempt: int = 0) -> None:
         try:
             confirmation = await self.exchange.publish(
                 Message(
@@ -64,6 +69,7 @@ class RabbitActivityTransport:
                     delivery_mode=DeliveryMode.PERSISTENT,
                     message_id=str(event.event_id),
                     type=ROUTING_KEY,
+                    headers={RETRY_HEADER: attempt},
                 ),
                 routing_key=ROUTING_KEY,
                 mandatory=True,
@@ -82,7 +88,27 @@ class RabbitActivityTransport:
                 except (ValueError, TypeError, KeyError, AttributeError, RecursionError):
                     await message.reject(requeue=False)
                     continue
-                await handle(event)
+                try:
+                    await handle(event)
+                except (OSError, TimeoutError, SQLAlchemyError, AMQPException):
+                    raise
+                except Exception as exc:  # noqa: BLE001 -- quarantine bounded handler failures without losing the source record
+                    attempt = (message.headers or {}).get(RETRY_HEADER, 0)
+                    if type(attempt) is not int or not 0 <= attempt < MAX_HANDLER_ATTEMPTS:
+                        attempt = MAX_HANDLER_ATTEMPTS - 1
+                    attempt += 1
+                    structlog.get_logger().error(
+                        "activity_notification_failed",
+                        event_id=str(event.event_id),
+                        error_type=type(exc).__name__,
+                        attempt=attempt,
+                        dead_lettered=attempt >= MAX_HANDLER_ATTEMPTS,
+                    )
+                    if attempt >= MAX_HANDLER_ATTEMPTS:
+                        await message.reject(requeue=False)
+                        continue
+                    await asyncio.sleep(attempt)
+                    await self.publish(event, attempt=attempt)
                 await message.ack()
         raise ConnectionError("Activity consumer stopped")
 

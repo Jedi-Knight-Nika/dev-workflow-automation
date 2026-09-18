@@ -81,6 +81,7 @@ services:
       context: ../backend
       target: api
     environment: &backend-environment
+      WEB_CONCURRENCY: ${API_WORKERS:-1}
       ENVIRONMENT: production
       DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL with URL-encoded credentials}
       DATABASE_URL_SYNC: ${DATABASE_URL_SYNC:?Set DATABASE_URL_SYNC with URL-encoded credentials}
@@ -105,8 +106,8 @@ services:
       WORKER_LEASE_SECONDS: ${WORKER_LEASE_SECONDS:-330}
       WORKER_HEARTBEAT_SECONDS: ${WORKER_HEARTBEAT_SECONDS:-5}
     depends_on:
-      postgres:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     volumes:
       - workspaces:/data/workspaces
     expose:
@@ -123,6 +124,17 @@ services:
       timeout: 3s
       retries: 10
     restart: unless-stopped
+
+  migrate:
+    build:
+      context: ../backend
+      target: api
+    command: [.venv/bin/alembic, upgrade, head]
+    environment: *backend-environment
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: 'no'
 
   worker:
     build:

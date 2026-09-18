@@ -29,6 +29,14 @@ groups:
         expr: pg_up == 0
         for: 1m
         labels: { severity: critical, service: postgres }
+      - alert: ActivityProjectionStalled
+        expr: (aew_activity_projector_lag_seconds > 60 or aew_activity_projector_lag_seconds < 0) and on() (aew_activity_projection_enabled == 1)
+        for: 5m
+        labels: { severity: warning, service: activity }
+      - alert: SchedulerClaimContention
+        expr: histogram_quantile(0.95, sum by (le) (rate(aew_scheduler_claim_seconds_bucket[5m]))) > 1
+        for: 5m
+        labels: { severity: warning, service: worker-controller }
       - alert: ContainerMemoryPressure
         expr: container_memory_working_set_bytes / (container_spec_memory_limit_bytes > 0) > 0.9
         for: 5m

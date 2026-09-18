@@ -67,6 +67,12 @@ def test_every_standard_stack_includes_private_persistent_messaging(base, overla
     )
     configuration = json.loads(result.stdout)
     services = configuration["services"]
+    assert (
+        services["backend"]["depends_on"]["migrate"]["condition"]
+        == "service_completed_successfully"
+    )
+    assert services["migrate"]["command"] == [".venv/bin/alembic", "upgrade", "head"]
+    assert services["migrate"]["restart"] == "no"
     broker, messaging = services["rabbitmq"], services["messaging"]
     assert not broker.get("profiles") and not messaging.get("profiles")
     assert not broker.get("ports") and not messaging.get("ports")

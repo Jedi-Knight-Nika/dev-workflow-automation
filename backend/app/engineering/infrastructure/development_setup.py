@@ -12,6 +12,7 @@ from app.agent_runtime.infrastructure.runner import Manifest
 from app.engineering.application.develop import DevelopmentBlocked
 from app.engineering.application.jobs import PhaseBlocked, PhaseLease
 from app.engineering.domain.lifecycle import WaitReason
+from app.engineering.domain.repair_limits import REPAIR_USD
 from app.engineering.infrastructure.developer_request import DeveloperRequest
 from app.engineering.infrastructure.phase_context import PhaseContext
 from app.platform.configuration.settings import Settings
@@ -86,7 +87,7 @@ async def admit_development(
                 "Insufficient budget for coding plus bounded supervision",
             )
     if bounded_repair:
-        remaining = min(remaining, Decimal("0.15"))
+        remaining = min(remaining, REPAIR_USD)
     store.reservation_usd = remaining
     store.routing_price_ids = {UUID(route.pricing_id) for route in routed_models}
     if price:

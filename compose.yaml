@@ -60,7 +60,8 @@ services:
     build:
       context: ./backend
       target: api
-    environment:
+    environment: &backend-environment
+      WEB_CONCURRENCY: ${API_WORKERS:-1}
       DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://engineering_worker:change-me@postgres:5432/engineering_worker}
       DATABASE_URL_SYNC: ${DATABASE_URL_SYNC:-postgresql+psycopg://engineering_worker:change-me@postgres:5432/engineering_worker}
       APP_SECRET_KEY: ${APP_SECRET_KEY:-development-only-secret-change-me}
@@ -88,8 +89,8 @@ services:
       WORKER_LEASE_SECONDS: ${WORKER_LEASE_SECONDS:-330}
       WORKER_HEARTBEAT_SECONDS: ${WORKER_HEARTBEAT_SECONDS:-5}
     depends_on:
-      postgres:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     volumes:
       - workspaces:/data/workspaces
       - ${GITHUB_APP_PRIVATE_KEY_FILE_HOST:-./github-app.private-key.pem}:/run/secrets/github_app_private_key:ro
@@ -106,6 +107,17 @@ services:
       interval: 10s
       timeout: 3s
       retries: 10
+
+  migrate:
+    build:
+      context: ./backend
+      target: api
+    command: [.venv/bin/alembic, upgrade, head]
+    environment: *backend-environment
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: 'no'
 
   worker:
     build:

@@ -22,11 +22,18 @@ class SqlAnalyticsFacts:
         self.sessions = sessions
 
     async def tasks(
-        self, since: datetime, team_id: UUID | None = None, task_id: UUID | None = None
+        self,
+        since: datetime,
+        team_id: UUID | None = None,
+        task_id: UUID | None = None,
+        *,
+        task_ids: list[UUID] | None = None,
     ) -> list[TaskFact]:
         async with self.sessions() as session:
             query = select(Task)
-            if task_id:
+            if task_ids is not None:
+                query = query.where(Task.id.in_(task_ids))
+            elif task_id:
                 query = query.where(Task.id == task_id)
             else:
                 query = query.where(

@@ -1,10 +1,12 @@
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
+from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.engineering.infrastructure.job_queue import record_event, request_execution
 from app.engineering.infrastructure.task_models import Task
+from app.intake.application.ports.engineering_intake import EngineeringIntake
 from app.intake.application.ports.task_reconciliation import ReconciliationResult
 from app.intake.domain.linear import configured_repository_id
 from app.intake.infrastructure.task_snapshot import ExternalTaskSnapshot
@@ -17,12 +19,16 @@ from app.intake.infrastructure.trello_client import (
 from app.platform.integrations.models import Integration
 from app.platform.scheduling.states import IntegrationStatus
 from app.platform.security.crypto import cipher
-from app.teams.infrastructure.routing import assign_routed_team
 
 
 class SqlAlchemyTrelloTaskReconciliation:
-    def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
+    def __init__(
+        self,
+        session_factory: async_sessionmaker[AsyncSession],
+        engineering: Callable[[AsyncSession], EngineeringIntake],
+    ) -> None:
         self._session_factory = session_factory
+        self._engineering = engineering
 
     async def reconcile_due(self) -> ReconciliationResult:
         async with self._session_factory() as session:
@@ -64,10 +70,32 @@ class SqlAlchemyTrelloTaskReconciliation:
                     board_id, {str(value) for value in configuration.get("list_ids") or []}
                 )
                 imported = updated = 0
-                for card in cards:
-                    created = await self._upsert_card(session, integration, card)
-                    imported += int(created)
-                    updated += int(not created)
+                async with session.begin_nested():
+                    snapshots = {
+                        row.external_id: row
+                        for row in await session.scalars(
+                            select(ExternalTaskSnapshot).where(
+                                ExternalTaskSnapshot.provider == "trello",
+                                ExternalTaskSnapshot.external_id.in_(
+                                    [card["id"] for card in cards]
+                                ),
+                            )
+                        )
+                    }
+                    tasks = {
+                        row.id: row
+                        for row in await session.scalars(
+                            select(Task).where(
+                                Task.id.in_([row.task_id for row in snapshots.values()])
+                            )
+                        )
+                    }
+                    for card in cards:
+                        created = await self._upsert_card(
+                            session, integration, card, tasks, snapshots
+                        )
+                        imported += int(created)
+                        updated += int(not created)
                 integration.sync_status = "READY"
                 integration.last_error = None
                 integration.last_synced_at = now
@@ -81,15 +109,15 @@ class SqlAlchemyTrelloTaskReconciliation:
                 return ReconciliationResult(processed=True)
 
     async def _upsert_card(
-        self, session: AsyncSession, integration: Integration, card: TrelloCard
+        self,
+        session: AsyncSession,
+        integration: Integration,
+        card: TrelloCard,
+        tasks: dict[UUID, Task],
+        snapshots: dict[str, ExternalTaskSnapshot],
     ) -> bool:
-        snapshot = await session.scalar(
-            select(ExternalTaskSnapshot).where(
-                ExternalTaskSnapshot.provider == "trello",
-                ExternalTaskSnapshot.external_id == card["id"],
-            )
-        )
-        task = await session.get(Task, snapshot.task_id) if snapshot else None
+        snapshot = snapshots.get(card["id"])
+        task = tasks.get(snapshot.task_id) if snapshot else None
         created = task is None
         identifier = f"TRELLO-{card['short_link']}"
         if task is None:
@@ -102,19 +130,13 @@ class SqlAlchemyTrelloTaskReconciliation:
             )
             session.add(task)
             await session.flush()
-            await assign_routed_team(session, task, reason="trello-reconciliation")
-            await request_execution(session, task, actor="tracker:ingestion")
-            await record_event(
-                session,
-                task.id,
-                "TASK_CREATED_FROM_TRELLO",
-                {"trello_card_id": card["id"], "identifier": identifier},
-                source="trello",
-            )
+            tasks[task.id] = task
+            await self._engineering(session).created(task.id, "trello", card["id"], identifier)
             snapshot = ExternalTaskSnapshot(
                 task_id=task.id, provider="trello", external_id=card["id"], identifier=identifier
             )
             session.add(snapshot)
+            snapshots[card["id"]] = snapshot
         else:
             from app.intake.infrastructure.engineering_events import requirements_changed
 

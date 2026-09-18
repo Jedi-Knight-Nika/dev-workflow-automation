@@ -3,6 +3,9 @@ from pathlib import Path
 from typing import Any
 from uuid import UUID
 
+RUNNER_MEMORY_BYTES = 2 * 1024**3
+RUNNER_CPUS = 2
+
 
 @dataclass(frozen=True)
 class RunnerMounts:
@@ -121,8 +124,8 @@ def developer_container_spec(
             "SecurityOpt": ["no-new-privileges:true"],
             "Tmpfs": {"/tmp": "rw,nosuid,nodev,size=512m"},
             "PidsLimit": 256,
-            "Memory": 2 * 1024**3,
-            "NanoCpus": 2_000_000_000,
+            "Memory": RUNNER_MEMORY_BYTES,
+            "NanoCpus": RUNNER_CPUS * 1_000_000_000,
             "Init": True,
         },
     }

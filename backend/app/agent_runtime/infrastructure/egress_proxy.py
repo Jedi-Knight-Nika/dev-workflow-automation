@@ -10,7 +10,10 @@ import os
 import re
 
 ALLOWED = frozenset({"api.openai.com", "api.anthropic.com", "api.deepseek.com", "github.com"})
-LIMIT = asyncio.Semaphore(64)
+MAX_CONNECTIONS = int(os.environ.get("EGRESS_MAX_CONNECTIONS", "64"))
+if not 1 <= MAX_CONNECTIONS <= 1024:
+    raise ValueError("EGRESS_MAX_CONNECTIONS must be between 1 and 1024")
+LIMIT = asyncio.Semaphore(MAX_CONNECTIONS)
 
 
 def destination(header: bytes) -> str:

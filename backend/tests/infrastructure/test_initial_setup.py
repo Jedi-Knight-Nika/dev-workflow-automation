@@ -12,8 +12,8 @@ def test_initial_and_additive_revisions_can_generate_sql_without_a_database() ->
     output = StringIO()
     config = Config("alembic.ini", output_buffer=output)
     revisions = ScriptDirectory.from_config(config)
-    assert revisions.get_heads() == ["0015_notification_outbox"]
-    assert len(list(revisions.walk_revisions())) == 15
+    assert revisions.get_heads() == ["0016_search_indexes"]
+    assert len(list(revisions.walk_revisions())) == 16
     command.upgrade(config, "head", sql=True)
     sql = output.getvalue()
     assert "CREATE TABLE developer_sessions" in sql
@@ -21,7 +21,7 @@ def test_initial_and_additive_revisions_can_generate_sql_without_a_database() ->
     assert "INSERT INTO teams" in sql
     assert "ALTER TABLE ai_runs" in sql
     assert "CREATE TABLE developer_context_generations" in sql
-    assert "CREATE EXTENSION" not in sql
+    assert "CREATE EXTENSION IF NOT EXISTS pg_trgm" in sql
     assert "DROP TABLE" not in sql
     assert "CREATE TABLE runner_resource_bindings" in sql
     assert "CREATE TABLE task_forecasts" in sql

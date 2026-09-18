@@ -58,6 +58,7 @@ def create_activity_projector() -> ProjectActivity:
 
 
 async def render_activity_metrics() -> bytes:
+    activity_monitoring.enabled.set(int(get_settings().activity_enabled))
     if get_settings().activity_enabled:
         try:
             await asyncio.wait_for(get_activity_queries().projection_status(), timeout=1)

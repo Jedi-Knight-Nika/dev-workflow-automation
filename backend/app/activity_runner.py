@@ -25,7 +25,7 @@ async def run() -> None:
         try:
             await projector.execute()
         except Exception as exc:  # noqa: BLE001 -- optional process boundary; only the error class is logged
-            structlog.get_logger().warning(
+            structlog.get_logger().error(
                 "activity_projection_delayed", error_type=type(exc).__name__
             )
         try:

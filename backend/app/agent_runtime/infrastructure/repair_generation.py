@@ -14,12 +14,12 @@ from app.agent_runtime.infrastructure.models import (
     DeveloperContextGeneration,
     DeveloperSession,
 )
-from app.agent_runtime.infrastructure.process import capture
 from app.engineering.application.jobs import PhaseLease
 from app.engineering.infrastructure.lease_guard import assert_current
 from app.engineering.infrastructure.models import ValidationRun
 from app.engineering.infrastructure.task_models import Job, Task, TaskEvent
 from app.platform.persistence.base import utcnow
+from app.platform.runtime.process import capture
 
 
 async def prepare_repair(

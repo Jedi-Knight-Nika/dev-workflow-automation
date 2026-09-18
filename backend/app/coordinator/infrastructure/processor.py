@@ -236,9 +236,17 @@ class SqlCoordinationRuns:
 
     async def ensure_authorized(self, run_id: UUID) -> None:
         async with self.sessions() as session:
-            run = await session.get(CoordinatorRun, run_id)
-            task = await session.get(Task, run.task_id) if run else None
-            team = await session.get(Team, task.team_id) if task and task.team_id else None
+            row = (
+                await session.execute(
+                    select(CoordinatorRun, Task, Team)
+                    .join(Task, Task.id == CoordinatorRun.task_id)
+                    .join(Team, Team.id == Task.team_id)
+                    .where(CoordinatorRun.id == run_id)
+                )
+            ).one_or_none()
+            if row is None:
+                raise ValueError("Coordinator authority changed during inference")
+            run, task, team = row
             if (
                 not run
                 or run.status != "CLAIMED"
@@ -262,7 +270,16 @@ class SqlCoordinationRuns:
     ) -> None:
         async with self.sessions.begin() as session:
             run = await session.get(CoordinatorRun, run_id, with_for_update=True)
-            assert run
+            if run is None or run.status != "CLAIMED":
+                return
+            if run.task_id != task_id:
+                raise ValueError("Coordinator task identity changed")
+            task = await session.get(Task, task_id, with_for_update=True)
+            if task is None or (task.lifecycle_version, task.requirement_version) != (
+                run.lifecycle_revision,
+                run.requirement_revision,
+            ):
+                raise SituationChanged("Task advanced before decision completion")
             run.decision = decision_payload(decision)
             run.status = "SHADOW" if run.mode == "shadow" else "READY"
             run.finished_at = datetime.now(UTC)

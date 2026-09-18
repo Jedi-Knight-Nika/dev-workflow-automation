@@ -37,14 +37,17 @@ def supporting_revision(name="0002_observability_analytics"):
     return module
 
 
-def isolated_schema(connection: Connection) -> None:
+def isolated_schema(connection: Connection) -> str:
     schema = "initial_setup_test_" + uuid4().hex
     connection.execute(text(f'CREATE SCHEMA "{schema}"'))
     connection.execute(text(f'SET LOCAL search_path TO "{schema}"'))
+    return schema
 
 
 def exercise_fresh_setup(connection: Connection) -> None:
-    isolated_schema(connection)
+    schema = isolated_schema(connection)
+    connection.execute(text("CREATE EXTENSION IF NOT EXISTS pg_trgm"))
+    connection.execute(text(f'ALTER EXTENSION pg_trgm SET SCHEMA "{schema}"'))
     revision = initial_revision()
     context = MigrationContext.configure(connection)
     with Operations.context(context):
@@ -66,6 +69,7 @@ def exercise_fresh_setup(connection: Connection) -> None:
         supporting_revision("0013_deployment_observations").upgrade()
         supporting_revision("0014_task_creation_requests").upgrade()
         supporting_revision("0015_notification_outbox").upgrade()
+        supporting_revision("0016_search_indexes").upgrade()
         assert (
             connection.execute(text("SELECT * FROM team_agent_profiles ORDER BY id")).all()
             == baseline_profiles
