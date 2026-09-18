@@ -49,4 +49,12 @@ Prettier has one root configuration, and `.editorconfig` defines shared whitespa
 
 Tool references: [Ruff](https://docs.astral.sh/ruff/), [Prettier installation/version pinning](https://prettier.io/docs/install), [Svelte ESLint support](https://sveltejs.github.io/eslint-plugin-svelte/user-guide/), and [Rust components](https://rust-lang.github.io/rustup/concepts/components.html).
 
+### Before pushing
+
+Run `make hooks` once in an existing checkout; `make setup` also installs the hook for new checkouts. This uses Git's native `core.hooksPath` and the version-controlled `.githooks/pre-push`, with no Husky or additional dependency. An existing custom hooks path is preserved: installation stops with instructions instead of replacing it.
+
+Every normal `git push` runs `make pre-push` for the whole working tree: formatting checks, Python/web/desktop/shell lint, Python/Svelte type checks, Rust Clippy and operational syntax checks. Any failed command blocks the push. The hook does not auto-format, stage, stash or commit files. Fix formatting with `make format`, review and commit the changes, then push again.
+
+The quality-tool prerequisites above must be available in the environment that launches Git, including GUI clients. These checks inspect the current checkout, not another branch or a snapshot of outgoing commits; push the intended checked-out branch with changes committed. Full tests and builds stay in `make check` and CI, and browser/live acceptance stays separate. Local hooks can be bypassed, so required CI checks remain the enforcement boundary. See [Git's hook documentation](https://git-scm.com/docs/githooks#_pre_push).
+
 The completed `next_todo.md` implementation plan and duplicate cleanup/follow-up notes were consolidated into the architecture report and Coordinator rollout guide. Operational guides, recorded evaluation results and third-party notices remain.

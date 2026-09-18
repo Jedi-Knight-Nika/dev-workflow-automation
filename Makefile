@@ -1,10 +1,28 @@
 .PHONY: setup dev-backend dev-frontend up down logs validate-real backup-production restore-production rotate-credentials operational-check backend-lint backend-typecheck backend-test frontend-lint frontend-typecheck frontend-build frontend-unit frontend-e2e test lint typecheck format format-check check migrate lock
 .PHONY: desktop-lint desktop-check desktop-format desktop-format-check shared-format shared-format-check
 .PHONY: shell-lint shell-format shell-format-check
+.PHONY: hooks pre-push
 
 setup:
 	cd backend && uv sync --all-extras --locked
 	cd frontend && npm install
+	$(MAKE) hooks
+
+hooks:
+	@existing=$$(git config --get core.hooksPath || :); \
+	if [ -n "$$existing" ] && [ "$$existing" != .githooks ]; then \
+		echo "Existing core.hooksPath=$$existing; integrate .githooks/pre-push there instead of replacing it." >&2; \
+		exit 1; \
+	fi
+	chmod +x .githooks/pre-push
+	git config --local core.hooksPath .githooks
+
+pre-push:
+	$(MAKE) format-check
+	$(MAKE) lint
+	$(MAKE) typecheck
+	$(MAKE) desktop-check
+	$(MAKE) operational-check
 
 dev-backend:
 	cd backend && uv run uvicorn app.main:app --reload --port 8000
@@ -26,7 +44,7 @@ validate-real:
 	python3 scripts/validate_real_workflow.py "$(TASK_KEY)" $(VALIDATE_ARGS)
 
 operational-check:
-	@for script in deploy/*.sh scripts/*.sh; do sh -n "$$script" || exit; done
+	@for script in deploy/*.sh scripts/*.sh .githooks/pre-push; do sh -n "$$script" || exit; done
 	python3 -m py_compile scripts/validate_real_workflow.py scripts/rotate_credentials.py
 
 rotate-credentials:
@@ -109,13 +127,13 @@ desktop-format-check:
 	cd desktop/src-tauri && cargo fmt --all -- --check
 
 shell-lint:
-	shellcheck scripts/*.sh deploy/*.sh
+	shellcheck scripts/*.sh deploy/*.sh .githooks/pre-push
 
 shell-format:
-	shfmt -i 2 -ci -w scripts/*.sh deploy/*.sh
+	shfmt -i 2 -ci -w scripts/*.sh deploy/*.sh .githooks/pre-push
 
 shell-format-check:
-	shfmt -i 2 -ci -d scripts/*.sh deploy/*.sh
+	shfmt -i 2 -ci -d scripts/*.sh deploy/*.sh .githooks/pre-push
 
 check: lint format-check typecheck test operational-check
 	$(MAKE) frontend-build
