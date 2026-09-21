@@ -677,6 +677,13 @@
       ),
       var(--color-panel);
   }
+  .worker header {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.45rem;
+    text-align: center;
+  }
   .worker header > i {
     width: 7px;
     height: 7px;
@@ -688,6 +695,11 @@
     box-shadow: 0 0 12px var(--color-brand-2);
   }
   .worker-core {
+    display: grid;
+    min-height: 14rem;
+    place-items: center;
+    align-content: center;
+    gap: 0.35rem;
     text-align: center;
     padding: 1.1rem;
   }
