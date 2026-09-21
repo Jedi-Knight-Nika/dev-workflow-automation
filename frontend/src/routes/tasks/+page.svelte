@@ -5,7 +5,13 @@
   import PageHeader from '$lib/components/PageHeader.svelte';
   import ErrorBanner from '$lib/components/ErrorBanner.svelte';
   import { createLiveRefresh } from '$lib/live-refresh';
-  import { listTaskPage, createTask, type TaskFilters } from '$lib/services/tasks';
+  import {
+    listTaskPage,
+    createTask,
+    runTaskCommand,
+    type TaskCommand,
+    type TaskFilters
+  } from '$lib/services/tasks';
   import { listTeams } from '$lib/services/teams';
   import { createTaskRequest } from '$lib/task-creation';
   import { listRepositories } from '$lib/services/repositories';
@@ -20,6 +26,10 @@
     error = $state('');
   let creating = $state(false),
     view = $state<'board' | 'list'>('board');
+  let contextTask = $state<Task | null>(null);
+  let contextPosition = $state({ x: 0, y: 0 });
+  let contextConfirmation = $state<'cancel' | 'archive' | null>(null);
+  let commanding = $state(false);
   let filters = $state<TaskFilters>({ sort: 'priority', direction: 'asc' });
   let draft = $state({
     title: '',
@@ -69,6 +79,73 @@
   }
   const live = createLiveRefresh(refresh);
   const creationRequest = createTaskRequest();
+  function openContextMenu(event: MouseEvent, task: Task) {
+    event.preventDefault();
+    contextTask = task;
+    contextPosition = { x: event.clientX, y: event.clientY };
+    contextConfirmation = null;
+  }
+  function closeContextMenu() {
+    contextTask = null;
+    contextConfirmation = null;
+  }
+  function taskActions(
+    task: Task
+  ): { command: TaskCommand; label: string; destructive?: boolean }[] {
+    if (['MERGED', 'CANCELLED', 'FAILED'].includes(task.status))
+      return [{ command: 'archive', label: 'Archive', destructive: true }];
+    const actions: { command: TaskCommand; label: string; destructive?: boolean }[] = [
+      ['NEW', 'PAUSED', 'WAITING_HUMAN'].includes(task.status)
+        ? {
+            command: 'resume',
+            label:
+              task.status === 'NEW'
+                ? 'Start work'
+                : task.manual_takeover
+                  ? 'Release takeover and resume'
+                  : 'Resume work'
+          }
+        : { command: 'pause', label: 'Pause work' }
+    ];
+    if (!task.manual_takeover) actions.push({ command: 'takeover', label: 'Take over manually' });
+    actions.push({ command: 'cancel', label: 'Cancel task', destructive: true });
+    return actions;
+  }
+  async function commandFromMenu(command: TaskCommand) {
+    if (!contextTask || commanding) return;
+    if (command === 'cancel' || command === 'archive') {
+      contextConfirmation = command;
+      return;
+    }
+    const taskId = contextTask.id;
+    commanding = true;
+    error = '';
+    try {
+      await runTaskCommand(taskId, command);
+      closeContextMenu();
+      await refresh();
+    } catch (cause) {
+      error = String(cause);
+    } finally {
+      commanding = false;
+    }
+  }
+  async function confirmContextCommand() {
+    if (!contextConfirmation || !contextTask || commanding) return;
+    const taskId = contextTask.id;
+    const command = contextConfirmation;
+    commanding = true;
+    error = '';
+    try {
+      await runTaskCommand(taskId, command);
+      closeContextMenu();
+      await refresh();
+    } catch (cause) {
+      error = String(cause);
+    } finally {
+      commanding = false;
+    }
+  }
   async function save() {
     if (saving) return;
     saving = true;
@@ -135,6 +212,10 @@
   eyebrow="Engineering"
   title="Tasks"
   description="One fixed lifecycle from a requirement to a validated, reviewed merge."
+/>
+<svelte:window
+  onclick={() => closeContextMenu()}
+  onkeydown={(event) => event.key === 'Escape' && closeContextMenu()}
 />
 <main class="space-y-5 p-4 sm:p-6 md:p-10">
   {#if error}<ErrorBanner message={error} />{/if}
@@ -307,6 +388,7 @@
   <a
     class="border-line block space-y-2 rounded-lg border bg-panel p-4 hover:border-brand"
     href={resolve('/tasks/[id]', { id: task.id })}
+    oncontextmenu={(event) => openContextMenu(event, task)}
   >
     <p class="text-muted text-xs">
       {task.external_key ?? 'Manual'} · P{task.priority} · {task.team_name ?? 'Unassigned'}
@@ -323,3 +405,38 @@
     </p>
   </a>
 {/snippet}
+{#if contextTask}
+  <div
+    class="fixed z-50 min-w-56 rounded-lg border border-line bg-panel p-2 shadow-lg"
+    style:left={contextPosition.x + 'px'}
+    style:top={contextPosition.y + 'px'}
+    role="menu"
+    tabindex="-1"
+    aria-label={'Actions for ' + contextTask.title}
+    onclick={(event) => event.stopPropagation()}
+    onkeydown={(event) => event.stopPropagation()}
+  >
+    {#if contextConfirmation}
+      <p class="px-2 py-1 text-sm">
+        {contextConfirmation === 'cancel' ? 'Cancel this task?' : 'Archive this task?'}
+      </p>
+      <button class="btn-danger w-full" disabled={commanding} onclick={confirmContextCommand}
+        >{contextConfirmation === 'cancel' ? 'Yes, cancel task' : 'Yes, archive task'}</button
+      >
+      <button
+        class="btn-secondary mt-1 w-full"
+        disabled={commanding}
+        onclick={() => (contextConfirmation = null)}>Keep task</button
+      >
+    {:else}
+      {#each taskActions(contextTask) as action (action.command)}
+        <button
+          class={action.destructive ? 'btn-danger w-full' : 'btn-secondary w-full'}
+          disabled={commanding}
+          role="menuitem"
+          onclick={() => commandFromMenu(action.command)}>{action.label}</button
+        >
+      {/each}
+    {/if}
+  </div>
+{/if}
