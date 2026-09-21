@@ -48,7 +48,7 @@ For an enrolled task, the system uses a task branch named `agent/task-<task UUID
 
 ## 3. Claim and run phases
 
-The scheduler recovers lost leases and receipts before dispatching work. It claims phase jobs with database locks, lease tokens, expiry, capacity limits, dependency checks, Team availability, retry timing, archive state, and manual-takeover checks. The worker revalidates its lease and monitors heartbeats while a phase runs. A revoked or expired lease stops authority to continue.
+The scheduler recovers lost leases and receipts before dispatching work. It claims phase jobs with database locks, lease tokens, expiry, capacity limits, dependency checks, Team availability, retry timing, archive state, and manual-takeover checks. A lease token fences the claim: a worker must present the current token when it records completion, so a slow worker cannot complete a job after another worker has recovered it. The worker revalidates its lease and monitors heartbeats while a phase runs. A revoked or expired lease stops authority to continue.
 
 The normal progression is:
 
@@ -58,7 +58,9 @@ INTAKE → DEVELOPING → VALIDATING → PUBLISHING → REVIEWING → MERGING �
 
 Planning is conditional. Development or review feedback may move work to `FIXING`; validation failure also moves it there. Publishing and merge rechecks wait for GitHub review. A model result alone cannot authorize publication or merge.
 
-The Developer request contains the authoritative requirement, current feedback, repair evidence, checkpoints, and coordination changes. The isolated harness receives only the configured workspace and allowed provider environment. Native execution records sessions, runs, usage, receipts, and checkpoints. Provider, timeout, token, budget, and runtime failures are classified rather than being treated as successful work merely because files changed.
+The Developer request contains the authoritative requirement, current feedback, repair evidence, checkpoints, and coordination changes. The request is tied to the task requirement revision and current repository SHA, preventing a result produced for an older requirement or checkout from being applied to newer work. The isolated harness receives only the configured workspace and allowed provider environment; it does not receive merge authority or unrestricted control-plane credentials.
+
+Native execution records sessions, runs, usage, receipts, and checkpoints. These durable records associate provider/model activity, token and cost accounting, and terminal outcomes with the task revision. Provider, timeout, token, budget, and runtime failures are classified rather than being treated as successful work merely because files changed. On recovery, recorded receipts and run state are reconciled before a replacement attempt is authorized, avoiding duplicate paid execution where an earlier outcome is known.
 
 ## 4. Validate and commit
 
@@ -67,12 +69,14 @@ Validation is deterministic and separate from Developer execution. A repository 
 The validator:
 
 1. Runs in a dedicated non-root container with the expected task branch and workspace.
-2. Fingerprints candidate files and runs the configured commands with timeouts and bounded output.
-3. Rejects a run that changes repository files during validation.
-4. When checks pass and the worktree is dirty, stages the changes and creates the local commit with the configured Team author and publication title.
-5. Returns the exact HEAD SHA, fingerprint, command results, and change summary.
+2. Receives the checked-out task workspace and configured commands, rather than the Developer's conversational output as proof of correctness.
+3. Fingerprints candidate files before execution and runs each configured command with command-level timeouts and bounded captured output.
+4. Rejects a run that changes repository files during validation, so test side effects cannot become unreviewed candidate changes.
+5. Verifies that the task lifecycle and revision are still current before its result can advance the task.
+6. When checks pass and the worktree is dirty, stages the changes and creates the local commit with the configured Team author and publication title.
+7. Returns the exact HEAD SHA, fingerprint, command results, and change summary.
 
-The system persists validation evidence against the task's current requirement version and revision. If validation fails, or review detects changes that require attention, the task returns to fixing. Two repeated failures without workspace progress stop automated paid turns and require inspection instead of retrying indefinitely.
+The exact commit SHA is the revision later published and checked by GitHub; a validation result for another SHA, requirement version, or changed workspace is not merge evidence. The system persists validation evidence against the task's current requirement version and revision. If validation fails, or review detects changes that require attention, the task returns to fixing. Two repeated failures without workspace progress stop automated paid turns and require inspection instead of retrying indefinitely.
 
 ## 5. Publish and review the pull request
 
